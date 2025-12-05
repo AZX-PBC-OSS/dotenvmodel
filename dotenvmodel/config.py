@@ -1,5 +1,6 @@
 """DotEnvConfig base class for configuration management."""
 
+import builtins
 import logging
 from pathlib import Path
 from typing import Any, Literal, Self, get_args, get_origin, get_type_hints
@@ -483,9 +484,34 @@ class DotEnvConfig(metaclass=ConfigMeta):
         return f"{self.__class__.__name__}({', '.join(field_strs)})"
 
     @classmethod
+    def get_fields(cls) -> builtins.dict[str, tuple[type, FieldInfo]]:
+        """
+        Get all fields defined on this configuration class.
+
+        Returns a copy of the fields dictionary to prevent external modification.
+
+        Returns:
+            Dictionary mapping field names to tuples of (type, FieldInfo)
+
+        Example:
+            ```python
+            class AppConfig(DotEnvConfig):
+                port: int = Field(default=8000)
+                debug: bool = Field(default=False)
+
+            fields = AppConfig.get_fields()
+            for name, (field_type, field_info) in fields.items():
+                print(f"{name}: {field_type}")
+            ```
+        """
+        return cls._fields.copy()
+
+    @classmethod
     def describe(
         cls,
-        format: Literal["table", "markdown", "json"] = "table",
+        format: Literal["table", "markdown", "json", "html", "dotenv"] = "table",
+        output: str | Path | None = None,
+        line_ending: str | None = None,
     ) -> str:
         """
         Generate documentation describing this configuration class.
@@ -494,7 +520,10 @@ class DotEnvConfig(metaclass=ConfigMeta):
         default values, descriptions, and validation constraints.
 
         Args:
-            format: Output format - "table" (ASCII), "markdown", or "json"
+            format: Output format - "table" (ASCII), "markdown", "json", "html", or "dotenv"
+            output: Optional file path to save the output to
+            line_ending: Line ending to use (e.g., "\\n", "\\r\\n", "\\r").
+                If None, uses platform default (os.linesep)
 
         Returns:
             Formatted string describing the configuration
@@ -505,13 +534,74 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 port: int = Field(default=8000, ge=1, le=65535, description="Server port")
                 debug: bool = Field(default=False, description="Enable debug mode")
 
+            # Print to console
             print(AppConfig.describe())
-            # AppConfig
-            # =========
-            # | ENV Variable | Type | Required | Default | Description | Constraints    |
-            # ...
+
+            # Save markdown to file
+            AppConfig.describe(format="markdown", output="docs/config.md")
+
+            # Generate .env.example
+            AppConfig.describe(format="dotenv", output=".env.example")
+
+            # Use Unix line endings regardless of platform
+            AppConfig.describe(format="markdown", line_ending="\\n")
+
+            # Use Windows line endings
+            AppConfig.describe(format="markdown", line_ending="\\r\\n")
             ```
         """
         from dotenvmodel.describe import describe_single
 
-        return describe_single(cls, format=format)
+        return describe_single(cls, format=format, output=output, line_ending=line_ending)
+
+    @classmethod
+    def generate_env_example(
+        cls,
+        output: str | Path | None = None,
+    ) -> str:
+        """
+        Generate a .env.example file for onboarding new developers.
+
+        This creates a template file showing all environment variables with:
+        - Comments describing each field
+        - Type and constraint information
+        - Example values
+        - Required vs optional fields
+
+        Args:
+            output: Optional file path to save the .env.example to (e.g., ".env.example")
+
+        Returns:
+            .env.example file content
+
+        Example:
+            ```python
+            class AppConfig(DotEnvConfig):
+                port: int = Field(default=8000, ge=1, le=65535, description="Server port")
+                api_key: str = Field(description="API key for external service")
+                debug: bool = Field(default=False, description="Enable debug mode")
+
+            # Generate and save .env.example
+            AppConfig.generate_env_example(output=".env.example")
+
+            # Or print to console
+            print(AppConfig.generate_env_example())
+
+            # Output:
+            # # Configuration for AppConfig
+            #
+            # # Server port
+            # # Type: int | Constraints: ge=1, le=65535
+            # # Example: PORT=8000
+            # # PORT=8000
+            #
+            # # API key for external service
+            # # Type: str
+            # # Example: API_KEY=your_value_here
+            # API_KEY=
+            # ...
+            ```
+        """
+        from dotenvmodel.describe import generate_env_example
+
+        return generate_env_example(cls, output=output)
