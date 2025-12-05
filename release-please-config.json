@@ -7,7 +7,7 @@
       "release-type": "python",
       "extra-files": [
         {
-          "type": "json",
+          "type": "generic",
           "path": "dotenvmodel/__init__.py",
           "jsonpath": "$.__version__"
         }
