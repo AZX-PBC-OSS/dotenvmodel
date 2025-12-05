@@ -1,17 +1,16 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "dotenvmodel"
 version = "0.1.0"
 description = "Type-safe environment configuration with automatic .env file loading"
 readme = "README.md"
+requires-python = ">=3.12"
 authors = [
     { name = "Rich Evans", email = "re@azx.io" }
 ]
-requires-python = ">=3.12"
-dependencies = [
-    "python-dotenv>=0.19.0",
-]
-license = { text = "MIT" }
-keywords = ["environment", "config", "dotenv", "settings", "configuration", "env"]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
@@ -23,12 +22,23 @@ classifiers = [
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
+dependencies = [
+    "python-dotenv>=0.19.0",
+]
+license = { text = "MIT" }
+keywords = ["environment", "config", "dotenv", "settings", "configuration", "env"]
 
 [project.urls]
-Homepage = "https://github.com/azxio/dotenvmodel"
-Repository = "https://github.com/azxio/dotenvmodel"
-Issues = "https://github.com/azxio/dotenvmodel/issues"
-Changelog = "https://github.com/azxio/dotenvmodel/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/AZX-PBC/dotenvmodel"
+Repository = "https://github.com/AZX-PBC/dotenvmodel"
+Issues = "https://github.com/AZX-PBC/dotenvmodel/issues"
+Changelog = "https://github.com/AZX-PBC/dotenvmodel/blob/main/CHANGELOG.md"
+
+[tool.uv]
+package = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["dotenvmodel"]
 
 [project.optional-dependencies]
 dev = [
@@ -37,10 +47,6 @@ dev = [
     "mypy>=1.0.0",
     "ruff>=0.1.0",
 ]
-
-[build-system]
-requires = ["hatchling"]
-build-backend = "hatchling.build"
 
 [dependency-groups]
 dev = [
