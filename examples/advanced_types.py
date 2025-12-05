@@ -114,7 +114,7 @@ if __name__ == "__main__":
 
     # SecretStr - hides values in logs
     print(f"API Key (hidden): {config.api_key}")
-    print(f"API Key (repr): {repr(config.api_key)}")
+    print(f"API Key (repr): {config.api_key!r}")
     print(f"API Key (actual): {config.api_key.get_secret_value()}\n")
 
     # JSON types - automatically parsed

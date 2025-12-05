@@ -2,7 +2,6 @@
 
 from dotenvmodel import DotEnvConfig, Field, configure_logging
 
-
 # Enable logging to see what's happening
 # Try different levels: "DEBUG", "INFO", "WARNING", "ERROR"
 configure_logging("INFO")
