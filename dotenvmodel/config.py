@@ -33,15 +33,24 @@ class ConfigMeta(type):
     """Metaclass for DotEnvConfig that discovers field definitions."""
 
     def __new__(mcs, name: str, bases: tuple[type, ...], namespace: dict[str, Any]) -> type:
+        # Inherit fields from parent classes
+        fields: dict[str, tuple[type, FieldInfo]] = {}
+        for base in bases:
+            if hasattr(base, "_fields"):
+                # Copy parent fields
+                fields.update(base._fields)
+
         # Get type hints for the class
         hints = namespace.get("__annotations__", {})
 
-        # Discover fields from class attributes
-        fields: dict[str, tuple[type, FieldInfo]] = {}
-
+        # Discover fields from class attributes (can override parent fields)
         for field_name, field_type in hints.items():
             # Skip private attributes
             if field_name.startswith("_"):
+                continue
+
+            # Skip class-level configuration attributes (not config fields)
+            if field_name == "env_prefix":
                 continue
 
             # Get the field value from namespace
@@ -118,7 +127,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
     _loaded: bool = False
     _load_env: str | None = None  # Store the env used during load
     _load_override: bool = True  # Store the override flag used during load
-    _load_env_file: Path | None = None  # Store the env_file used during load
+    _load_env_dir: Path | None = None  # Store the env_dir used during load
     env_prefix: str = ""  # Class-level prefix for environment variables (default: no prefix)
 
     def _process_field(
@@ -183,7 +192,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         env: str | None = None,
         *,
         override: bool = True,
-        env_file: Path | None = None,
+        env_dir: Path | None = None,
     ) -> Self:
         """
         Load configuration from environment variables and .env files.
@@ -193,14 +202,14 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 ENV environment variable, defaults to "dev"
             override: If True, .env file values override existing environment variables.
                 If False, existing env vars take precedence
-            env_file: Optional custom base directory for .env files
+            env_dir: Optional custom base directory for .env files
 
         Returns:
             Instance of the config class with all fields populated and validated
 
         Raises:
             ValidationError: If required fields are missing or validation fails
-            FileNotFoundError: If custom env_file path doesn't exist
+            FileNotFoundError: If custom env_dir path doesn't exist
 
         Example:
             ```python
@@ -214,13 +223,13 @@ class DotEnvConfig(metaclass=ConfigMeta):
             config = Config.load(override=False)
 
             # Custom .env file location
-            config = Config.load(env_file=Path("/app/config"))
+            config = Config.load(env_dir=Path("/app/config"))
             ```
         """
         logger.info(f"Loading {cls.__name__} configuration")
 
         # Load .env files first
-        load_env_files(env=env, override=override, env_file=env_file)
+        load_env_files(env=env, override=override, env_dir=env_dir)
 
         # Create instance and load fields
         instance = cls()
@@ -262,7 +271,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         # Store load parameters for reload()
         instance._load_env = env
         instance._load_override = override
-        instance._load_env_file = env_file
+        instance._load_env_dir = env_dir
         return instance
 
     def reload(
@@ -270,7 +279,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         env: str | None = None,
         *,
         override: bool | None = None,
-        env_file: Path | None = None,
+        env_dir: Path | None = None,
     ) -> Self:
         """
         Reload configuration from environment variables and .env files.
@@ -279,7 +288,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         pick up changes to environment variables or .env files without creating
         a new instance.
 
-        By default, this uses the same parameters (env, override, env_file) that
+        By default, this uses the same parameters (env, override, env_dir) that
         were used during the original load() call. You can override any of these
         by passing new values.
 
@@ -289,15 +298,15 @@ class DotEnvConfig(metaclass=ConfigMeta):
             override: If True, .env file values override existing environment variables.
                 If False, existing env vars take precedence. If None, uses the
                 override value from the original load() call
-            env_file: Optional custom base directory for .env files. If None, uses
-                the env_file from the original load() call
+            env_dir: Optional custom base directory for .env files. If None, uses
+                the env_dir from the original load() call
 
         Returns:
             Self (the same instance with reloaded values)
 
         Raises:
             ValidationError: If required fields are missing or validation fails
-            FileNotFoundError: If custom env_file path doesn't exist
+            FileNotFoundError: If custom env_dir path doesn't exist
 
         Example:
             ```python
@@ -316,10 +325,10 @@ class DotEnvConfig(metaclass=ConfigMeta):
         # Use stored parameters if not explicitly provided
         reload_env = env if env is not None else self._load_env
         reload_override = override if override is not None else self._load_override
-        reload_env_file = env_file if env_file is not None else self._load_env_file
+        reload_env_dir = env_dir if env_dir is not None else self._load_env_dir
 
         # Load .env files first
-        load_env_files(env=reload_env, override=reload_override, env_file=reload_env_file)
+        load_env_files(env=reload_env, override=reload_override, env_dir=reload_env_dir)
 
         errors: list[ValidationError] = []
 

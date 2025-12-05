@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any, TypeVar
 
 # Type variable for generic field types
@@ -72,6 +73,35 @@ class FieldInfo:
         if default is ...:
             default = _MISSING
 
+        # Validate numeric constraint types
+        for param_name, param_value in [("ge", ge), ("le", le), ("gt", gt), ("lt", lt)]:
+            if param_value is not None and not isinstance(param_value, (int, float, Decimal)):
+                raise TypeError(f"{param_name} must be int, float, or Decimal, got {type(param_value).__name__}")
+
+        # Validate length/size constraint types
+        for param_name, param_value in [
+            ("min_length", min_length),
+            ("max_length", max_length),
+            ("min_items", min_items),
+            ("max_items", max_items),
+        ]:
+            if param_value is not None and (not isinstance(param_value, int) or param_value < 0):
+                raise ValueError(f"{param_name} must be a non-negative integer, got {param_value!r}")
+
+        # Validate UUID version
+        if uuid_version is not None and uuid_version not in (1, 3, 4, 5):
+            raise ValueError(f"uuid_version must be 1, 3, 4, or 5, got {uuid_version}")
+
+        # Validate contradictory constraints
+        if ge is not None and le is not None and ge > le:
+            raise ValueError(f"ge ({ge}) cannot be greater than le ({le})")
+        if gt is not None and lt is not None and gt >= lt:
+            raise ValueError(f"gt ({gt}) must be less than lt ({lt})")
+        if min_length is not None and max_length is not None and min_length > max_length:
+            raise ValueError(f"min_length ({min_length}) cannot be greater than max_length ({max_length})")
+        if min_items is not None and max_items is not None and min_items > max_items:
+            raise ValueError(f"min_items ({min_items}) cannot be greater than max_items ({max_items})")
+
         self.default = default
         self.default_factory = default_factory
         self.alias = alias
@@ -87,7 +117,14 @@ class FieldInfo:
         self.min_length = min_length
         self.max_length = max_length
         self.regex = regex
-        self._compiled_regex = re.compile(regex) if regex else None
+        # Compile regex pattern with error handling
+        if regex:
+            try:
+                self._compiled_regex = re.compile(regex)
+            except re.error as e:
+                raise ValueError(f"Invalid regex pattern: {regex!r} - {e}") from e
+        else:
+            self._compiled_regex = None
 
         # General constraints
         self.choices = choices
@@ -146,6 +183,14 @@ class FieldInfo:
             parts.append(f"regex={self.regex!r}")
         if self.choices is not None:
             parts.append(f"choices={self.choices!r}")
+        if self.min_items is not None:
+            parts.append(f"min_items={self.min_items}")
+        if self.max_items is not None:
+            parts.append(f"max_items={self.max_items}")
+        if self.uuid_version is not None:
+            parts.append(f"uuid_version={self.uuid_version}")
+        if self.separator != ",":  # Only show if non-default
+            parts.append(f"separator={self.separator!r}")
 
         return f"FieldInfo({', '.join(parts)})"
 

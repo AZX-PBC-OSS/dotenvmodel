@@ -118,7 +118,7 @@ class MultipleValidationErrors(DotEnvModelError):
 
     def _format_message(self) -> str:
         """Format a detailed error message for multiple validation errors."""
-        msg = f"ValidationError: Configuration validation failed with {len(self.errors)} error(s):\n\n"
+        msg = f"MultipleValidationErrors: Configuration validation failed with {len(self.errors)} error(s):\n\n"
         for i, error in enumerate(self.errors, 1):
             msg += f"{i}. {error.__class__.__name__}: {error.error_msg}\n"
             msg += f"   Field: {error.field_name}\n"

@@ -426,7 +426,7 @@ config = AppConfig.load(override=False)  # Env vars take precedence
 
 # Custom .env file directory
 from pathlib import Path
-config = AppConfig.load(env_file=Path("/app/config"))
+config = AppConfig.load(env_dir=Path("/app/config"))
 ```
 
 ### .env File Cascading
@@ -608,7 +608,7 @@ config.reload(env="prod")  # Switch to production environment
 The `reload()` method:
 
 - Reloads all fields from environment variables and .env files
-- By default, reuses the same `env`, `override`, and `env_file` parameters from the original `load()` call
+- By default, reuses the same `env`, `override`, and `env_dir` parameters from the original `load()` call
 - Allows overriding any parameter by passing new values
 - Validates all fields and raises errors if validation fails
 - Returns the same instance (useful for method chaining)
@@ -870,6 +870,34 @@ def test_with_fixture(test_config):
 
 - Python 3.12+
 - python-dotenv
+
+## Known Limitations
+
+### Union Types (Non-Optional)
+
+Non-optional Union types like `str | int` or `Union[str, int]` are not currently supported. Only Optional unions (types with `None`) work:
+
+```python
+# ✅ Supported - Optional unions
+class Config(DotEnvConfig):
+    value: str | None = Field()  # Works
+    other: int | None = Field()  # Works
+
+# ❌ Not supported - Non-optional unions
+class Config(DotEnvConfig):
+    value: str | int = Field()  # Not supported
+```
+
+**Workaround**: Use a single type (typically `str`) and handle conversion in your application code:
+
+```python
+class Config(DotEnvConfig):
+    value: str = Field()
+
+config = Config.load()
+# Convert to int if needed in your code
+value_as_int = int(config.value) if config.value.isdigit() else config.value
+```
 
 ## License
 

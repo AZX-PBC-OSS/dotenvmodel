@@ -17,6 +17,12 @@ class SecretStr:
     Use this for sensitive data like API keys, passwords, and tokens to prevent
     them from appearing in logs, error messages, or debugging output.
 
+    Security features:
+    - Hidden in str/repr output
+    - Name-mangled attribute to prevent accidental access
+    - Prevents pickling to avoid serialization leaks
+    - Immutable to prevent modification
+
     Example:
         ```python
         class Config(DotEnvConfig):
@@ -29,12 +35,14 @@ class SecretStr:
         ```
     """
 
+    __slots__ = ("__secret",)
+
     def __init__(self, value: str) -> None:
-        self._value = value
+        object.__setattr__(self, "_SecretStr__secret", value)
 
     def get_secret_value(self) -> str:
         """Get the actual secret value."""
-        return self._value
+        return self.__secret
 
     def __str__(self) -> str:
         return "**********"
@@ -42,13 +50,28 @@ class SecretStr:
     def __repr__(self) -> str:
         return "SecretStr('**********')"
 
+    def __setattr__(self, name: str, value: object) -> None:
+        """Prevent attribute modification."""
+        raise AttributeError("SecretStr is immutable")
+
+    def __delattr__(self, name: str) -> None:
+        """Prevent attribute deletion."""
+        raise AttributeError("SecretStr is immutable")
+
+    def __reduce__(self) -> tuple:
+        """Prevent pickling by raising an error."""
+        raise TypeError(
+            "SecretStr cannot be pickled for security reasons. "
+            "Extract the secret value with get_secret_value() before pickling if needed."
+        )
+
     def __eq__(self, other: object) -> bool:
         if isinstance(other, SecretStr):
-            return self._value == other._value
+            return self.__secret == other.__secret
         return False
 
     def __hash__(self) -> int:
-        return hash(self._value)
+        return hash(self.__secret)
 
 
 class BaseDsn(str):

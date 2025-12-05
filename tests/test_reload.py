@@ -266,12 +266,12 @@ class TestReload:
             host: str = Field()
             port: int = Field()
 
-        config = Config.load(env="dev", env_file=env_dir)
+        config = Config.load(env="dev", env_dir=env_dir)
         assert config.host == "dev.example.com"
         assert config.port == 8000
 
         # Reload with different environment
-        config.reload(env="prod", env_file=env_dir)
+        config.reload(env="prod", env_dir=env_dir)
         assert config.host == "prod.example.com"
         assert config.port == 443
 
@@ -289,7 +289,7 @@ class TestReload:
             value: str = Field()
 
         # Load with env="dev"
-        config = Config.load(env="dev", env_file=env_dir)
+        config = Config.load(env="dev", env_dir=env_dir)
         assert config.value == "dev_value"
 
         # Modify the .env.dev file
@@ -331,4 +331,4 @@ class TestReload:
         # Check stored parameters
         assert config._load_env == "prod"
         assert config._load_override is False
-        assert config._load_env_file is None
+        assert config._load_env_dir is None

@@ -10,17 +10,17 @@ from dotenvmodel import DotEnvConfig, Field
 class TestEnvFileLoading:
     """Test .env file loading functionality."""
 
-    def test_load_from_env_file(self, tmp_path: Path) -> None:
+    def test_load_from_env_dir(self, tmp_path: Path) -> None:
         """Test loading from .env file."""
         # Create .env file
-        env_file = tmp_path / ".env"
-        env_file.write_text("DATABASE_URL=postgresql://localhost/test\nDEBUG=true\n")
+        env_dir = tmp_path / ".env"
+        env_dir.write_text("DATABASE_URL=postgresql://localhost/test\nDEBUG=true\n")
 
         class Config(DotEnvConfig):
             database_url: str = Field()
             debug: bool = Field()
 
-        config = Config.load(env_file=tmp_path)
+        config = Config.load(env_dir=tmp_path)
         assert config.database_url == "postgresql://localhost/test"
         assert config.debug is True
 
@@ -40,7 +40,7 @@ class TestEnvFileLoading:
             debug: bool = Field()
             log_level: str = Field(default="INFO")
 
-        config = Config.load(env="dev", env_file=tmp_path)
+        config = Config.load(env="dev", env_dir=tmp_path)
         # Should use .env.dev.local value for DATABASE_URL
         assert config.database_url == "postgresql://localhost/dev_local"
         # Should use .env.dev value for DEBUG
@@ -56,7 +56,7 @@ class TestEnvFileLoading:
         class Config(DotEnvConfig):
             port: int = Field()
 
-        config = Config.load(env="prod", env_file=tmp_path)
+        config = Config.load(env="prod", env_dir=tmp_path)
         assert config.port == 80
 
     def test_load_env_from_environment_variable(self, tmp_path: Path, monkeypatch) -> None:
@@ -70,7 +70,7 @@ class TestEnvFileLoading:
         class Config(DotEnvConfig):
             value: str = Field()
 
-        config = Config.load(env_file=tmp_path)
+        config = Config.load(env_dir=tmp_path)
         assert config.value == "custom"
 
     def test_load_override_true(self, tmp_path: Path, monkeypatch) -> None:
@@ -84,7 +84,7 @@ class TestEnvFileLoading:
         class Config(DotEnvConfig):
             port: int = Field()
 
-        config = Config.load(env_file=tmp_path, override=True)
+        config = Config.load(env_dir=tmp_path, override=True)
         # .env file should override env var
         assert config.port == 8000
 
@@ -99,18 +99,18 @@ class TestEnvFileLoading:
         class Config(DotEnvConfig):
             port: int = Field()
 
-        config = Config.load(env_file=tmp_path, override=False)
+        config = Config.load(env_dir=tmp_path, override=False)
         # Existing env var should take precedence
         assert config.port == 9000
 
-    def test_load_missing_env_file_directory(self) -> None:
+    def test_load_missing_env_dir_directory(self) -> None:
         """Test loading with non-existent env file directory."""
 
         class Config(DotEnvConfig):
             value: str = Field(default="test")
 
         with pytest.raises(FileNotFoundError) as exc_info:
-            Config.load(env_file=Path("/nonexistent/directory"))
+            Config.load(env_dir=Path("/nonexistent/directory"))
 
         assert "does not exist" in str(exc_info.value)
 
@@ -142,7 +142,7 @@ class TestEnvFileLoading:
         config = Config.load()
         assert config.value == "from_dotenv_dir"
 
-    def test_missing_env_files_are_ignored(self, tmp_path: Path, monkeypatch) -> None:
+    def test_missing_env_dirs_are_ignored(self, tmp_path: Path, monkeypatch) -> None:
         """Test that missing .env files are silently ignored."""
         # Don't create any .env files
         # Clear any existing VALUE env var to avoid pollution
@@ -152,7 +152,7 @@ class TestEnvFileLoading:
             value: str = Field(default="default")
 
         # Should not raise error, just use defaults
-        config = Config.load(env="dev", env_file=tmp_path)
+        config = Config.load(env="dev", env_dir=tmp_path)
         assert config.value == "default"
 
 

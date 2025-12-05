@@ -14,7 +14,7 @@ def load_env_files(
     env: str | None = None,
     *,
     override: bool = True,
-    env_file: Path | None = None,
+    env_dir: Path | None = None,
 ) -> dict[str, str]:
     """
     Load environment variables from cascading .env files.
@@ -30,7 +30,7 @@ def load_env_files(
             ENV environment variable, defaults to "dev"
         override: If True, .env file values override existing environment variables.
             If False, existing env vars take precedence
-        env_file: Optional custom base directory for .env files. If None, uses
+        env_dir: Optional custom base directory for .env files. If None, uses
             DOTENV_DIR environment variable or current working directory
 
     Returns:
@@ -47,11 +47,11 @@ def load_env_files(
     logger.info(f"Loading configuration for environment: {env}")
 
     # Determine base directory
-    if env_file is None:
+    if env_dir is None:
         env_dir_str = os.getenv("DOTENV_DIR")
         base_dir = Path(env_dir_str) if env_dir_str else Path.cwd()
     else:
-        base_dir = env_file
+        base_dir = env_dir
 
     logger.debug(f"Base directory for .env files: {base_dir}")
 

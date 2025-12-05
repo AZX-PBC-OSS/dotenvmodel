@@ -1,5 +1,6 @@
 """Field validation logic for dotenvmodel."""
 
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -24,8 +25,8 @@ def validate_field(field_name: str, value: Any, field_info: FieldInfo, env_var_n
     if value is None:
         return
 
-    # Numeric validation
-    if isinstance(value, (int, float)):
+    # Numeric validation (int, float, Decimal)
+    if isinstance(value, (int, float, Decimal)):
         _validate_numeric(field_name, value, field_info, env_var_name)
 
     # String validation (including SecretStr)
@@ -51,9 +52,9 @@ def validate_field(field_name: str, value: Any, field_info: FieldInfo, env_var_n
 
 
 def _validate_numeric(
-    field_name: str, value: int | float, field_info: FieldInfo, env_var_name: str
+    field_name: str, value: int | float | Decimal, field_info: FieldInfo, env_var_name: str
 ) -> None:
-    """Validate numeric constraints (ge, le, gt, lt)."""
+    """Validate numeric constraints (ge, le, gt, lt) for int, float, and Decimal."""
     if field_info.ge is not None and value < field_info.ge:
         raise ConstraintViolationError(
             field_name=field_name,

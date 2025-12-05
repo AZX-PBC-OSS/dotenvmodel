@@ -32,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Environment Management**
   - Automatic .env file loading with cascading (`.env`, `.env.{env}`, `.env.{env}.local`)
   - Support for multiple environments (dev, prod, test, staging)
-  - Custom .env file locations via `env_file` parameter
+  - Custom .env file locations via `env_dir` parameter
   - Override control with `override` parameter
 
 - **Advanced Features**
