@@ -108,18 +108,13 @@ def get_env_var(field_name: str, alias: str | None = None, prefix: str | None = 
     Args:
         field_name: Name of the field
         alias: Optional alias for the environment variable
-        prefix: Optional prefix to prepend to the environment variable name
+        prefix: Optional prefix to prepend to the environment variable name.
+            Underscore is auto-inserted between prefix and field name if needed.
 
     Returns:
         Environment variable value or None if not set
     """
-    # Use alias if provided, otherwise convert field_name to UPPER_CASE
-    env_var_name = alias if alias else field_name.upper()
-
-    # Prepend prefix if provided (and alias is not used, since alias is absolute)
-    if prefix and not alias:
-        env_var_name = f"{prefix}{env_var_name}"
-
+    env_var_name = get_env_var_name(field_name, alias, prefix)
     return os.getenv(env_var_name)
 
 
@@ -130,7 +125,8 @@ def get_env_var_name(field_name: str, alias: str | None = None, prefix: str | No
     Args:
         field_name: Name of the field
         alias: Optional alias for the environment variable
-        prefix: Optional prefix to prepend to the environment variable name
+        prefix: Optional prefix to prepend to the environment variable name.
+            Underscore is auto-inserted between prefix and field name if needed.
 
     Returns:
         Environment variable name
@@ -140,6 +136,10 @@ def get_env_var_name(field_name: str, alias: str | None = None, prefix: str | No
 
     # Prepend prefix if provided (and alias is not used, since alias is absolute)
     if prefix and not alias:
-        env_var_name = f"{prefix}{env_var_name}"
+        # Auto-insert underscore if prefix doesn't end with one
+        if prefix.endswith("_"):
+            env_var_name = f"{prefix}{env_var_name}"
+        else:
+            env_var_name = f"{prefix}_{env_var_name}"
 
     return env_var_name

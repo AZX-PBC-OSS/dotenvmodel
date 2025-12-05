@@ -83,6 +83,7 @@ class TestInheritance:
         from dotenvmodel import ConstraintViolationError
 
         class BaseConfig(DotEnvConfig):
+            env_prefix = ""  # Opt out of auto-prefix for this test
             port: int = Field(ge=1, le=65535)
 
         class AppConfig(BaseConfig):

@@ -12,7 +12,7 @@
 - **Developer Experience**: Intuitive Pydantic-style API
 - **Smart .env Loading**: Automatic cascading of `.env`, `.env.{env}`, `.env.{env}.local` files
 - **Configuration Reload**: Reload configuration at runtime without creating new instances
-- **Environment Prefixes**: Class-level `env_prefix` to namespace environment variables
+- **Auto-Prefix Derivation**: Automatic prefix from class name (e.g., `DatabaseConfig` → `DATABASE_`), with explicit override support
 - **Validation**: Numeric constraints (ge, le, gt, lt), string constraints (min_length, max_length, regex), choice validation, and collection size constraints (min_items, max_items)
 - **Clear Error Messages**: Helpful validation errors that guide you to fixes
 - **Optional Logging**: Built-in logging support to debug configuration loading
@@ -622,66 +622,105 @@ The `reload()` method:
 
 ## Environment Variable Prefixes
 
-Use class-level prefixes to namespace environment variables:
+Prefixes are **automatically derived from class names** by default, or can be explicitly set:
 
 ```python
+# Auto-derived prefix: DATABASE_ (from class name DatabaseConfig)
 class DatabaseConfig(DotEnvConfig):
-    env_prefix = "DB_"  # All fields will be prefixed with DB_
     host: str = Field()
     port: int = Field(default=5432)
     name: str = Field()
 
-# Reads DB_HOST, DB_PORT, DB_NAME from environment
+# Reads DATABASE_HOST, DATABASE_PORT, DATABASE_NAME from environment
+config = DatabaseConfig.load_from_dict({
+    "DATABASE_HOST": "localhost",
+    "DATABASE_PORT": "5433",
+    "DATABASE_NAME": "myapp"
+})
+```
+
+### Auto-Prefix Derivation Rules
+
+Prefixes are automatically derived from the class name:
+
+| Class Name | Auto Prefix | Example Field | Env Var |
+|------------|-------------|---------------|---------|
+| `Config` | (none) | `host` | `HOST` |
+| `DatabaseConfig` | `DATABASE` | `host` | `DATABASE_HOST` |
+| `DBConfig` | `DB` | `host` | `DB_HOST` |
+| `HTTPServerConfig` | `HTTP_SERVER` | `port` | `HTTP_SERVER_PORT` |
+| `MyAppSettings` | `MY_APP` | `debug` | `MY_APP_DEBUG` |
+
+**Rules:**
+1. **Single-word class names** (`Config`, `Settings`) get no prefix
+2. **Multi-word class names** use all words except the last as prefix
+3. **Acronyms stay together** (`DB`, `HTTP`, `API`, `AWS`)
+4. **CamelCase** converts to **SCREAMING_SNAKE_CASE**
+
+### Explicit Prefix Override
+
+Override the auto-derived prefix when needed:
+
+```python
+class DatabaseConfig(DotEnvConfig):
+    env_prefix = "DB"  # Override auto-derived DATABASE
+    host: str = Field()
+    port: int = Field(default=5432)
+
+# Reads DB_HOST, DB_PORT (underscore auto-inserted)
 config = DatabaseConfig.load_from_dict({
     "DB_HOST": "localhost",
     "DB_PORT": "5433",
-    "DB_NAME": "myapp"
 })
+```
+
+**Note:** The underscore between prefix and field name is auto-inserted, so `env_prefix = "DB"` and `env_prefix = "DB_"` behave identically.
+
+### Disabling Auto-Prefix
+
+Set `env_prefix = ""` to explicitly disable prefixing:
+
+```python
+class DatabaseConfig(DotEnvConfig):
+    env_prefix = ""  # No prefix, even though class name suggests one
+    host: str = Field()
+
+# Reads HOST (no prefix)
+config = DatabaseConfig.load_from_dict({"HOST": "localhost"})
 ```
 
 ### Prefix Behavior
 
 - **Automatic Uppercasing**: Field names are automatically uppercased and prefixed
-  - `host` → `DB_HOST`
-  - `port` → `DB_PORT`
+  - `host` → `DATABASE_HOST`
+  - `port` → `DATABASE_PORT`
 
 - **Aliases Override Prefix**: When using `alias`, the prefix is NOT applied (aliases are absolute)
 
   ```python
-  class Config(DotEnvConfig):
-      env_prefix = "APP_"
+  class AppConfig(DotEnvConfig):
+      # Auto-prefix would be APP_
       db_url: str = Field(alias="DATABASE_URL")  # Reads DATABASE_URL (no prefix)
       api_key: str = Field()  # Reads APP_API_KEY (with prefix)
   ```
 
-- **No Prefix by Default**: If `env_prefix` is not set, no prefix is applied
-
-  ```python
-  class Config(DotEnvConfig):
-      # No env_prefix defined
-      host: str = Field()  # Reads HOST
-  ```
-
-### Multiple Config Classes with Different Prefixes
+### Multiple Config Classes
 
 ```python
 class DatabaseConfig(DotEnvConfig):
-    env_prefix = "DB_"
-    host: str = Field()
-    port: int = Field(default=5432)
+    host: str = Field()           # DATABASE_HOST
+    port: int = Field(default=5432)  # DATABASE_PORT
 
 class RedisConfig(DotEnvConfig):
-    env_prefix = "REDIS_"
-    host: str = Field()
-    port: int = Field(default=6379)
+    host: str = Field()           # REDIS_HOST
+    port: int = Field(default=6379)  # REDIS_PORT
 
 class AppConfig(DotEnvConfig):
-    env_prefix = "APP_"
-    name: str = Field()
-    version: str = Field()
+    name: str = Field()           # APP_NAME
+    version: str = Field()        # APP_VERSION
 
-# Each config reads its own prefixed variables
-db = DatabaseConfig.load()      # Reads DB_HOST, DB_PORT
+# Each config auto-derives its prefix from the class name
+db = DatabaseConfig.load()      # Reads DATABASE_HOST, DATABASE_PORT
 redis = RedisConfig.load()      # Reads REDIS_HOST, REDIS_PORT
 app = AppConfig.load()          # Reads APP_NAME, APP_VERSION
 ```
@@ -740,8 +779,8 @@ except ConstraintViolationError as e:
 from pathlib import Path
 from dotenvmodel import DotEnvConfig, Field, Required
 
-class DatabaseConfig(DotEnvConfig):
-    env_prefix = "DB_"  # Namespace with DB_ prefix
+class DBConfig(DotEnvConfig):
+    # Auto-derived prefix: DB_ (from class name DBConfig)
     host: str = Field()
     port: int = Field(default=5432)
     name: str = Field()
@@ -750,7 +789,7 @@ class DatabaseConfig(DotEnvConfig):
     echo: bool = Field(default=False)
 
 class RedisConfig(DotEnvConfig):
-    env_prefix = "REDIS_"  # Namespace with REDIS_ prefix
+    # Auto-derived prefix: REDIS_ (from class name RedisConfig)
     host: str = Field()
     port: int = Field(default=6379)
     password: str | None = Field(default=None)
@@ -758,7 +797,7 @@ class RedisConfig(DotEnvConfig):
     socket_keepalive: bool = Field(default=True)
 
 class AppConfig(DotEnvConfig):
-    env_prefix = "APP_"  # Namespace with APP_ prefix
+    # Auto-derived prefix: APP_ (from class name AppConfig)
 
     # App settings
     environment: str = Field(
@@ -785,11 +824,11 @@ class AppConfig(DotEnvConfig):
     allowed_origins: list[str] = Field(default_factory=list)
     upload_dir: Path = Field(default=Path("/tmp/uploads"))
 
-# Load all configs with prefixes
-# DatabaseConfig reads: DB_HOST, DB_PORT, DB_NAME, etc.
+# Load all configs - prefixes are auto-derived from class names!
+# DBConfig reads: DB_HOST, DB_PORT, DB_NAME, etc.
 # RedisConfig reads: REDIS_HOST, REDIS_PORT, REDIS_PASSWORD, etc.
 # AppConfig reads: APP_ENVIRONMENT, APP_DEBUG, APP_HOST, API_BASE_URL (alias), etc.
-db_config = DatabaseConfig.load(env="prod")
+db_config = DBConfig.load(env="prod")
 redis_config = RedisConfig.load(env="prod")
 app_config = AppConfig.load(env="prod")
 
@@ -807,6 +846,7 @@ import pytest
 from dotenvmodel import DotEnvConfig, Field, Required, MissingFieldError
 
 class TestConfig(DotEnvConfig):
+    env_prefix = ""  # No prefix for testing - use field names directly
     database_url: str = Required
     api_key: str = Required
     debug: bool = Field(default=False)

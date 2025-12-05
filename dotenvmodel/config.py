@@ -12,6 +12,7 @@ from dotenvmodel.exceptions import (
 )
 from dotenvmodel.fields import _MISSING, FieldInfo, _RequiredSentinel
 from dotenvmodel.loading import get_env_var, get_env_var_name, load_env_files
+from dotenvmodel.prefix import derive_prefix_from_class_name
 from dotenvmodel.validation import validate_field
 
 # Module-level logger
@@ -128,7 +129,23 @@ class DotEnvConfig(metaclass=ConfigMeta):
     _load_env: str | None = None  # Store the env used during load
     _load_override: bool = True  # Store the override flag used during load
     _load_env_dir: Path | None = None  # Store the env_dir used during load
-    env_prefix: str = ""  # Class-level prefix for environment variables (default: no prefix)
+    env_prefix: str | None = None  # Class-level prefix (None=auto-derive, ""=no prefix)
+
+    @classmethod
+    def _get_prefix(cls) -> str:
+        """
+        Get the effective prefix for this config class.
+
+        Returns:
+            - Auto-derived prefix from class name if env_prefix is None
+            - Empty string if env_prefix is ""
+            - The explicit prefix if env_prefix is set to a non-empty string
+        """
+        prefix = getattr(cls, "env_prefix", None)
+        if prefix is None:
+            # Auto-derive from class name
+            return derive_prefix_from_class_name(cls.__name__)
+        return prefix
 
     def _process_field(
         self,
@@ -240,8 +257,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
         logger.debug(f"Processing {len(cls._fields)} field(s)")
 
-        # Get the class prefix (if any)
-        prefix = getattr(cls, "env_prefix", "")
+        # Get the class prefix (auto-derived or explicit)
+        prefix = cls._get_prefix()
 
         # Process each field
         for field_name, (field_type, field_info) in cls._fields.items():
@@ -337,8 +354,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
         logger.debug(f"Reloading {len(self._fields)} field(s)")
 
-        # Get the class prefix (if any)
-        prefix = getattr(self.__class__, "env_prefix", "")
+        # Get the class prefix (auto-derived or explicit)
+        prefix = self.__class__._get_prefix()
 
         # Process each field
         for field_name, (field_type, field_info) in self._fields.items():
@@ -401,8 +418,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
         # Get type hints for the class
         get_type_hints(cls)
 
-        # Get the class prefix (if any)
-        prefix = getattr(cls, "env_prefix", "")
+        # Get the class prefix (auto-derived or explicit)
+        prefix = cls._get_prefix()
 
         # Process each field
         for field_name, (field_type, field_info) in cls._fields.items():

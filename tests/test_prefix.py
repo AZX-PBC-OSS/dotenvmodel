@@ -121,15 +121,15 @@ class TestEnvPrefix:
         assert config.port == 8080
 
     def test_prefix_without_underscore(self) -> None:
-        """Test prefix without trailing underscore."""
+        """Test prefix without trailing underscore auto-inserts underscore."""
 
         class Config(DotEnvConfig):
-            env_prefix = "APP"  # No trailing underscore
+            env_prefix = "APP"  # No trailing underscore - underscore is auto-inserted
             host: str = Field()
 
         config = Config.load_from_dict(
             {
-                "APPHOST": "localhost",
+                "APP_HOST": "localhost",  # Underscore auto-inserted between prefix and field
             }
         )
 
