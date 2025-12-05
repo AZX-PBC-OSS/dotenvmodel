@@ -434,30 +434,37 @@ config = AppConfig.load(env_dir=Path("/app/config"))
 Files are loaded in order (later files override earlier ones):
 
 1. `.env` - Base configuration (usually gitignored)
-2. `.env.{env}` - Environment-specific (committed to repo)
-3. `.env.{env}.local` - Local overrides (gitignored)
+2. `.env.local` - Local base overrides (gitignored, never committed)
+3. `.env.{env}` - Environment-specific (committed to repo)
+4. `.env.{env}.local` - Local environment overrides (gitignored, never committed)
 
 **Example:**
 
 ```bash
-# .env (base)
+# .env (base - usually gitignored)
 DATABASE_URL=postgresql://localhost/myapp
 REDIS_URL=redis://localhost:6379
 DEBUG=false
 
-# .env.dev (development)
+# .env.local (local base overrides - gitignored)
+DATABASE_URL=postgresql://localhost/myapp_local
+
+# .env.dev (development - committed to repo)
 DEBUG=true
 LOG_LEVEL=DEBUG
 
-# .env.dev.local (local overrides, gitignored)
-DATABASE_URL=postgresql://localhost/myapp_dev
+# .env.dev.local (local dev overrides - gitignored)
 ENABLE_PROFILING=true
+API_KEY=dev-key-local-override
 ```
 
 When you load with `env="dev"`:
 ```python
 config = AppConfig.load(env="dev")
-# Loads: .env, .env.dev, .env.dev.local (in that order)
+# Loads in order: .env → .env.local → .env.dev → .env.dev.local
+# Final DATABASE_URL: postgresql://localhost/myapp_local (from .env.local)
+# Final DEBUG: true (from .env.dev)
+# Final ENABLE_PROFILING: true (from .env.dev.local)
 ```
 
 ### From Dictionary (Testing)

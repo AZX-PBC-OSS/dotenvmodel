@@ -25,28 +25,36 @@ class TestEnvFileLoading:
         assert config.debug is True
 
     def test_load_with_environment_cascade(self, tmp_path: Path) -> None:
-        """Test cascading .env files (.env, .env.dev, .env.dev.local)."""
+        """Test cascading .env files (.env, .env.local, .env.dev, .env.dev.local)."""
         # Create base .env
-        (tmp_path / ".env").write_text("DATABASE_URL=postgresql://localhost/prod\nDEBUG=false\n")
+        (tmp_path / ".env").write_text(
+            "DATABASE_URL=postgresql://localhost/prod\nDEBUG=false\nPORT=8000\n"
+        )
 
-        # Create .env.dev (overrides base)
+        # Create .env.local (local base overrides)
+        (tmp_path / ".env.local").write_text("DATABASE_URL=postgresql://localhost/local_base\n")
+
+        # Create .env.dev (environment-specific)
         (tmp_path / ".env.dev").write_text("DEBUG=true\nLOG_LEVEL=DEBUG\n")
 
-        # Create .env.dev.local (overrides everything)
-        (tmp_path / ".env.dev.local").write_text("DATABASE_URL=postgresql://localhost/dev_local\n")
+        # Create .env.dev.local (local environment overrides)
+        (tmp_path / ".env.dev.local").write_text("PORT=3000\n")
 
         class Config(DotEnvConfig):
             database_url: str = Field()
             debug: bool = Field()
             log_level: str = Field(default="INFO")
+            port: int = Field()
 
         config = Config.load(env="dev", env_dir=tmp_path)
-        # Should use .env.dev.local value for DATABASE_URL
-        assert config.database_url == "postgresql://localhost/dev_local"
-        # Should use .env.dev value for DEBUG
+        # Should use .env.local value for DATABASE_URL (overrides .env)
+        assert config.database_url == "postgresql://localhost/local_base"
+        # Should use .env.dev value for DEBUG (overrides .env)
         assert config.debug is True
         # Should use .env.dev value for LOG_LEVEL
         assert config.log_level == "DEBUG"
+        # Should use .env.dev.local value for PORT (overrides .env)
+        assert config.port == 3000
 
     def test_load_with_explicit_env(self, tmp_path: Path) -> None:
         """Test loading with explicit environment."""

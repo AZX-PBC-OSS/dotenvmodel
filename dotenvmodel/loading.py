@@ -22,8 +22,9 @@ def load_env_files(
     This function implements Node.js-style .env file cascading, loading files
     in the following order (later files override earlier):
     1. .env (base configuration)
-    2. .env.{env} (environment-specific)
-    3. .env.{env}.local (local overrides)
+    2. .env.local (local base overrides)
+    3. .env.{env} (environment-specific)
+    4. .env.{env}.local (local environment overrides)
 
     Args:
         env: Environment name (e.g., "dev", "prod", "test"). If None, reads from
@@ -63,8 +64,9 @@ def load_env_files(
     # Define file loading order
     env_files = [
         base_dir / ".env",  # Base shared configuration
+        base_dir / ".env.local",  # Local base overrides
         base_dir / f".env.{env}",  # Environment-specific config
-        base_dir / f".env.{env}.local",  # Local developer overrides
+        base_dir / f".env.{env}.local",  # Local environment overrides
     ]
 
     logger.debug(f"Searching for .env files in order: {[str(f) for f in env_files]}")
