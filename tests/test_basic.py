@@ -9,6 +9,7 @@ from dotenvmodel import (
     MissingFieldError,
     Required,
     TypeCoercionError,
+    ValidationError,
 )
 
 
@@ -422,3 +423,42 @@ def test_whitespace_only_strings_preserved():
     config = Config.load_from_dict({"VALUE": "   "})
     assert config.value == "   "
     assert len(config.value) == 3
+
+
+class TestConfigFieldDefaults:
+    """Test field default handling in config metaclass."""
+
+    def test_optional_type_with_no_default_gets_none(self) -> None:
+        """Test optional types with no default (_MISSING case defaulting to None)."""
+
+        class Config(DotEnvConfig):
+            optional_value: str | None
+
+        config = Config.load_from_dict({})
+        assert config.optional_value is None
+
+    def test_non_optional_type_with_no_default_is_required(self) -> None:
+        """Test non-optional types with no default (_MISSING case requiring field)."""
+
+        class Config(DotEnvConfig):
+            required_value: str
+
+        with pytest.raises(ValidationError) as exc_info:
+            Config.load_from_dict({})
+
+        assert "required_value" in str(exc_info.value).lower() or "REQUIRED_VALUE" in str(
+            exc_info.value
+        )
+
+    def test_regular_default_value_without_field(self) -> None:
+        """Test regular default values (non-FieldInfo, non-sentinel values)."""
+
+        class Config(DotEnvConfig):
+            port: int = 8000
+            name: str = "default_name"
+            enabled: bool = True
+
+        config = Config.load_from_dict({})
+        assert config.port == 8000
+        assert config.name == "default_name"
+        assert config.enabled is True

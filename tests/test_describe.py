@@ -11,6 +11,7 @@ from dotenvmodel.describe import (
     format_constraints,
     format_default,
     format_type_name,
+    generate_constraint_examples,
     render_json,
     render_markdown,
     render_table,
@@ -1175,7 +1176,6 @@ class TestConstraintExamples:
 
     def test_generate_numeric_constraint_examples(self) -> None:
         """Test examples for numeric constraints."""
-        from dotenvmodel.describe import generate_constraint_examples
         from dotenvmodel.fields import FieldInfo
 
         field_info = FieldInfo(ge=1, le=100)
@@ -1196,7 +1196,6 @@ class TestConstraintExamples:
 
     def test_generate_string_length_examples(self) -> None:
         """Test examples for string length constraints."""
-        from dotenvmodel.describe import generate_constraint_examples
         from dotenvmodel.fields import FieldInfo
 
         field_info = FieldInfo(min_length=8, max_length=32)
@@ -1212,7 +1211,6 @@ class TestConstraintExamples:
 
     def test_generate_choices_examples(self) -> None:
         """Test examples for choices constraint."""
-        from dotenvmodel.describe import generate_constraint_examples
         from dotenvmodel.fields import FieldInfo
 
         field_info = FieldInfo(choices=["dev", "staging", "prod"])
@@ -1228,7 +1226,6 @@ class TestConstraintExamples:
 
     def test_generate_collection_size_examples(self) -> None:
         """Test examples for collection size constraints."""
-        from dotenvmodel.describe import generate_constraint_examples
         from dotenvmodel.fields import FieldInfo
 
         field_info = FieldInfo(min_items=2, max_items=5)
@@ -1694,3 +1691,321 @@ class TestComprehensiveIntegration:
         assert json_data[0]["class_name"] == "AppConfig"
         assert json_data[1]["class_name"] == "DatabaseConfig"
         assert json_data[2]["class_name"] == "CacheConfig"
+
+
+class TestDescribeFormattingEdgeCases:
+    """Test formatting edge cases in describe.py."""
+
+    def test_callable_without_parameters(self) -> None:
+        """Test Callable without parameters."""
+        from collections.abc import Callable
+
+        from dotenvmodel.describe import format_type_name
+
+        # Bare Callable without type args
+        result = format_type_name(Callable)
+        assert result == "Callable"
+
+        # Create a Callable with args that are not a list/tuple (edge case)
+        try:
+            from collections.abc import Callable as TypingCallable
+
+            # Create partial callable annotation (edge case)
+            result2 = format_type_name(TypingCallable)
+            # Should return "Callable" as fallback
+            assert "Callable" in result2
+        except Exception:
+            # If we can't construct the edge case, that's okay
+            pass
+
+    def test_generic_type_without_args(self) -> None:
+        """Test generic type without args."""
+        from dotenvmodel.describe import format_type_name
+
+        # Bare list without type parameters
+        result = format_type_name(list)
+        assert result == "list"
+
+    def test_list_type_hint_without_element_type(self) -> None:
+        """Test list type hint without element type."""
+        from dotenvmodel.describe import get_type_parsing_hint
+
+        # Test with list[float] which doesn't have a specific example
+        hint = get_type_parsing_hint(list[float], None)
+        # Should return the basic hint without example
+        assert "comma-separated" in hint
+        # Should NOT have specific examples like for int or str
+        assert "1,2,3,4" not in hint
+        assert "value1,value2,value3" not in hint
+
+    def test_get_type_parsing_hint_no_hint(self) -> None:
+        """Test type parsing hint when type has no hint."""
+        from dotenvmodel.describe import get_type_parsing_hint
+
+        # Test with a type that has no parsing hint
+        hint = get_type_parsing_hint(int, None)
+        # int doesn't have a parsing hint, should return empty string
+        assert hint == ""
+
+    def test_constraint_examples_with_only_lower_bound(self) -> None:
+        """Test constraint examples with only lower bound."""
+
+        # Test numeric constraint with only ge
+        field_info_ge = FieldInfo(ge=10)
+        examples_ge = generate_constraint_examples(int, field_info_ge)
+        assert "valid" in examples_ge
+        assert len(examples_ge["valid"]) > 0
+        assert "10" in examples_ge["valid"]
+        assert any("too small" in ex for ex in examples_ge["invalid"])
+
+        # Test numeric constraint with only gt
+        field_info_gt = FieldInfo(gt=0)
+        examples_gt = generate_constraint_examples(int, field_info_gt)
+        assert len(examples_gt["valid"]) > 0
+
+    def test_constraint_examples_for_float_type(self) -> None:
+        """Test constraint examples for float type."""
+
+        # Test with float type to ensure get_origin path is tested
+        field_info = FieldInfo(ge=0.0, le=1.0)
+        examples = generate_constraint_examples(float, field_info)
+        assert "valid" in examples
+        assert len(examples["valid"]) > 0
+
+    def test_constraint_examples_with_only_upper_bound(self) -> None:
+        """Test constraint examples with only upper bound."""
+
+        # Test numeric constraint with only le
+        field_info_le = FieldInfo(le=100)
+        examples_le = generate_constraint_examples(int, field_info_le)
+        assert "valid" in examples_le
+        assert len(examples_le["valid"]) > 0
+        assert "100" in examples_le["valid"]
+        assert any("too large" in ex for ex in examples_le["invalid"])
+
+        # Test numeric constraint with only lt
+        field_info_lt = FieldInfo(lt=50)
+        examples_lt = generate_constraint_examples(int, field_info_lt)
+        assert len(examples_lt["valid"]) > 0
+
+    def test_string_length_constraints_only_min_length(self) -> None:
+        """Test string length constraints with only min length."""
+
+        field_info = FieldInfo(min_length=8)
+        examples = generate_constraint_examples(str, field_info)
+
+        assert "valid" in examples
+        assert len(examples["valid"]) > 0
+        assert any("minimum" in ex.lower() for ex in examples["valid"])
+        assert any("too short" in ex for ex in examples["invalid"])
+
+    def test_string_length_constraints_only_max_length(self) -> None:
+        """Test string length constraints with only max length."""
+
+        field_info = FieldInfo(max_length=32)
+        examples = generate_constraint_examples(str, field_info)
+
+        assert "valid" in examples
+        assert len(examples["valid"]) > 0
+        assert any("maximum" in ex.lower() for ex in examples["valid"])
+        assert any("too long" in ex for ex in examples["invalid"])
+
+    def test_collection_item_constraints_only_min_items(self) -> None:
+        """Test collection item constraints with only min items."""
+
+        field_info = FieldInfo(min_items=2)
+        examples = generate_constraint_examples(list, field_info)
+
+        assert "valid" in examples
+        assert len(examples["valid"]) > 0
+        assert any("minimum" in ex.lower() for ex in examples["valid"])
+        assert any("too few" in ex for ex in examples["invalid"])
+
+    def test_collection_item_constraints_only_max_items(self) -> None:
+        """Test collection item constraints with only max items."""
+
+        field_info = FieldInfo(max_items=5)
+        examples = generate_constraint_examples(list, field_info)
+
+        assert "valid" in examples
+        assert len(examples["valid"]) > 0
+        assert any("maximum" in ex.lower() for ex in examples["valid"])
+        assert any("too many" in ex for ex in examples["invalid"])
+
+    def test_dotenv_format_with_list_type_examples(self) -> None:
+        """Test dotenv format with list type examples."""
+
+        class Config(DotEnvConfig):
+            tags: list[str] = Field(description="List of tags")
+
+        output = Config.describe(output_format="dotenv")
+
+        # Should include example for list type
+        assert "# Example: TAGS=value1,value2,value3" in output
+
+    def test_dotenv_format_with_int_type_examples(self) -> None:
+        """Test dotenv format with int type examples."""
+
+        class Config(DotEnvConfig):
+            count: int = Field(description="Count value")
+
+        output = Config.describe(output_format="dotenv")
+
+        # Should include example for int type
+        assert "# Example: COUNT=8000" in output
+
+    def test_dotenv_format_with_bool_type_examples(self) -> None:
+        """Test dotenv format with bool type examples."""
+
+        class Config(DotEnvConfig):
+            enabled: bool = Field(description="Enable feature")
+
+        output = Config.describe(output_format="dotenv")
+
+        # Should include example for bool type
+        assert "# Example: ENABLED=true" in output
+
+    def test_dotenv_format_with_optional_field_no_default(self) -> None:
+        """Test dotenv format with optional field having no default."""
+
+        class Config(DotEnvConfig):
+            optional_value: str | None = Field(description="Optional value")
+
+        output = Config.describe(output_format="dotenv")
+
+        # Optional field with no default (None) should be commented with =
+        # The field has default=None but it shows as "-" which triggers line 727
+        assert "# OPTIONAL_VALUE=" in output
+
+    def test_dotenv_format_with_field_having_none_default(self) -> None:
+        """Test dotenv format with field having None as default value."""
+
+        class Config(DotEnvConfig):
+            # Explicitly test the else branch on line 727
+            nullable_field: str | None = Field(default=None)
+
+        output = Config.describe(output_format="dotenv")
+
+        # Should be commented since it's optional (has default)
+        # The default is "None" not "-" so it should hit line 725
+        assert "# NULLABLE_FIELD=None" in output or "# NULLABLE_FIELD=" in output
+
+    def test_html_format_with_empty_config(self) -> None:
+        """Test HTML format with empty config (no fields)."""
+
+        class EmptyConfig(DotEnvConfig):
+            pass
+
+        output = EmptyConfig.describe(output_format="html")
+
+        # Should render properly even with no fields
+        assert "<!DOCTYPE html>" in output
+        assert "No fields defined" in output
+
+    def test_json_format_with_custom_line_ending(self) -> None:
+        """Test JSON format with custom line ending."""
+
+        class Config(DotEnvConfig):
+            port: int = Field(default=8000)
+
+        output = Config.describe(output_format="json", line_ending="\r\n")
+
+        # Should contain Windows line endings
+        assert "\r\n" in output
+        # Should still be valid JSON
+        data = json.loads(output)
+        assert data["class_name"] == "Config"
+
+    def test_describe_configs_json_with_custom_line_ending(self) -> None:
+        """Test describe_configs JSON format with custom line ending."""
+
+        class Config1(DotEnvConfig):
+            port: int = Field(default=8000)
+
+        class Config2(DotEnvConfig):
+            debug: bool = Field(default=False)
+
+        # Test with custom line ending
+        output = describe_configs([Config1, Config2], output_format="json", line_ending="\r\n")
+
+        # Should contain Windows line endings
+        assert "\r\n" in output
+        # Should still be valid JSON
+        data = json.loads(output)
+        assert len(data) == 2
+
+    def test_dotenv_format_with_multiple_config_classes(self) -> None:
+        """Test dotenv format with multiple config classes."""
+
+        class Config1(DotEnvConfig):
+            field1: str = Field(default="value1")
+
+        class Config2(DotEnvConfig):
+            field2: int = Field(default=100)
+
+        output = describe_configs([Config1, Config2], output_format="dotenv")
+
+        # Should contain both configs
+        assert "Configuration for Config1" in output
+        assert "Configuration for Config2" in output
+        assert "FIELD1=" in output
+        assert "FIELD2=" in output
+
+    def test_describe_str_type_example_in_dotenv(self) -> None:
+        """Test that str type gets example in dotenv format."""
+
+        class Config(DotEnvConfig):
+            name: str = Field(description="Name field")
+
+        output = Config.describe(output_format="dotenv")
+        assert "# Example: NAME=your_value_here" in output
+
+
+class TestEnumTypeFormatting:
+    """Test Enum type formatting in describe functionality."""
+
+    def test_enum_type_in_describe(self) -> None:
+        """Test that Enum types are formatted correctly in describe output."""
+        from enum import Enum
+
+        class LogLevel(str, Enum):
+            DEBUG = "debug"
+            INFO = "info"
+            WARNING = "warning"
+            ERROR = "error"
+
+        class Config(DotEnvConfig):
+            log_level: LogLevel = Field(default=LogLevel.INFO)
+
+        output = Config.describe()
+
+        # Should show enum name and values (may be truncated with ...)
+        assert "LogLevel" in output
+        assert "debug" in output
+        assert "info" in output
+        # warning may be truncated as "warn..."
+        assert "warn" in output
+
+
+class TestEnumConstraints:
+    """Test Enum constraints in describe output."""
+
+    def test_enum_shows_choices_in_constraints(self) -> None:
+        """Test that Enum types show their values as choices."""
+        from enum import Enum
+
+        class Environment(str, Enum):
+            DEV = "development"
+            STAGING = "staging"
+            PROD = "production"
+
+        class Config(DotEnvConfig):
+            env: Environment = Field(default=Environment.DEV)
+
+        output = Config.describe(output_format="table")
+
+        # Should show choices in constraints column (may be truncated)
+        assert "choices:" in output
+        assert "development" in output
+        assert "staging" in output
+        # "production" may be truncated with "..."

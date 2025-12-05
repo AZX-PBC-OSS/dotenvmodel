@@ -294,6 +294,26 @@ class TestTimedeltaType:
         assert "Invalid timedelta format" in str(exc_info.value)
 
 
+class TestTimedeltaSecondsUnit:
+    """Test duration parser with seconds unit."""
+
+    def test_parse_timedelta_with_seconds_unit(self) -> None:
+        """Test parsing duration with seconds unit (e.g., "30s")."""
+
+        class Config(DotEnvConfig):
+            timeout: timedelta = Field()
+
+        config = Config.load_from_dict({"TIMEOUT": "30s"})
+        assert config.timeout == timedelta(seconds=30)
+
+        # Test multiple seconds formats
+        config2 = Config.load_from_dict({"TIMEOUT": "90s"})
+        assert config2.timeout == timedelta(seconds=90)
+
+        config3 = Config.load_from_dict({"TIMEOUT": "1.5s"})
+        assert config3.timeout == timedelta(seconds=1.5)
+
+
 class TestSecretStrType:
     """Test SecretStr type."""
 

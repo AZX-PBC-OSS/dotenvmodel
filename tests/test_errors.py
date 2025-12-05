@@ -325,3 +325,116 @@ class TestTypeCoercionEdgeCases:
             Config.load_from_dict({"CUSTOM": "value"})
 
         assert "Unsupported type" in str(exc_info.value)
+
+
+class TestConfigErrorHandling:
+    """Test error handling in load() and reload() methods."""
+
+    def test_single_validation_error_during_load(self) -> None:
+        """Test single ValidationError being raised during load()."""
+
+        class Config(DotEnvConfig):
+            port: int = Field(ge=1, le=65535)
+
+        # Single error should be raised directly (not wrapped in MultipleValidationErrors)
+        with pytest.raises(ConstraintViolationError) as exc_info:
+            Config.load_from_dict({"PORT": "99999"})
+
+        # Should NOT be MultipleValidationErrors
+        assert not isinstance(exc_info.value, MultipleValidationErrors)
+
+    def test_multiple_validation_errors_during_load(self) -> None:
+        """Test MultipleValidationErrors being raised during load()."""
+
+        class Config(DotEnvConfig):
+            api_key: str = Required
+            database_url: str = Required
+            port: int = Field(ge=1, le=65535)
+
+        # Multiple errors should be wrapped in MultipleValidationErrors
+        with pytest.raises(MultipleValidationErrors) as exc_info:
+            Config.load_from_dict({"PORT": "99999"})
+
+        # Should contain multiple errors
+        error = exc_info.value
+        assert isinstance(error, MultipleValidationErrors)
+        assert len(error.errors) >= 2
+
+    def test_validation_error_caught_during_load(self) -> None:
+        """Test that ValidationError is caught during load()."""
+        import os
+
+        class Config(DotEnvConfig):
+            value: int = Field(ge=1)
+
+        # Set up environment variable with invalid value
+        os.environ["VALUE"] = "0"
+
+        try:
+            # This should catch ValidationError and append to errors
+            with pytest.raises(ConstraintViolationError):
+                Config.load()
+        finally:
+            # Clean up
+            if "VALUE" in os.environ:
+                del os.environ["VALUE"]
+
+    def test_single_validation_error_during_reload(self) -> None:
+        """Test single ValidationError during reload()."""
+        import os
+
+        class Config(DotEnvConfig):
+            port: int = Field(default=8000, ge=1, le=65535)
+
+        # Initial load with valid value
+        config = Config.load_from_dict({"PORT": "8000"})
+
+        # Set invalid environment variable
+        os.environ["PORT"] = "99999"
+
+        try:
+            # Reload should raise single error directly (not wrapped)
+            with pytest.raises(ConstraintViolationError):
+                config.reload()
+        finally:
+            # Clean up
+            if "PORT" in os.environ:
+                del os.environ["PORT"]
+
+    def test_multiple_validation_errors_during_reload(self) -> None:
+        """Test MultipleValidationErrors during reload()."""
+        import os
+
+        class Config(DotEnvConfig):
+            field1: str = Required
+            field2: str = Required
+
+        # Initial load with valid values
+        config = Config.load_from_dict({"FIELD1": "a", "FIELD2": "b"})
+
+        # Clear the environment variables to cause missing field errors
+        if "FIELD1" in os.environ:
+            del os.environ["FIELD1"]
+        if "FIELD2" in os.environ:
+            del os.environ["FIELD2"]
+
+        # Reload should raise multiple validation errors
+        with pytest.raises(MultipleValidationErrors) as exc_info:
+            config.reload()
+
+        assert len(exc_info.value.errors) >= 2
+
+    def test_multiple_errors_includes_all_error_types(self) -> None:
+        """Test that MultipleValidationErrors can contain different error types."""
+
+        class Config(DotEnvConfig):
+            required_field: str = Required
+            port: int = Field(ge=1, le=65535)
+            email: str = Field(regex=r"^[\w\.-]+@[\w\.-]+\.\w+$")
+
+        with pytest.raises(MultipleValidationErrors) as exc_info:
+            Config.load_from_dict({"PORT": "99999", "EMAIL": "invalid"})
+
+        errors = exc_info.value.errors
+        # Should have at least: missing required_field, invalid port, invalid email
+        assert len(errors) >= 2

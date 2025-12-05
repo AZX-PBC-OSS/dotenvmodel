@@ -1,8 +1,10 @@
 """Type coercion logic for environment variable strings."""
 
+import inspect
 import types
 from datetime import datetime, timedelta
 from decimal import Decimal
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, get_args, get_origin
 from uuid import UUID
@@ -42,6 +44,10 @@ def coerce_value(
     # Handle Literal types first
     if origin is Literal:
         return _coerce_literal(field_name, value, field_type, env_var_name)
+
+    # Handle Enum types before Union types
+    if inspect.isclass(field_type) and issubclass(field_type, Enum):
+        return _coerce_enum(field_name, value, field_type, env_var_name)
 
     # Handle Union types (including Optional[T] and str | None)
     # Check for UnionType (str | None) or typing.Union
@@ -177,6 +183,68 @@ def coerce_value(
                 field_type=field_type,
                 env_var_name=env_var_name,
             )
+
+
+def _coerce_enum(
+    field_name: str,
+    value: str | None,
+    field_type: type[Enum],
+    env_var_name: str,
+) -> Enum:
+    """
+    Coerce a string value to an Enum member.
+
+    Tries to match by:
+    1. Enum value (case-sensitive)
+    2. Enum name (case-insensitive)
+
+    Args:
+        field_name: Name of the field
+        value: String value from environment variable
+        field_type: Enum class to coerce to
+        env_var_name: Environment variable name
+
+    Returns:
+        Enum member instance
+
+    Raises:
+        TypeCoercionError: If value doesn't match any enum member
+    """
+    if value is None or value == "":
+        raise TypeCoercionError(
+            field_name=field_name,
+            value=value,
+            error_msg="Value cannot be None or empty for Enum type",
+            field_type=field_type,
+            env_var_name=env_var_name,
+        )
+
+    # Try matching by value first (exact match)
+    for member in field_type:
+        if str(member.value) == value:
+            return member
+
+    # Try matching by name (case-insensitive)
+    value_upper = value.upper()
+    for member in field_type:
+        if member.name.upper() == value_upper:
+            return member
+
+    # No match found - provide helpful error
+    valid_values = [str(m.value) for m in field_type]
+    valid_names = [m.name for m in field_type]
+
+    raise TypeCoercionError(
+        field_name=field_name,
+        value=value,
+        error_msg=(
+            f"Invalid {field_type.__name__} value. "
+            f"Must be one of: {', '.join(valid_values)} "
+            f"(or by name: {', '.join(valid_names)})"
+        ),
+        field_type=field_type,
+        env_var_name=env_var_name,
+    )
 
 
 def _coerce_bool(field_name: str, value: str, env_var_name: str) -> bool:

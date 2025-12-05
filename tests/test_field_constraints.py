@@ -2,7 +2,8 @@
 
 import pytest
 
-from dotenvmodel import Field
+from dotenvmodel import DotEnvConfig, Field
+from dotenvmodel.fields import _MISSING, FieldInfo
 
 
 class TestFieldConstraintValidation:
@@ -116,3 +117,44 @@ class TestFieldConstraintValidation:
         # Should succeed
         Field(ge=Decimal("0"), le=Decimal("1"))
         Field(gt=Decimal("0"), lt=Decimal("1"))
+
+
+class TestFieldInfoMethods:
+    """Test FieldInfo methods."""
+
+    def test_get_default_when_default_is_missing(self) -> None:
+        """Test FieldInfo.get_default() when default is _MISSING."""
+        field_info = FieldInfo()  # No default provided
+        assert field_info.default is _MISSING
+        assert field_info.get_default() is _MISSING
+
+    def test_has_default_property(self) -> None:
+        """Test FieldInfo.has_default property."""
+        # Field with default
+        field_with_default = FieldInfo(default="value")
+        assert field_with_default.has_default is True
+
+        # Field with default_factory
+        field_with_factory = FieldInfo(default_factory=list)
+        assert field_with_factory.has_default is True
+
+        # Required field (no default)
+        required_field = FieldInfo()
+        assert required_field.has_default is False
+
+    def test_field_info_get_default_with_factory(self) -> None:
+        """Test FieldInfo.get_default() with default_factory."""
+        field_info = FieldInfo(default_factory=list)
+        result = field_info.get_default()
+        assert result == []
+        assert isinstance(result, list)
+
+    def test_optional_field_in_metaclass_with_field_info(self) -> None:
+        """Test optional field gets auto None when using FieldInfo with no default."""
+
+        class Config(DotEnvConfig):
+            # Optional type with Field() but no default
+            value: str | None = Field()
+
+        config = Config.load_from_dict({})
+        assert config.value is None

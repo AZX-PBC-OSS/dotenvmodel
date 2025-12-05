@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import collections.abc
+import inspect
 import json
 import os
 import types
 from dataclasses import asdict, dataclass
+from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal, Union, get_args, get_origin
 
@@ -76,10 +78,16 @@ def format_type_name(field_type: type) -> str:
         str | None -> "str | None"
         Optional[int] -> "int | None"
         SecretStr -> "SecretStr"
+        LogLevel -> "LogLevel (debug, info, warning, error)"
     """
     # Handle NoneType specially
     if field_type is type(None):
         return "None"
+
+    # Handle Enum types
+    if inspect.isclass(field_type) and issubclass(field_type, Enum):
+        values = [str(m.value) for m in field_type]
+        return f"{field_type.__name__} ({', '.join(values)})"
 
     origin = get_origin(field_type)
 
@@ -275,20 +283,33 @@ def generate_constraint_examples(field_type: type, field_info: FieldInfo) -> dic
     return {"valid": valid, "invalid": invalid}
 
 
-def format_constraints(field_info: FieldInfo, truncate: bool = True) -> str:
+def format_constraints(
+    field_info: FieldInfo, truncate: bool = True, field_type: type | None = None
+) -> str:
     """
     Format field constraints as a readable string.
 
     Args:
         field_info: The field metadata
         truncate: Whether to truncate long values (for table display)
+        field_type: Optional field type to detect enum constraints
 
     Examples:
         ge=1, le=100 -> "ge=1, le=100"
         min_length=8 -> "min_length=8"
         choices=["a", "b"] -> "choices=[a, b]"
+        LogLevel enum -> "choices: debug, info, warning, error"
     """
     constraints: list[str] = []
+
+    # Handle Enum types - show valid enum values
+    if field_type is not None and inspect.isclass(field_type) and issubclass(field_type, Enum):
+        values = [str(m.value) for m in field_type]
+        choices_str = ", ".join(values)
+        if truncate and len(choices_str) > TRUNCATE_THRESHOLD_MEDIUM:
+            choices_str = choices_str[: TRUNCATE_THRESHOLD_MEDIUM - 3] + "..."
+        constraints.append(f"choices: {choices_str}")
+        return ", ".join(constraints)
 
     # Numeric constraints
     if field_info.ge is not None:
@@ -373,6 +394,10 @@ def format_default(field_info: FieldInfo, field_type: type, truncate: bool = Tru
     if default is None:
         return "None"
 
+    # Handle Enum defaults - show the value not the representation
+    if isinstance(default, Enum):
+        return str(default.value)
+
     # Check if this is a SecretStr type and hide the value
     if isinstance(field_type, type) and issubclass(field_type, SecretStr):
         return "<secret>"
@@ -417,7 +442,7 @@ def describe_class(
         env_var = get_env_var_name(field_name, field_info.alias, prefix)
         type_name = format_type_name(field_type)
         default_str = format_default(field_info, field_type, truncate=truncate)
-        constraints_str = format_constraints(field_info, truncate=truncate)
+        constraints_str = format_constraints(field_info, truncate=truncate, field_type=field_type)
         description = field_info.description or "-"
 
         if truncate and len(description) > TRUNCATE_THRESHOLD_LONG:
