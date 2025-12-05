@@ -380,8 +380,6 @@ class TestConfigMethods:
 
 
 """Test empty string handling for str fields."""
-import pytest
-from dotenvmodel import DotEnvConfig, Field
 
 
 def test_empty_string_preserved_for_str_field():

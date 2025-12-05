@@ -1,5 +1,5 @@
 """Tests for empty items in collections."""
-import pytest
+
 from dotenvmodel import DotEnvConfig, Field
 
 
@@ -8,6 +8,7 @@ class TestEmptyItemsInCollections:
 
     def test_list_str_preserves_empty_items(self) -> None:
         """Test that list[str] preserves empty items as empty strings."""
+
         class Config(DotEnvConfig):
             names: list[str] = Field()
 
@@ -16,6 +17,7 @@ class TestEmptyItemsInCollections:
 
     def test_list_int_skips_empty_items(self) -> None:
         """Test that list[int] skips empty items."""
+
         class Config(DotEnvConfig):
             numbers: list[int] = Field()
 
@@ -24,6 +26,7 @@ class TestEmptyItemsInCollections:
 
     def test_list_str_with_only_empty_items(self) -> None:
         """Test list[str] with only empty items."""
+
         class Config(DotEnvConfig):
             values: list[str] = Field()
 
@@ -32,6 +35,7 @@ class TestEmptyItemsInCollections:
 
     def test_set_str_preserves_empty_string(self) -> None:
         """Test that set[str] includes empty string."""
+
         class Config(DotEnvConfig):
             tags: set[str] = Field()
 
@@ -40,6 +44,7 @@ class TestEmptyItemsInCollections:
 
     def test_set_int_skips_empty_items(self) -> None:
         """Test that set[int] skips empty items."""
+
         class Config(DotEnvConfig):
             numbers: set[int] = Field()
 
@@ -48,6 +53,7 @@ class TestEmptyItemsInCollections:
 
     def test_tuple_str_preserves_empty_items(self) -> None:
         """Test that tuple[str, ...] preserves empty items."""
+
         class Config(DotEnvConfig):
             values: tuple[str, ...] = Field()
 
@@ -56,6 +62,7 @@ class TestEmptyItemsInCollections:
 
     def test_tuple_int_skips_empty_items(self) -> None:
         """Test that tuple[int, ...] skips empty items."""
+
         class Config(DotEnvConfig):
             scores: tuple[int, ...] = Field()
 
@@ -64,6 +71,7 @@ class TestEmptyItemsInCollections:
 
     def test_list_optional_int_keeps_none_for_empty(self) -> None:
         """Test that list[int | None] keeps None for empty items."""
+
         class Config(DotEnvConfig):
             numbers: list[int | None] = Field()
 
@@ -72,6 +80,7 @@ class TestEmptyItemsInCollections:
 
     def test_dict_with_empty_string_values(self) -> None:
         """Test dict with empty string values."""
+
         class Config(DotEnvConfig):
             mapping: dict[str, str] = Field()
 
@@ -80,6 +89,7 @@ class TestEmptyItemsInCollections:
 
     def test_dict_skips_empty_int_keys(self) -> None:
         """Test that dict[int, str] skips pairs with empty keys."""
+
         class Config(DotEnvConfig):
             mapping: dict[int, str] = Field()
 
@@ -88,6 +98,7 @@ class TestEmptyItemsInCollections:
 
     def test_trailing_separator_creates_empty_item(self) -> None:
         """Test that trailing separator creates empty item for str types."""
+
         class Config(DotEnvConfig):
             values: list[str] = Field()
 
@@ -96,6 +107,7 @@ class TestEmptyItemsInCollections:
 
     def test_leading_separator_creates_empty_item(self) -> None:
         """Test that leading separator creates empty item for str types."""
+
         class Config(DotEnvConfig):
             values: list[str] = Field()
 
@@ -104,6 +116,7 @@ class TestEmptyItemsInCollections:
 
     def test_multiple_consecutive_separators(self) -> None:
         """Test multiple consecutive separators."""
+
         class Config(DotEnvConfig):
             values: list[str] = Field()
 
