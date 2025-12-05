@@ -163,6 +163,47 @@ class TestEnvFileLoading:
         config = Config.load(env="dev", env_dir=tmp_path)
         assert config.value == "default"
 
+    def test_env_parameter_validation_prevents_path_traversal(self, tmp_path: Path) -> None:
+        """Test that env parameter is validated to prevent path traversal attacks."""
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="test")
+
+        # Test various malicious env values
+        malicious_envs = [
+            "../etc/passwd",
+            "../../secrets",
+            "..",
+            ".",
+            "dev/../prod",
+            "dev/../../etc",
+            "dev/local",
+            "/etc/passwd",
+        ]
+
+        for malicious_env in malicious_envs:
+            with pytest.raises(ValueError) as exc_info:
+                Config.load(env=malicious_env, env_dir=tmp_path)
+
+            assert "Invalid environment name" in str(exc_info.value)
+            assert "alphanumeric" in str(exc_info.value)
+
+    def test_env_parameter_allows_valid_names(self, tmp_path: Path, monkeypatch) -> None:
+        """Test that valid environment names are accepted."""
+        # Clear any existing VALUE env var to avoid pollution
+        monkeypatch.delenv("VALUE", raising=False)
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="test")
+
+        # Test valid env names
+        valid_envs = ["dev", "prod", "test", "staging", "dev-local", "test_env", "prod123"]
+
+        for valid_env in valid_envs:
+            # Should not raise error
+            config = Config.load(env=valid_env, env_dir=tmp_path)
+            assert config.value == "test"
+
 
 class TestEnvVarName:
     """Test environment variable name handling."""

@@ -45,6 +45,14 @@ def load_env_files(
     if env is None:
         env = os.getenv("ENV", "dev")
 
+    # Validate env parameter to prevent path traversal attacks
+    # Only allow alphanumeric characters, hyphens, and underscores
+    if not env or not all(c.isalnum() or c in ("-", "_") for c in env):
+        raise ValueError(
+            f"Invalid environment name: {env!r}. "
+            "Environment names must only contain alphanumeric characters, hyphens, and underscores."
+        )
+
     logger.info(f"Loading configuration for environment: {env}")
 
     # Determine base directory
