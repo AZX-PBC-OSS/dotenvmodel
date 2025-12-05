@@ -124,10 +124,12 @@ class TestAutoPrefixIntegration:
             host: str = Field()
             port: int = Field(default=5432)
 
-        config = DatabaseConfig.load_from_dict({
-            "DATABASE_HOST": "localhost",
-            "DATABASE_PORT": "5433",
-        })
+        config = DatabaseConfig.load_from_dict(
+            {
+                "DATABASE_HOST": "localhost",
+                "DATABASE_PORT": "5433",
+            }
+        )
         assert config.host == "localhost"
         assert config.port == 5433
 
@@ -138,10 +140,12 @@ class TestAutoPrefixIntegration:
             host: str = Field()
             port: int = Field(default=5432)
 
-        config = DBConfig.load_from_dict({
-            "DB_HOST": "localhost",
-            "DB_PORT": "5433",
-        })
+        config = DBConfig.load_from_dict(
+            {
+                "DB_HOST": "localhost",
+                "DB_PORT": "5433",
+            }
+        )
         assert config.host == "localhost"
         assert config.port == 5433
 
@@ -152,10 +156,12 @@ class TestAutoPrefixIntegration:
             host: str = Field()
             port: int = Field(default=8080)
 
-        config = HTTPServerConfig.load_from_dict({
-            "HTTP_SERVER_HOST": "0.0.0.0",
-            "HTTP_SERVER_PORT": "9000",
-        })
+        config = HTTPServerConfig.load_from_dict(
+            {
+                "HTTP_SERVER_HOST": "0.0.0.0",
+                "HTTP_SERVER_PORT": "9000",
+            }
+        )
         assert config.host == "0.0.0.0"
         assert config.port == 9000
 
@@ -187,10 +193,12 @@ class TestAutoPrefixIntegration:
             db_url: str = Field(alias="DATABASE_URL")  # Alias is absolute
             host: str = Field()  # Gets DATABASE_HOST
 
-        config = DatabaseConfig.load_from_dict({
-            "DATABASE_URL": "postgresql://localhost/db",
-            "DATABASE_HOST": "localhost",
-        })
+        config = DatabaseConfig.load_from_dict(
+            {
+                "DATABASE_URL": "postgresql://localhost/db",
+                "DATABASE_HOST": "localhost",
+            }
+        )
         assert config.db_url == "postgresql://localhost/db"
         assert config.host == "localhost"
 
@@ -201,10 +209,12 @@ class TestAutoPrefixIntegration:
             debug: bool = Field(default=False)
             name: str = Field()
 
-        config = MyAppConfig.load_from_dict({
-            "MY_APP_DEBUG": "true",
-            "MY_APP_NAME": "test-app",
-        })
+        config = MyAppConfig.load_from_dict(
+            {
+                "MY_APP_DEBUG": "true",
+                "MY_APP_NAME": "test-app",
+            }
+        )
         assert config.debug is True
         assert config.name == "test-app"
 
@@ -215,10 +225,12 @@ class TestAutoPrefixIntegration:
             client_id: str = Field()
             client_secret: str = Field()
 
-        config = OAuth2Config.load_from_dict({
-            "OAUTH2_CLIENT_ID": "my-client",
-            "OAUTH2_CLIENT_SECRET": "secret123",
-        })
+        config = OAuth2Config.load_from_dict(
+            {
+                "OAUTH2_CLIENT_ID": "my-client",
+                "OAUTH2_CLIENT_SECRET": "secret123",
+            }
+        )
         assert config.client_id == "my-client"
         assert config.client_secret == "secret123"
 
@@ -271,10 +283,12 @@ class TestAutoPrefixInheritance:
         class AppConfig(BaseConfig):
             debug: bool = Field(default=False)
 
-        config = AppConfig.load_from_dict({
-            "APP_HOST": "example.com",
-            "APP_DEBUG": "true",
-        })
+        config = AppConfig.load_from_dict(
+            {
+                "APP_HOST": "example.com",
+                "APP_DEBUG": "true",
+            }
+        )
         assert config.host == "example.com"
         assert config.debug is True
 
@@ -288,10 +302,12 @@ class TestAutoPrefixInheritance:
             env_prefix = "CUSTOM"  # Override auto-derived APP
             other: str = Field(default="app")
 
-        config = AppConfig.load_from_dict({
-            "CUSTOM_VALUE": "custom_value",
-            "CUSTOM_OTHER": "custom_other",
-        })
+        config = AppConfig.load_from_dict(
+            {
+                "CUSTOM_VALUE": "custom_value",
+                "CUSTOM_OTHER": "custom_other",
+            }
+        )
         assert config.value == "custom_value"
         assert config.other == "custom_other"
 
@@ -306,10 +322,12 @@ class TestAutoPrefixInheritance:
             # Should auto-derive MY_APP, not BASE
             other: str = Field(default="app")
 
-        config = MyAppConfig.load_from_dict({
-            "MY_APP_VALUE": "my_value",
-            "MY_APP_OTHER": "my_other",
-        })
+        config = MyAppConfig.load_from_dict(
+            {
+                "MY_APP_VALUE": "my_value",
+                "MY_APP_OTHER": "my_other",
+            }
+        )
         assert config.value == "my_value"
         assert config.other == "my_other"
 
@@ -324,10 +342,12 @@ class TestAutoPrefixInheritance:
             # Should inherit empty prefix, not auto-derive APP
             debug: bool = Field(default=False)
 
-        config = AppConfig.load_from_dict({
-            "HOST": "example.com",
-            "DEBUG": "true",
-        })
+        config = AppConfig.load_from_dict(
+            {
+                "HOST": "example.com",
+                "DEBUG": "true",
+            }
+        )
         assert config.host == "example.com"
         assert config.debug is True
 
@@ -494,9 +514,9 @@ class TestAutoPrefixEdgeCases:
         class AppConfig(DotEnvConfig):
             database_connection_string: str = Field()
 
-        config = AppConfig.load_from_dict({
-            "APP_DATABASE_CONNECTION_STRING": "postgres://localhost"
-        })
+        config = AppConfig.load_from_dict(
+            {"APP_DATABASE_CONNECTION_STRING": "postgres://localhost"}
+        )
         assert config.database_connection_string == "postgres://localhost"
 
     def test_multiple_configs_different_auto_prefixes(self) -> None:
@@ -537,8 +557,10 @@ class TestAutoPrefixEdgeCases:
             host: str = Field()
 
         # Both provided - prefixed should win
-        config = AppConfig.load_from_dict({
-            "APP_HOST": "prefixed",
-            "host": "field_name",
-        })
+        config = AppConfig.load_from_dict(
+            {
+                "APP_HOST": "prefixed",
+                "host": "field_name",
+            }
+        )
         assert config.host == "prefixed"
