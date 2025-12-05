@@ -76,7 +76,9 @@ class FieldInfo:
         # Validate numeric constraint types
         for param_name, param_value in [("ge", ge), ("le", le), ("gt", gt), ("lt", lt)]:
             if param_value is not None and not isinstance(param_value, (int, float, Decimal)):
-                raise TypeError(f"{param_name} must be int, float, or Decimal, got {type(param_value).__name__}")
+                raise TypeError(
+                    f"{param_name} must be int, float, or Decimal, got {type(param_value).__name__}"
+                )
 
         # Validate length/size constraint types
         for param_name, param_value in [
@@ -86,7 +88,9 @@ class FieldInfo:
             ("max_items", max_items),
         ]:
             if param_value is not None and (not isinstance(param_value, int) or param_value < 0):
-                raise ValueError(f"{param_name} must be a non-negative integer, got {param_value!r}")
+                raise ValueError(
+                    f"{param_name} must be a non-negative integer, got {param_value!r}"
+                )
 
         # Validate UUID version
         if uuid_version is not None and uuid_version not in (1, 3, 4, 5):
@@ -98,9 +102,13 @@ class FieldInfo:
         if gt is not None and lt is not None and gt >= lt:
             raise ValueError(f"gt ({gt}) must be less than lt ({lt})")
         if min_length is not None and max_length is not None and min_length > max_length:
-            raise ValueError(f"min_length ({min_length}) cannot be greater than max_length ({max_length})")
+            raise ValueError(
+                f"min_length ({min_length}) cannot be greater than max_length ({max_length})"
+            )
         if min_items is not None and max_items is not None and min_items > max_items:
-            raise ValueError(f"min_items ({min_items}) cannot be greater than max_items ({max_items})")
+            raise ValueError(
+                f"min_items ({min_items}) cannot be greater than max_items ({max_items})"
+            )
 
         self.default = default
         self.default_factory = default_factory

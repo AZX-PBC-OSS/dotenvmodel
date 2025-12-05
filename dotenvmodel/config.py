@@ -38,7 +38,7 @@ class ConfigMeta(type):
         for base in bases:
             if hasattr(base, "_fields"):
                 # Copy parent fields
-                fields.update(base._fields)
+                fields.update(base._fields)  # type: ignore[arg-type]
 
         # Get type hints for the class
         hints = namespace.get("__annotations__", {})

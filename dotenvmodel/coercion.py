@@ -56,12 +56,14 @@ def coerce_value(
             return coerce_value(field_name, value, actual_type, env_var_name, field_info)
         else:
             # Non-Optional Union types (e.g., Union[str, int] or str | int) are not supported
-            type_names = ", ".join(str(arg.__name__ if hasattr(arg, "__name__") else arg) for arg in args)
+            type_names = ", ".join(
+                str(arg.__name__ if hasattr(arg, "__name__") else arg) for arg in args
+            )
             raise TypeCoercionError(
                 field_name=field_name,
                 value=value,
                 error_msg=f"Union types with multiple non-None types are not supported. "
-                         f"Use Optional[T] or T | None for nullable fields. Got: Union[{type_names}]",
+                f"Use Optional[T] or T | None for nullable fields. Got: Union[{type_names}]",
                 field_type=field_type,
                 env_var_name=env_var_name,
             )

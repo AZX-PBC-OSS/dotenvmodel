@@ -42,7 +42,7 @@ class SecretStr:
 
     def get_secret_value(self) -> str:
         """Get the actual secret value."""
-        return self.__secret
+        return self.__secret  # type: ignore[attr-defined]
 
     def __str__(self) -> str:
         return "**********"
@@ -67,11 +67,11 @@ class SecretStr:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, SecretStr):
-            return self.__secret == other.__secret
+            return self.__secret == other.__secret  # type: ignore[attr-defined]
         return False
 
     def __hash__(self) -> int:
-        return hash(self.__secret)
+        return hash(self.__secret)  # type: ignore[attr-defined]
 
 
 class BaseDsn(str):
