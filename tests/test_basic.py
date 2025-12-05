@@ -377,3 +377,50 @@ class TestConfigMethods:
         assert "Config" in repr_str
         assert "name='test'" in repr_str
         assert "port=8000" in repr_str
+
+
+"""Test empty string handling for str fields."""
+import pytest
+from dotenvmodel import DotEnvConfig, Field
+
+
+def test_empty_string_preserved_for_str_field():
+    """Test that empty strings are preserved for non-optional str fields."""
+
+    class Config(DotEnvConfig):
+        name: str = Field()
+
+    config = Config.load_from_dict({"NAME": ""})
+    assert config.name == ""
+    assert isinstance(config.name, str)
+
+
+def test_empty_string_becomes_none_for_optional_str():
+    """Test that empty strings become None for Optional[str] fields."""
+
+    class Config(DotEnvConfig):
+        name: str | None = Field()
+
+    config = Config.load_from_dict({"NAME": ""})
+    assert config.name is None
+
+
+def test_empty_string_with_default():
+    """Test empty string behavior with default values."""
+
+    class Config(DotEnvConfig):
+        name: str = Field(default="default_name")
+
+    config = Config.load_from_dict({"NAME": ""})
+    assert config.name == ""  # Empty string overrides default
+
+
+def test_whitespace_only_strings_preserved():
+    """Test that whitespace-only strings are preserved for str fields."""
+
+    class Config(DotEnvConfig):
+        value: str = Field()
+
+    config = Config.load_from_dict({"VALUE": "   "})
+    assert config.value == "   "
+    assert len(config.value) == 3

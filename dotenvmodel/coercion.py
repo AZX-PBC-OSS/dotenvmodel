@@ -82,7 +82,11 @@ def coerce_value(
     if field_type is bool:
         return _coerce_bool(field_name, value, env_var_name)
 
-    # For other non-collection types, empty string is treated as None
+    # Handle str type explicitly - preserve empty strings
+    if field_type is str:
+        return value  # Allow empty strings for str fields
+
+    # For other non-collection types (not str, not bool), empty string is treated as None
     # This will cause required fields to fail validation
     if value == "":
         return None
@@ -93,6 +97,7 @@ def coerce_value(
     # Handle basic and special types using match/case
     match field_type:
         case type() if field_type is str:
+            # Already handled above, but keep for completeness
             return value
 
         case type() if field_type is int:
@@ -135,6 +140,11 @@ def coerce_value(
             return dotenv_types.coerce_timedelta(value, field_name, env_var_name)
 
         case type() if field_type is dotenv_types.SecretStr:
+            # Apply URL unquoting if requested (default: True)
+            if field_info and field_info.url_unquote:
+                from urllib.parse import unquote
+
+                value = unquote(value)
             return dotenv_types.SecretStr(value)
 
         case type() if field_type in (
@@ -283,6 +293,17 @@ def _coerce_list(
     for item in items:
         try:
             coerced = coerce_value(field_name, item, element_type, env_var_name)
+            # Skip None values for non-optional types (empty items in non-str lists)
+            # For list[str], empty items are preserved as ""
+            # For list[int], empty items are skipped entirely
+            if coerced is None and element_type is not str:
+                # Check if element type is Optional
+                from typing import get_args, get_origin
+
+                origin = get_origin(element_type)
+                if origin is None or type(None) not in get_args(element_type):
+                    # Not Optional, skip None values
+                    continue
             result.append(coerced)
         except TypeCoercionError as e:
             raise TypeCoercionError(
@@ -354,6 +375,16 @@ def _coerce_dict(
         try:
             coerced_key = coerce_value(field_name, key_str, key_type, env_var_name)
             coerced_val = coerce_value(field_name, val_str, value_type, env_var_name)
+
+            # Skip None keys (empty keys for non-str types) - this would be invalid
+            if coerced_key is None and key_type is not str:
+                from typing import get_args, get_origin
+
+                origin = get_origin(key_type)
+                if origin is None or type(None) not in get_args(key_type):
+                    continue  # Skip this pair
+
+            # For values, we allow None if value_type is Optional
             result[coerced_key] = coerced_val
         except TypeCoercionError as e:
             raise TypeCoercionError(

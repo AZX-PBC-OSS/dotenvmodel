@@ -4,7 +4,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from urllib.parse import ParseResult, urlparse
+from urllib.parse import ParseResult, unquote, urlparse
 from uuid import UUID
 
 from dotenvmodel.exceptions import TypeCoercionError
@@ -149,8 +149,10 @@ class BaseDsn(str):
 
     @property
     def password(self) -> str | None:
-        """Get the URL password."""
-        return self.parsed.password
+        """Get the URL password (decoded from percent-encoding)."""
+        if self.parsed.password:
+            return unquote(self.parsed.password)
+        return None
 
 
 class HttpUrl(BaseDsn):

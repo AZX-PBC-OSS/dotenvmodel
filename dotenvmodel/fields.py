@@ -64,6 +64,8 @@ class FieldInfo:
         uuid_version: int | None = None,
         # Collection parsing
         separator: str = ",",
+        # SecretStr options
+        url_unquote: bool = True,
     ) -> None:
         # Validate that only one default mechanism is used
         if default is not _MISSING and default is not ... and default_factory is not None:
@@ -147,6 +149,9 @@ class FieldInfo:
         # Collection parsing
         self.separator = separator
 
+        # SecretStr options
+        self.url_unquote = url_unquote
+
         # Mark if field is required
         self.required = default is _MISSING and default_factory is None
 
@@ -221,6 +226,7 @@ def Field(
     max_items: int | None = None,
     uuid_version: int | None = None,
     separator: str = ",",
+    url_unquote: bool = True,
 ) -> Any:
     """
     Define a configuration field with validation and default values.
@@ -288,4 +294,5 @@ def Field(
         max_items=max_items,
         uuid_version=uuid_version,
         separator=separator,
+        url_unquote=url_unquote,
     )
