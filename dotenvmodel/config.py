@@ -509,7 +509,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
     @classmethod
     def describe(
         cls,
-        format: Literal["table", "markdown", "json", "html", "dotenv"] = "table",
+        output_format: Literal["table", "markdown", "json", "html", "dotenv"] = "table",
         output: str | Path | None = None,
         line_ending: str | None = None,
     ) -> str:
@@ -520,7 +520,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         default values, descriptions, and validation constraints.
 
         Args:
-            format: Output format - "table" (ASCII), "markdown", "json", "html", or "dotenv"
+            output_format: Output format - "table" (ASCII), "markdown", "json", "html", or "dotenv"
             output: Optional file path to save the output to
             line_ending: Line ending to use (e.g., "\\n", "\\r\\n", "\\r").
                 If None, uses platform default (os.linesep)
@@ -538,21 +538,23 @@ class DotEnvConfig(metaclass=ConfigMeta):
             print(AppConfig.describe())
 
             # Save markdown to file
-            AppConfig.describe(format="markdown", output="docs/config.md")
+            AppConfig.describe(output_format="markdown", output="docs/config.md")
 
             # Generate .env.example
-            AppConfig.describe(format="dotenv", output=".env.example")
+            AppConfig.describe(output_format="dotenv", output=".env.example")
 
             # Use Unix line endings regardless of platform
-            AppConfig.describe(format="markdown", line_ending="\\n")
+            AppConfig.describe(output_format="markdown", line_ending="\\n")
 
             # Use Windows line endings
-            AppConfig.describe(format="markdown", line_ending="\\r\\n")
+            AppConfig.describe(output_format="markdown", line_ending="\\r\\n")
             ```
         """
         from dotenvmodel.describe import describe_single
 
-        return describe_single(cls, format=format, output=output, line_ending=line_ending)
+        return describe_single(
+            cls, output_format=output_format, output=output, line_ending=line_ending
+        )
 
     @classmethod
     def generate_env_example(

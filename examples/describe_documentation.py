@@ -61,20 +61,20 @@ if __name__ == "__main__":
     # Example 2: Markdown Format
     print("2. Markdown Format")
     print("-" * 80)
-    print(AppConfig.describe(format="markdown"))
+    print(AppConfig.describe(output_format="markdown"))
     print()
 
     # Example 3: JSON Format
     print("3. JSON Format")
     print("-" * 80)
-    json_output = AppConfig.describe(format="json")
+    json_output = AppConfig.describe(output_format="json")
     print(json.dumps(json.loads(json_output), indent=2))
     print()
 
     # Example 4: HTML Format
     print("4. HTML Format")
     print("-" * 80)
-    html_output = AppConfig.describe(format="html")
+    html_output = AppConfig.describe(output_format="html")
     print(html_output[:500] + "...")
     print("(Output truncated - full HTML includes styled tables)")
     print()
@@ -82,7 +82,7 @@ if __name__ == "__main__":
     # Example 5: Dotenv Format
     print("5. Dotenv Format - for .env.example files")
     print("-" * 80)
-    dotenv_output = AppConfig.describe(format="dotenv")
+    dotenv_output = AppConfig.describe(output_format="dotenv")
     print(dotenv_output)
     print()
 
@@ -98,15 +98,15 @@ if __name__ == "__main__":
     print("7. File Export - Save documentation to disk")
     print("-" * 80)
     print("You can now save directly to files:")
-    print("  AppConfig.describe(format='markdown', output='docs/config.md')")
-    print("  AppConfig.describe(format='html', output='docs/config.html')")
+    print("  AppConfig.describe(output_format='markdown', output='docs/config.md')")
+    print("  AppConfig.describe(output_format='html', output='docs/config.html')")
     print("  AppConfig.generate_env_example(output='.env.example')")
     print()
 
     # Example 8: Multiple Configurations
     print("8. Documenting Multiple Configurations")
     print("-" * 80)
-    all_configs = describe_configs([AppConfig, DatabaseConfig, RedisConfig], format="table")
+    all_configs = describe_configs([AppConfig, DatabaseConfig, RedisConfig], output_format="table")
     print(all_configs)
     print()
 
@@ -117,7 +117,7 @@ if __name__ == "__main__":
     # Check all config classes for required vars
     all_required_vars = []
     for config_cls in [AppConfig, DatabaseConfig, RedisConfig]:
-        spec = json.loads(config_cls.describe(format="json"))
+        spec = json.loads(config_cls.describe(output_format="json"))
         required_vars = [f["env_var"] for f in spec["fields"] if f["required"]]
         all_required_vars.extend(required_vars)
 
@@ -135,7 +135,7 @@ import os
 import sys
 
 # Get all required variables
-spec = json.loads(AppConfig.describe(format="json"))
+spec = json.loads(AppConfig.describe(output_format="json"))
 required_vars = [f["env_var"] for f in spec["fields"] if f["required"]]
 
 # Check which ones are missing
@@ -154,7 +154,7 @@ print("✓ All required environment variables are set")
     # Example 10: Programmatic Access to Schema
     print("10. Programmatic Access to Configuration Schema")
     print("-" * 80)
-    spec = json.loads(DatabaseConfig.describe(format="json"))
+    spec = json.loads(DatabaseConfig.describe(output_format="json"))
 
     print(f"Configuration class: {spec['class_name']}")
     print(f"Environment prefix: {spec['env_prefix']}")

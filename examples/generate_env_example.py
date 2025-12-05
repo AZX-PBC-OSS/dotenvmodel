@@ -66,7 +66,7 @@ if __name__ == "__main__":
     # Method 3: Using describe() with dotenv format
     print("Method 3: Using describe() with dotenv format (equivalent)")
     print("-" * 80)
-    dotenv_docs = AppConfig.describe(format="dotenv")
+    dotenv_docs = AppConfig.describe(output_format="dotenv")
     print(dotenv_docs)
     print()
 

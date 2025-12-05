@@ -393,7 +393,7 @@ class TestDescribeFormats:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        output = Config.describe(format="table")
+        output = Config.describe(output_format="table")
         assert "+" in output  # Table borders
         assert "|" in output  # Table columns
         assert "Config" in output
@@ -404,7 +404,7 @@ class TestDescribeFormats:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        output = Config.describe(format="markdown")
+        output = Config.describe(output_format="markdown")
         assert "## Config" in output
         assert "|" in output
         assert "---" in output or "|-" in output
@@ -415,7 +415,7 @@ class TestDescribeFormats:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        output = Config.describe(format="json")
+        output = Config.describe(output_format="json")
         data = json.loads(output)
         assert "class_name" in data
         assert data["class_name"] == "Config"
@@ -430,7 +430,7 @@ class TestDescribeFormats:
                 description="This is a very long description that should not be truncated in JSON format"
             )
 
-        output = Config.describe(format="json")
+        output = Config.describe(output_format="json")
         data = json.loads(output)
         assert "should not be truncated" in data["fields"][0]["description"]
 
@@ -440,8 +440,8 @@ class TestDescribeFormats:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        with pytest.raises(ValueError, match="Unknown format"):
-            Config.describe(format="xml")  # type: ignore
+        with pytest.raises(ValueError, match="Unknown output_format"):
+            Config.describe(output_format="xml")  # type: ignore
 
 
 class TestDescribeConfigs:
@@ -471,7 +471,7 @@ class TestDescribeConfigs:
         class DbConfig(DotEnvConfig):
             db_url: str = Field()
 
-        output = describe_configs([AppConfig, DbConfig], format="json")
+        output = describe_configs([AppConfig, DbConfig], output_format="json")
         data = json.loads(output)
         assert isinstance(data, list)
         assert len(data) == 2
@@ -537,7 +537,7 @@ class TestEdgeCases:
                 description="This is a very long description that should be truncated when displayed in table format to avoid overwhelming the output"
             )
 
-        output = Config.describe(format="table")
+        output = Config.describe(output_format="table")
         # Should be truncated with "..."
         assert "..." in output
 
@@ -549,7 +549,7 @@ class TestEdgeCases:
                 description="This is a very long description that should not be truncated in JSON format because JSON can handle full-length content"
             )
 
-        output = Config.describe(format="json")
+        output = Config.describe(output_format="json")
         data = json.loads(output)
         # Full description should be present
         assert "should not be truncated in JSON format" in data["fields"][0]["description"]
@@ -773,7 +773,7 @@ class TestSecretStrMasking:
             api_key: SecretStr = Field(default=SecretStr("my-secret"))
 
         for fmt in ["table", "markdown", "json"]:
-            output = Config.describe(format=fmt)
+            output = Config.describe(output_format=fmt)
             assert "<secret>" in output or '"<secret>"' in output
             assert "my-secret" not in output
 
@@ -783,7 +783,7 @@ class TestSecretStrMasking:
         class Config(DotEnvConfig):
             password: SecretStr = Field(default=SecretStr("password123"))
 
-        output = Config.describe(format="table")
+        output = Config.describe(output_format="table")
         assert "<secret>" in output
         assert "password123" not in output
         # Ensure table structure is intact
@@ -796,7 +796,7 @@ class TestSecretStrMasking:
         class Config(DotEnvConfig):
             token: SecretStr = Field(default=SecretStr("secret-token"))
 
-        output = Config.describe(format="markdown")
+        output = Config.describe(output_format="markdown")
         assert "`<secret>`" in output
         assert "secret-token" not in output
         # Ensure markdown structure is intact
@@ -809,7 +809,7 @@ class TestSecretStrMasking:
         class Config(DotEnvConfig):
             api_secret: SecretStr = Field(default=SecretStr("secret-value"))
 
-        output = Config.describe(format="json")
+        output = Config.describe(output_format="json")
         data = json.loads(output)
         assert data["fields"][0]["default"] == "<secret>"
         assert "secret-value" not in output
@@ -919,7 +919,7 @@ class TestNewFormats:
             port: int = Field(default=8000, description="Server port")
             debug: bool = Field(default=False)
 
-        output = Config.describe(format="html")
+        output = Config.describe(output_format="html")
 
         # Verify HTML structure
         assert "<!DOCTYPE html>" in output
@@ -940,7 +940,7 @@ class TestNewFormats:
             env_prefix = "APP_"
             port: int = Field(default=8000)
 
-        output = Config.describe(format="html")
+        output = Config.describe(output_format="html")
 
         assert "APP_" in output
         assert "prefix" in output
@@ -951,7 +951,7 @@ class TestNewFormats:
         class Config(DotEnvConfig):
             field: str = Field(description="Description with <tags> & special chars")
 
-        output = Config.describe(format="html")
+        output = Config.describe(output_format="html")
 
         # Should be escaped
         assert "&lt;tags&gt;" in output
@@ -965,7 +965,7 @@ class TestNewFormats:
         class Config(DotEnvConfig):
             password: SecretStr = Field(default=SecretStr("secret"))
 
-        output = Config.describe(format="html")
+        output = Config.describe(output_format="html")
 
         assert "&lt;secret&gt;" in output
         # Check for secret class (may be combined with other classes)
@@ -980,7 +980,7 @@ class TestNewFormats:
             port: int = Field(default=8000, description="Server port")
             api_key: str = Field(description="API key")
 
-        output = Config.describe(format="dotenv")
+        output = Config.describe(output_format="dotenv")
 
         # Verify header
         assert "# Configuration for Config" in output
@@ -1004,7 +1004,7 @@ class TestNewFormats:
             required_field: str = Required
             optional_field: str = Field(default="default_value")
 
-        output = Config.describe(format="dotenv")
+        output = Config.describe(output_format="dotenv")
 
         # Required field should be uncommented (no value)
         assert "\nREQUIRED_FIELD=\n" in output
@@ -1019,7 +1019,7 @@ class TestNewFormats:
             env_prefix = "APP_"
             port: int = Field(default=8000)
 
-        output = Config.describe(format="dotenv")
+        output = Config.describe(output_format="dotenv")
 
         assert "# All variables prefixed with: APP_" in output
         assert "APP_PORT=" in output
@@ -1030,7 +1030,7 @@ class TestNewFormats:
         class Config(DotEnvConfig):
             password: SecretStr = Field(default=SecretStr("my_actual_secret"))
 
-        output = Config.describe(format="dotenv")
+        output = Config.describe(output_format="dotenv")
 
         # Secret should be commented with placeholder
         assert "# PASSWORD=your_secret_here" in output
@@ -1043,7 +1043,7 @@ class TestNewFormats:
         class Config(DotEnvConfig):
             port: int = Field(default=8000, ge=1, le=65535)
 
-        output = Config.describe(format="dotenv")
+        output = Config.describe(output_format="dotenv")
 
         assert "# Type: int | Constraints: ge=1, le=65535" in output
 
@@ -1058,7 +1058,7 @@ class TestFileExport:
             port: int = Field(default=8000)
 
         output_file = tmp_path / "config.md"
-        result = Config.describe(format="markdown", output=str(output_file))
+        result = Config.describe(output_format="markdown", output=str(output_file))
 
         # File should exist
         assert output_file.exists()
@@ -1099,7 +1099,9 @@ class TestFileExport:
             url: str = Field()
 
         output_file = tmp_path / "configs.md"
-        result = describe_configs([Config1, Config2], format="markdown", output=str(output_file))
+        result = describe_configs(
+            [Config1, Config2], output_format="markdown", output=str(output_file)
+        )
 
         assert output_file.exists()
         assert "Config1" in result
@@ -1112,7 +1114,7 @@ class TestFileExport:
             port: int = Field(default=8000)
 
         output_file = tmp_path / "config.html"
-        result = Config.describe(format="html", output=str(output_file))
+        result = Config.describe(output_format="html", output=str(output_file))
 
         assert output_file.exists()
         assert "<!DOCTYPE html>" in result
@@ -1275,7 +1277,7 @@ class TestGenerateEnvExample:
             debug: bool = Field(default=False)
 
         env_example = Config.generate_env_example()
-        dotenv_format = Config.describe(format="dotenv")
+        dotenv_format = Config.describe(output_format="dotenv")
 
         # Should be identical
         assert env_example == dotenv_format
@@ -1291,7 +1293,7 @@ class TestLineEndings:
             port: int = Field(default=8000)
             debug: bool = Field(default=False)
 
-        output = Config.describe(format="table", line_ending="\n")
+        output = Config.describe(output_format="table", line_ending="\n")
 
         # Should contain Unix line endings
         assert "\n" in output
@@ -1305,7 +1307,7 @@ class TestLineEndings:
             port: int = Field(default=8000)
             debug: bool = Field(default=False)
 
-        output = Config.describe(format="table", line_ending="\r\n")
+        output = Config.describe(output_format="table", line_ending="\r\n")
 
         # Should contain Windows line endings
         assert "\r\n" in output
@@ -1317,7 +1319,7 @@ class TestLineEndings:
             port: int = Field(default=8000)
             debug: bool = Field(default=False)
 
-        output = Config.describe(format="table", line_ending="\r")
+        output = Config.describe(output_format="table", line_ending="\r")
 
         # Should contain carriage returns
         assert "\r" in output
@@ -1331,7 +1333,7 @@ class TestLineEndings:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        output = Config.describe(format="table", line_ending=None)
+        output = Config.describe(output_format="table", line_ending=None)
 
         # Should use platform default
         assert os.linesep in output
@@ -1342,7 +1344,7 @@ class TestLineEndings:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        output = Config.describe(format="table", line_ending="\r\n")
+        output = Config.describe(output_format="table", line_ending="\r\n")
 
         assert "\r\n" in output
         assert "PORT" in output
@@ -1353,7 +1355,7 @@ class TestLineEndings:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        output = Config.describe(format="markdown", line_ending="\r\n")
+        output = Config.describe(output_format="markdown", line_ending="\r\n")
 
         assert "\r\n" in output
         assert "## Config" in output
@@ -1366,7 +1368,7 @@ class TestLineEndings:
 
         # JSON internally uses \n for formatting, but the custom line ending
         # is applied to the final result
-        output = Config.describe(format="json", line_ending="\r\n")
+        output = Config.describe(output_format="json", line_ending="\r\n")
 
         # JSON should be parseable
         data = json.loads(output)
@@ -1381,7 +1383,7 @@ class TestLineEndings:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        output = Config.describe(format="html", line_ending="\r\n")
+        output = Config.describe(output_format="html", line_ending="\r\n")
 
         assert "\r\n" in output
         assert "<!DOCTYPE html>" in output
@@ -1392,7 +1394,7 @@ class TestLineEndings:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        output = Config.describe(format="dotenv", line_ending="\r\n")
+        output = Config.describe(output_format="dotenv", line_ending="\r\n")
 
         assert "\r\n" in output
         assert "PORT=" in output
@@ -1406,7 +1408,7 @@ class TestLineEndings:
         class Config2(DotEnvConfig):
             debug: bool = Field(default=False)
 
-        output = describe_configs([Config1, Config2], format="markdown", line_ending="\r\n")
+        output = describe_configs([Config1, Config2], output_format="markdown", line_ending="\r\n")
 
         # Should use Windows line endings
         assert "\r\n" in output
@@ -1428,7 +1430,9 @@ class TestLineEndings:
             debug: bool = Field(default=False)
 
         output_file = tmp_path / "test_output.md"
-        result = Config.describe(format="markdown", line_ending="\r\n", output=str(output_file))
+        result = Config.describe(
+            output_format="markdown", line_ending="\r\n", output=str(output_file)
+        )
 
         # File should exist
         assert output_file.exists()
@@ -1452,12 +1456,16 @@ class TestLineEndings:
             url: str = Field()
 
         # Test with Unix line endings
-        output_unix = describe_configs([AppConfig, DbConfig], format="table", line_ending="\n")
+        output_unix = describe_configs(
+            [AppConfig, DbConfig], output_format="table", line_ending="\n"
+        )
         assert "\n" in output_unix
         assert "\r\n" not in output_unix
 
         # Test with Windows line endings
-        output_windows = describe_configs([AppConfig, DbConfig], format="table", line_ending="\r\n")
+        output_windows = describe_configs(
+            [AppConfig, DbConfig], output_format="table", line_ending="\r\n"
+        )
         assert "\r\n" in output_windows
 
     def test_line_endings_with_empty_config(self) -> None:
@@ -1466,7 +1474,7 @@ class TestLineEndings:
         class EmptyConfig(DotEnvConfig):
             pass
 
-        output = EmptyConfig.describe(format="table", line_ending="\r\n")
+        output = EmptyConfig.describe(output_format="table", line_ending="\r\n")
 
         # Should contain custom line endings
         assert "\r\n" in output
@@ -1481,7 +1489,7 @@ class TestLineEndings:
 
         # Test each format with Windows line endings
         for fmt in ["table", "markdown", "html", "dotenv"]:
-            output = Config.describe(format=fmt, line_ending="\r\n")
+            output = Config.describe(output_format=fmt, line_ending="\r\n")
             assert "\r\n" in output, f"Format {fmt} should contain \\r\\n line endings"
 
     def test_unix_line_endings_in_describe_configs_json(self) -> None:
@@ -1493,7 +1501,7 @@ class TestLineEndings:
         class Config2(DotEnvConfig):
             debug: bool = Field(default=False)
 
-        output = describe_configs([Config1, Config2], format="json", line_ending="\n")
+        output = describe_configs([Config1, Config2], output_format="json", line_ending="\n")
 
         # JSON should be parseable
         data = json.loads(output)
@@ -1597,7 +1605,7 @@ class TestComprehensiveIntegration:
             tags: list[str] = Field(default_factory=list)
             password: SecretStr = Field(default=SecretStr("secret"))
 
-        output = ComplexConfig.describe(format="json")
+        output = ComplexConfig.describe(output_format="json")
         data = json.loads(output)
 
         # Verify structure
@@ -1622,7 +1630,7 @@ class TestComprehensiveIntegration:
             api_key: str = Field(description="API key")
             port: int = Field(default=8000)
 
-        output = ComplexConfig.describe(format="markdown")
+        output = ComplexConfig.describe(output_format="markdown")
 
         # Verify markdown structure
         assert "## ComplexConfig" in output
@@ -1676,7 +1684,9 @@ class TestComprehensiveIntegration:
         assert "secret" not in output or output.count("secret") == 1  # Only in field name
 
         # Test JSON format with multiple configs
-        json_output = describe_configs([AppConfig, DatabaseConfig, CacheConfig], format="json")
+        json_output = describe_configs(
+            [AppConfig, DatabaseConfig, CacheConfig], output_format="json"
+        )
         json_data = json.loads(json_output)
 
         assert isinstance(json_data, list)

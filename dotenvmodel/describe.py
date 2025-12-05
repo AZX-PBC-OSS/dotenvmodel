@@ -822,7 +822,7 @@ def render_html(
 
 def describe_single(
     config_cls: type[DotEnvConfig],
-    format: OutputFormat = "table",
+    output_format: OutputFormat = "table",
     output: str | Path | None = None,
     line_ending: str | None = None,
 ) -> str:
@@ -831,7 +831,7 @@ def describe_single(
 
     Args:
         config_cls: The DotEnvConfig subclass to describe
-        format: Output format - "table", "markdown", "json", "html", or "dotenv"
+        output_format: Output format - "table", "markdown", "json", "html", or "dotenv"
         output: Optional file path to save the output to
         line_ending: Line ending to use (e.g., "\\n", "\\r\\n", "\\r").
             If None, uses platform default (os.linesep)
@@ -842,37 +842,37 @@ def describe_single(
     Example:
         ```python
         # Generate markdown and save to file
-        AppConfig.describe(format="markdown", output="docs/config.md")
+        AppConfig.describe(output_format="markdown", output="docs/config.md")
 
         # Generate .env.example file
-        AppConfig.describe(format="dotenv", output=".env.example")
+        AppConfig.describe(output_format="dotenv", output=".env.example")
 
         # Use Unix line endings regardless of platform
-        AppConfig.describe(format="markdown", line_ending="\\n")
+        AppConfig.describe(output_format="markdown", line_ending="\\n")
 
         # Use Windows line endings
-        AppConfig.describe(format="markdown", line_ending="\\r\\n")
+        AppConfig.describe(output_format="markdown", line_ending="\\r\\n")
         ```
     """
     # Use platform default line ending if not specified
     line_ending = line_ending if line_ending is not None else os.linesep
 
     # For JSON and dotenv, don't truncate values
-    truncate = format not in ("json", "dotenv", "html")
+    truncate = output_format not in ("json", "dotenv", "html")
     class_name, prefix, fields = describe_class(config_cls, truncate=truncate)
 
-    if format == "table":
+    if output_format == "table":
         result = render_table(class_name, prefix, fields, line_ending)
-    elif format == "markdown":
+    elif output_format == "markdown":
         result = render_markdown(class_name, prefix, fields, line_ending)
-    elif format == "json":
+    elif output_format == "json":
         result = render_json(class_name, prefix, fields, line_ending)
-    elif format == "html":
+    elif output_format == "html":
         result = render_html(class_name, prefix, fields, line_ending)
-    elif format == "dotenv":
+    elif output_format == "dotenv":
         result = render_dotenv(class_name, prefix, fields, line_ending)
     else:
-        raise ValueError(f"Unknown format: {format}")
+        raise ValueError(f"Unknown output_format: {output_format}")
 
     # Save to file if output path provided
     if output:
@@ -884,7 +884,7 @@ def describe_single(
 
 def describe_configs(
     config_classes: list[type[DotEnvConfig]],
-    format: OutputFormat = "table",
+    output_format: OutputFormat = "table",
     output: str | Path | None = None,
     line_ending: str | None = None,
 ) -> str:
@@ -896,7 +896,7 @@ def describe_configs(
 
     Args:
         config_classes: List of DotEnvConfig subclasses to describe
-        format: Output format - "table", "markdown", "json", "html", or "dotenv"
+        output_format: Output format - "table", "markdown", "json", "html", or "dotenv"
         output: Optional file path to save the output to
         line_ending: Line ending to use (e.g., "\\n", "\\r\\n", "\\r").
             If None, uses platform default (os.linesep)
@@ -907,10 +907,10 @@ def describe_configs(
     Example:
         ```python
         # Generate markdown documentation for all configs
-        describe_configs([AppConfig, DatabaseConfig], format="markdown", output="docs/config.md")
+        describe_configs([AppConfig, DatabaseConfig], output_format="markdown", output="docs/config.md")
 
         # Use Windows line endings
-        describe_configs([AppConfig, DatabaseConfig], format="markdown", line_ending="\\r\\n")
+        describe_configs([AppConfig, DatabaseConfig], output_format="markdown", line_ending="\\r\\n")
         ```
     """
     if not config_classes:
@@ -919,7 +919,7 @@ def describe_configs(
     # Use platform default line ending if not specified
     line_ending = line_ending if line_ending is not None else os.linesep
 
-    if format == "json":
+    if output_format == "json":
         # For JSON, return an array of class descriptions
         results = []
         for cls in config_classes:
@@ -933,11 +933,13 @@ def describe_configs(
         # For table, markdown, html, and dotenv, concatenate sections
         sections = []
         for cls in config_classes:
-            sections.append(describe_single(cls, format=format, line_ending=line_ending))
+            sections.append(
+                describe_single(cls, output_format=output_format, line_ending=line_ending)
+            )
 
-        if format == "table":
+        if output_format == "table":
             separator = line_ending + line_ending
-        elif format in ("markdown", "html"):
+        elif output_format in ("markdown", "html"):
             separator = line_ending + line_ending + "---" + line_ending + line_ending
         else:  # dotenv
             separator = line_ending + line_ending
@@ -960,7 +962,7 @@ def generate_env_example(
     """
     Generate a .env.example file for onboarding new developers.
 
-    This is a convenience function that calls describe_single with format="dotenv".
+    This is a convenience function that calls describe_single with output_format="dotenv".
 
     Args:
         config_cls: The DotEnvConfig subclass to generate example for
@@ -980,4 +982,4 @@ def generate_env_example(
         print(AppConfig.generate_env_example())
         ```
     """
-    return describe_single(config_cls, format="dotenv", output=output)
+    return describe_single(config_cls, output_format="dotenv", output=output)

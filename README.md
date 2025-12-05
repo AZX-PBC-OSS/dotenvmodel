@@ -670,14 +670,14 @@ AppConfig
 **ASCII Table (default)** - Best for terminal output and logging:
 
 ```python
-print(AppConfig.describe(format="table"))
+print(AppConfig.describe(output_format="table"))
 ```
 
 **Markdown** - Perfect for README files and documentation:
 
 ```python
 # Generate markdown documentation
-docs = AppConfig.describe(format="markdown")
+docs = AppConfig.describe(output_format="markdown")
 
 # Save to file
 with open("CONFIG.md", "w") as f:
@@ -690,7 +690,7 @@ with open("CONFIG.md", "w") as f:
 import json
 
 # Get configuration schema as JSON
-config_spec = AppConfig.describe(format="json")
+config_spec = AppConfig.describe(output_format="json")
 data = json.loads(config_spec)
 
 # Use for validation, code generation, etc.
@@ -702,7 +702,7 @@ print(data["fields"][0]["env_var"])  # "DATABASE_URL"
 
 ```python
 # Generate HTML with styled tables
-html_docs = AppConfig.describe(format="html")
+html_docs = AppConfig.describe(output_format="html")
 
 # Save to file
 with open("config.html", "w") as f:
@@ -713,7 +713,7 @@ with open("config.html", "w") as f:
 
 ```python
 # Generate .env.example format
-dotenv_docs = AppConfig.describe(format="dotenv")
+dotenv_docs = AppConfig.describe(output_format="dotenv")
 print(dotenv_docs)
 ```
 
@@ -723,13 +723,13 @@ Save documentation directly to files using the `output` parameter:
 
 ```python
 # Save as markdown
-AppConfig.describe(format="markdown", output="docs/config.md")
+AppConfig.describe(output_format="markdown", output="docs/config.md")
 
 # Save as HTML
-AppConfig.describe(format="html", output="docs/config.html")
+AppConfig.describe(output_format="html", output="docs/config.html")
 
 # Save as JSON
-AppConfig.describe(format="json", output="config-schema.json")
+AppConfig.describe(output_format="json", output="config-schema.json")
 ```
 
 ### Generate `.env.example` Files
@@ -826,7 +826,7 @@ class RedisConfig(DotEnvConfig):
     port: int = Field(default=6379, description="Redis port")
 
 # Generate documentation for all configs
-all_docs = describe_configs([DatabaseConfig, RedisConfig], format="markdown")
+all_docs = describe_configs([DatabaseConfig, RedisConfig], output_format="markdown")
 print(all_docs)
 ```
 
@@ -856,7 +856,7 @@ import json
 import os
 
 # Get required environment variables from config schema
-spec = json.loads(AppConfig.describe(format="json"))
+spec = json.loads(AppConfig.describe(output_format="json"))
 required_vars = [f["env_var"] for f in spec["fields"] if f["required"]]
 
 # Validate all required vars are set
@@ -889,10 +889,10 @@ from dotenvmodel import describe_configs
 configs = [AppConfig, DatabaseConfig, RedisConfig, CacheConfig]
 
 # Save as markdown
-describe_configs(configs, format="markdown", output="docs/configuration.md")
+describe_configs(configs, output_format="markdown", output="docs/configuration.md")
 
 # Or generate HTML version with styling
-describe_configs(configs, format="html", output="docs/configuration.html")
+describe_configs(configs, output_format="html", output="docs/configuration.html")
 ```
 
 **5. Build Tool Integration:**
@@ -905,10 +905,10 @@ from your_app.config import AppConfig, DatabaseConfig
 AppConfig.generate_env_example(output=".env.example")
 
 # Generate markdown docs
-AppConfig.describe(format="markdown", output="docs/CONFIG.md")
+AppConfig.describe(output_format="markdown", output="docs/CONFIG.md")
 
 # Generate HTML for internal wiki
-AppConfig.describe(format="html", output="docs/config.html")
+AppConfig.describe(output_format="html", output="docs/config.html")
 
 print("✓ Configuration documentation generated")
 ```
