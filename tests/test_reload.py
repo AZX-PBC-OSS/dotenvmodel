@@ -1,6 +1,5 @@
 """Tests for config reload functionality."""
 
-
 import pytest
 
 from dotenvmodel import DotEnvConfig, Field, MissingFieldError

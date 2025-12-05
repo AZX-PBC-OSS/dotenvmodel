@@ -37,9 +37,7 @@ class TestHttpUrl:
         class Config(DotEnvConfig):
             webhook_url: HttpUrl = Field()
 
-        config = Config.load_from_dict(
-            {"WEBHOOK_URL": "https://example.com/webhook?token=abc123"}
-        )
+        config = Config.load_from_dict({"WEBHOOK_URL": "https://example.com/webhook?token=abc123"})
         assert config.webhook_url.query == "token=abc123"
 
     def test_http_url_invalid_scheme(self) -> None:
@@ -102,9 +100,7 @@ class TestPostgresDsn:
         class Config(DotEnvConfig):
             database_url: PostgresDsn = Field()
 
-        config = Config.load_from_dict(
-            {"DATABASE_URL": "postgres://user:pass@localhost/mydb"}
-        )
+        config = Config.load_from_dict({"DATABASE_URL": "postgres://user:pass@localhost/mydb"})
         assert config.database_url.scheme == "postgres"
         assert config.database_url.port == 5432  # Default port
         assert config.database_url.database == "mydb"
@@ -246,10 +242,12 @@ class TestUrlDsnProperties:
             db1: PostgresDsn = Field()
             db2: PostgresDsn = Field()
 
-        config = Config.load_from_dict({
-            "DB1": "postgresql://localhost/mydb",
-            "DB2": "postgresql://localhost/",
-        })
+        config = Config.load_from_dict(
+            {
+                "DB1": "postgresql://localhost/mydb",
+                "DB2": "postgresql://localhost/",
+            }
+        )
 
         assert config.db1.database == "mydb"
         assert config.db2.database == ""
@@ -262,11 +260,13 @@ class TestUrlDsnProperties:
             redis2: RedisDsn = Field()
             redis3: RedisDsn = Field()
 
-        config = Config.load_from_dict({
-            "REDIS1": "redis://localhost/5",
-            "REDIS2": "redis://localhost/",
-            "REDIS3": "redis://localhost",
-        })
+        config = Config.load_from_dict(
+            {
+                "REDIS1": "redis://localhost/5",
+                "REDIS2": "redis://localhost/",
+                "REDIS3": "redis://localhost",
+            }
+        )
 
         assert config.redis1.database == 5
         assert config.redis2.database == 0

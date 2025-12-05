@@ -16,10 +16,12 @@ class TestEnvPrefix:
             database_url: str = Field()
             api_key: str = Field()
 
-        config = AppConfig.load_from_dict({
-            "APP_DATABASE_URL": "postgresql://localhost/db",
-            "APP_API_KEY": "secret123",
-        })
+        config = AppConfig.load_from_dict(
+            {
+                "APP_DATABASE_URL": "postgresql://localhost/db",
+                "APP_API_KEY": "secret123",
+            }
+        )
 
         assert config.database_url == "postgresql://localhost/db"
         assert config.api_key == "secret123"
@@ -38,10 +40,12 @@ class TestEnvPrefix:
         assert config.port == 8000
 
         # Override with prefixed env vars
-        config = Config.load_from_dict({
-            "MY_DEBUG": "true",
-            "MY_PORT": "3000",
-        })
+        config = Config.load_from_dict(
+            {
+                "MY_DEBUG": "true",
+                "MY_PORT": "3000",
+            }
+        )
         assert config.debug is True
         assert config.port == 3000
 
@@ -55,10 +59,12 @@ class TestEnvPrefix:
             # Regular field should get prefix
             api_key: str = Field()
 
-        config = Config.load_from_dict({
-            "DATABASE_URL": "postgresql://localhost/db",  # No prefix!
-            "APP_API_KEY": "secret123",  # With prefix
-        })
+        config = Config.load_from_dict(
+            {
+                "DATABASE_URL": "postgresql://localhost/db",  # No prefix!
+                "APP_API_KEY": "secret123",  # With prefix
+            }
+        )
 
         assert config.db_url == "postgresql://localhost/db"
         assert config.api_key == "secret123"
@@ -71,10 +77,12 @@ class TestEnvPrefix:
             database_url: str = Field()
             api_key: str = Field()
 
-        config = Config.load_from_dict({
-            "DATABASE_URL": "postgresql://localhost/db",
-            "API_KEY": "secret123",
-        })
+        config = Config.load_from_dict(
+            {
+                "DATABASE_URL": "postgresql://localhost/db",
+                "API_KEY": "secret123",
+            }
+        )
 
         assert config.database_url == "postgresql://localhost/db"
         assert config.api_key == "secret123"
@@ -86,9 +94,11 @@ class TestEnvPrefix:
             env_prefix = ""  # Explicit empty prefix
             database_url: str = Field()
 
-        config = Config.load_from_dict({
-            "DATABASE_URL": "postgresql://localhost/db",
-        })
+        config = Config.load_from_dict(
+            {
+                "DATABASE_URL": "postgresql://localhost/db",
+            }
+        )
 
         assert config.database_url == "postgresql://localhost/db"
 
@@ -100,10 +110,12 @@ class TestEnvPrefix:
             host: str = Field()
             port: int = Field()
 
-        config = Config.load_from_dict({
-            "MYAPP_HOST": "localhost",
-            "MYAPP_PORT": "8080",
-        })
+        config = Config.load_from_dict(
+            {
+                "MYAPP_HOST": "localhost",
+                "MYAPP_PORT": "8080",
+            }
+        )
 
         assert config.host == "localhost"
         assert config.port == 8080
@@ -115,9 +127,11 @@ class TestEnvPrefix:
             env_prefix = "APP"  # No trailing underscore
             host: str = Field()
 
-        config = Config.load_from_dict({
-            "APPHOST": "localhost",
-        })
+        config = Config.load_from_dict(
+            {
+                "APPHOST": "localhost",
+            }
+        )
 
         assert config.host == "localhost"
 
@@ -134,15 +148,19 @@ class TestEnvPrefix:
             host: str = Field()
             port: int = Field(default=6379)
 
-        db_config = DatabaseConfig.load_from_dict({
-            "DB_HOST": "db.example.com",
-            "DB_PORT": "5433",
-        })
+        db_config = DatabaseConfig.load_from_dict(
+            {
+                "DB_HOST": "db.example.com",
+                "DB_PORT": "5433",
+            }
+        )
 
-        redis_config = RedisConfig.load_from_dict({
-            "REDIS_HOST": "redis.example.com",
-            "REDIS_PORT": "6380",
-        })
+        redis_config = RedisConfig.load_from_dict(
+            {
+                "REDIS_HOST": "redis.example.com",
+                "REDIS_PORT": "6380",
+            }
+        )
 
         assert db_config.host == "db.example.com"
         assert db_config.port == 5433
@@ -156,9 +174,11 @@ class TestEnvPrefix:
             env_prefix = "APP_"
             port: int = Field(ge=1, le=65535)
 
-        config = Config.load_from_dict({
-            "APP_PORT": "8080",
-        })
+        config = Config.load_from_dict(
+            {
+                "APP_PORT": "8080",
+            }
+        )
 
         assert config.port == 8080
 
@@ -166,9 +186,11 @@ class TestEnvPrefix:
         from dotenvmodel import ConstraintViolationError
 
         with pytest.raises(ConstraintViolationError):
-            Config.load_from_dict({
-                "APP_PORT": "99999",
-            })
+            Config.load_from_dict(
+                {
+                    "APP_PORT": "99999",
+                }
+            )
 
     def test_prefix_with_collections(self) -> None:
         """Test prefix with collection types."""
@@ -178,10 +200,12 @@ class TestEnvPrefix:
             allowed_hosts: list[str] = Field()
             tags: set[str] = Field()
 
-        config = Config.load_from_dict({
-            "APP_ALLOWED_HOSTS": "localhost,example.com,*.example.com",
-            "APP_TAGS": "web,api,backend",
-        })
+        config = Config.load_from_dict(
+            {
+                "APP_ALLOWED_HOSTS": "localhost,example.com,*.example.com",
+                "APP_TAGS": "web,api,backend",
+            }
+        )
 
         assert config.allowed_hosts == ["localhost", "example.com", "*.example.com"]
         assert config.tags == {"web", "api", "backend"}
@@ -197,10 +221,12 @@ class TestEnvPrefix:
             tenant_id: UUID = Field()
             database_url: PostgresDsn = Field()
 
-        config = Config.load_from_dict({
-            "APP_TENANT_ID": "550e8400-e29b-41d4-a716-446655440000",
-            "APP_DATABASE_URL": "postgresql://user:pass@localhost:5432/db",
-        })
+        config = Config.load_from_dict(
+            {
+                "APP_TENANT_ID": "550e8400-e29b-41d4-a716-446655440000",
+                "APP_DATABASE_URL": "postgresql://user:pass@localhost:5432/db",
+            }
+        )
 
         assert isinstance(config.tenant_id, UUID)
         assert str(config.tenant_id) == "550e8400-e29b-41d4-a716-446655440000"

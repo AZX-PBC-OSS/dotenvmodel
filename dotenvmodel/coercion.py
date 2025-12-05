@@ -59,9 +59,7 @@ def coerce_value(
     if origin is not None and origin not in (Literal,):
         # This is a generic type like list[str], dict[str, str], etc.
         separator = field_info.separator if field_info else ","
-        return _coerce_generic(
-            field_name, value, field_type, origin, env_var_name, separator
-        )
+        return _coerce_generic(field_name, value, field_type, origin, env_var_name, separator)
 
     # If value is None, return None (empty string handling depends on type)
     if value is None:
@@ -142,9 +140,7 @@ def coerce_value(
                     env_var_name=env_var_name,
                 ) from e
 
-        case type() if hasattr(field_type, "__name__") and field_type.__name__.startswith(
-            "Json["
-        ):
+        case type() if hasattr(field_type, "__name__") and field_type.__name__.startswith("Json["):
             # Handle Json[T] type
             inner_type = getattr(field_type, "__inner_type__", None)
             return dotenv_types.coerce_json(value, field_name, env_var_name, inner_type)
@@ -182,9 +178,7 @@ def _coerce_bool(field_name: str, value: str, env_var_name: str) -> bool:
     )
 
 
-def _coerce_literal(
-    field_name: str, value: str | None, field_type: type, env_var_name: str
-) -> Any:
+def _coerce_literal(field_name: str, value: str | None, field_type: type, env_var_name: str) -> Any:
     """Coerce a value to a Literal type."""
     if value is None:
         raise TypeCoercionError(

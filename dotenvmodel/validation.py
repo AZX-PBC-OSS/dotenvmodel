@@ -7,9 +7,7 @@ from dotenvmodel.exceptions import ConstraintViolationError
 from dotenvmodel.fields import FieldInfo
 
 
-def validate_field(
-    field_name: str, value: Any, field_info: FieldInfo, env_var_name: str
-) -> None:
+def validate_field(field_name: str, value: Any, field_info: FieldInfo, env_var_name: str) -> None:
     """
     Validate a field value against its constraints.
 
@@ -93,9 +91,7 @@ def _validate_numeric(
         )
 
 
-def _validate_string(
-    field_name: str, value: str, field_info: FieldInfo, env_var_name: str
-) -> None:
+def _validate_string(field_name: str, value: str, field_info: FieldInfo, env_var_name: str) -> None:
     """Validate string constraints (min_length, max_length, regex)."""
     if field_info.min_length is not None and len(value) < field_info.min_length:
         raise ConstraintViolationError(

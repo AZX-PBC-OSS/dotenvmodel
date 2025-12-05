@@ -33,18 +33,20 @@ class AppConfig(DotEnvConfig):
 if __name__ == "__main__":
     # Load configuration from environment
     try:
-        config = AppConfig.load_from_dict({
-            "DATABASE_URL": "postgresql://localhost/myapp",
-            "API_KEY": "secret-key-123",
-            "DEBUG": "true",
-            "PORT": "3000",
-            "WORKERS": "8",
-            "ALLOWED_HOSTS": "localhost,example.com,*.example.com",
-            "TAGS": "web;api;backend",
-            "POOL_SIZE": "25",
-            "TIMEOUT": "60.5",
-            "ENV": "dev",
-        })
+        config = AppConfig.load_from_dict(
+            {
+                "DATABASE_URL": "postgresql://localhost/myapp",
+                "API_KEY": "secret-key-123",
+                "DEBUG": "true",
+                "PORT": "3000",
+                "WORKERS": "8",
+                "ALLOWED_HOSTS": "localhost,example.com,*.example.com",
+                "TAGS": "web;api;backend",
+                "POOL_SIZE": "25",
+                "TIMEOUT": "60.5",
+                "ENV": "dev",
+            }
+        )
 
         print("Configuration loaded successfully!")
         print(f"Database URL: {config.database_url}")

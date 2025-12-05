@@ -32,9 +32,7 @@ def _is_optional_type(field_type: type) -> bool:
 class ConfigMeta(type):
     """Metaclass for DotEnvConfig that discovers field definitions."""
 
-    def __new__(
-        mcs, name: str, bases: tuple[type, ...], namespace: dict[str, Any]
-    ) -> type:
+    def __new__(mcs, name: str, bases: tuple[type, ...], namespace: dict[str, Any]) -> type:
         # Get type hints for the class
         hints = namespace.get("__annotations__", {})
 
@@ -163,9 +161,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 value = field_info.get_default()
         else:
             # Coerce the string value to the target type
-            value = coerce_value(
-                field_name, raw_value, field_type, env_var_name, field_info
-            )
+            value = coerce_value(field_name, raw_value, field_type, env_var_name, field_info)
 
             # Check if coercion resulted in None for a required field
             if value is None and field_info.required:

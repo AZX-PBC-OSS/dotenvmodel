@@ -91,9 +91,7 @@ def load_env_files(
     return dict(os.environ)
 
 
-def get_env_var(
-    field_name: str, alias: str | None = None, prefix: str | None = None
-) -> str | None:
+def get_env_var(field_name: str, alias: str | None = None, prefix: str | None = None) -> str | None:
     """
     Get environment variable value by field name or alias.
 
@@ -115,9 +113,7 @@ def get_env_var(
     return os.getenv(env_var_name)
 
 
-def get_env_var_name(
-    field_name: str, alias: str | None = None, prefix: str | None = None
-) -> str:
+def get_env_var_name(field_name: str, alias: str | None = None, prefix: str | None = None) -> str:
     """
     Get the environment variable name for a field.
 

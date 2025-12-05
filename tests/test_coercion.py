@@ -102,9 +102,7 @@ class TestCoerceValue:
 
     def test_coerce_datetime_type(self) -> None:
         """Test coercing to datetime type."""
-        result = coerce_value(
-            "test_field", "2024-01-15T10:30:00", datetime, "TEST_FIELD"
-        )
+        result = coerce_value("test_field", "2024-01-15T10:30:00", datetime, "TEST_FIELD")
         assert isinstance(result, datetime)
 
     def test_coerce_timedelta_type(self) -> None:
@@ -150,9 +148,7 @@ class TestCoerceValue:
 
     def test_coerce_dict_str_str(self) -> None:
         """Test coercing to dict[str, str]."""
-        result = coerce_value(
-            "test_field", "key1=val1,key2=val2", dict[str, str], "TEST_FIELD"
-        )
+        result = coerce_value("test_field", "key1=val1,key2=val2", dict[str, str], "TEST_FIELD")
         assert result == {"key1": "val1", "key2": "val2"}
 
     def test_coerce_literal_type(self) -> None:
@@ -178,9 +174,7 @@ class TestCoerceValue:
 
     def test_coerce_http_url_type(self) -> None:
         """Test coercing to HttpUrl type."""
-        result = coerce_value(
-            "test_field", "https://example.com", HttpUrl, "TEST_FIELD"
-        )
+        result = coerce_value("test_field", "https://example.com", HttpUrl, "TEST_FIELD")
         assert isinstance(result, HttpUrl)
 
     def test_coerce_http_url_invalid(self) -> None:
@@ -218,9 +212,7 @@ class TestCoerceValue:
 
     def test_coerce_json_type(self) -> None:
         """Test coercing to Json type."""
-        result = coerce_value(
-            "test_field", '{"key": "value"}', Json[dict], "TEST_FIELD"
-        )
+        result = coerce_value("test_field", '{"key": "value"}', Json[dict], "TEST_FIELD")
         assert result == {"key": "value"}
 
 
@@ -258,9 +250,7 @@ class TestCoerceLiteral:
 
     def test_coerce_literal_valid_value(self) -> None:
         """Test coercing valid literal value."""
-        result = _coerce_literal(
-            "field", "dev", Literal["dev", "staging", "prod"], "ENV_VAR"
-        )
+        result = _coerce_literal("field", "dev", Literal["dev", "staging", "prod"], "ENV_VAR")
         assert result == "dev"
 
     def test_coerce_literal_invalid_value(self) -> None:
@@ -390,9 +380,7 @@ class TestCoerceDict:
 
     def test_coerce_dict_with_whitespace(self) -> None:
         """Test dict coercion strips whitespace."""
-        result = _coerce_dict(
-            "field", " key1 = val1 , key2 = val2 ", (str, str), "ENV_VAR"
-        )
+        result = _coerce_dict("field", " key1 = val1 , key2 = val2 ", (str, str), "ENV_VAR")
         assert result == {"key1": "val1", "key2": "val2"}
 
     def test_coerce_dict_with_equals_in_value(self) -> None:

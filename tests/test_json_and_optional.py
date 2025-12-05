@@ -22,9 +22,7 @@ class TestJsonType:
         class Config(DotEnvConfig):
             feature_flags: Json[dict[str, bool]] = Field()
 
-        config = Config.load_from_dict(
-            {"FEATURE_FLAGS": '{"new_ui": true, "beta_api": false}'}
-        )
+        config = Config.load_from_dict({"FEATURE_FLAGS": '{"new_ui": true, "beta_api": false}'})
         assert config.feature_flags == {"new_ui": True, "beta_api": False}
         assert isinstance(config.feature_flags, dict)
 

@@ -15,9 +15,7 @@ class TestJsonType:
         class Config(DotEnvConfig):
             feature_flags: Json[dict[str, bool]] = Field()
 
-        config = Config.load_from_dict({
-            "FEATURE_FLAGS": '{"new_ui": true, "beta_api": false}'
-        })
+        config = Config.load_from_dict({"FEATURE_FLAGS": '{"new_ui": true, "beta_api": false}'})
 
         assert isinstance(config.feature_flags, dict)
         assert config.feature_flags == {"new_ui": True, "beta_api": False}
@@ -39,9 +37,11 @@ class TestJsonType:
         class Config(DotEnvConfig):
             service_config: Json[dict[str, dict[str, str]]] = Field()
 
-        config = Config.load_from_dict({
-            "SERVICE_CONFIG": '{"api": {"host": "localhost", "port": "8080"}, "db": {"host": "dbserver"}}'
-        })
+        config = Config.load_from_dict(
+            {
+                "SERVICE_CONFIG": '{"api": {"host": "localhost", "port": "8080"}, "db": {"host": "dbserver"}}'
+            }
+        )
 
         assert config.service_config == {
             "api": {"host": "localhost", "port": "8080"},
@@ -65,9 +65,9 @@ class TestJsonType:
         class Config(DotEnvConfig):
             config: Json[dict] = Field()
 
-        config = Config.load_from_dict({
-            "CONFIG": '{"name": "app", "version": 1, "enabled": true, "tags": ["prod", "stable"]}'
-        })
+        config = Config.load_from_dict(
+            {"CONFIG": '{"name": "app", "version": 1, "enabled": true, "tags": ["prod", "stable"]}'}
+        )
 
         assert config.config["name"] == "app"
         assert config.config["version"] == 1
