@@ -2,7 +2,7 @@
 
 import logging
 from pathlib import Path
-from typing import Any, Self, get_args, get_origin, get_type_hints
+from typing import Any, Literal, Self, get_args, get_origin, get_type_hints
 
 from dotenvmodel.coercion import coerce_value
 from dotenvmodel.exceptions import (
@@ -481,3 +481,37 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 value = getattr(self, field_name)
                 field_strs.append(f"{field_name}={value!r}")
         return f"{self.__class__.__name__}({', '.join(field_strs)})"
+
+    @classmethod
+    def describe(
+        cls,
+        format: Literal["table", "markdown", "json"] = "table",
+    ) -> str:
+        """
+        Generate documentation describing this configuration class.
+
+        Shows all environment variables, their types, whether they're required,
+        default values, descriptions, and validation constraints.
+
+        Args:
+            format: Output format - "table" (ASCII), "markdown", or "json"
+
+        Returns:
+            Formatted string describing the configuration
+
+        Example:
+            ```python
+            class AppConfig(DotEnvConfig):
+                port: int = Field(default=8000, ge=1, le=65535, description="Server port")
+                debug: bool = Field(default=False, description="Enable debug mode")
+
+            print(AppConfig.describe())
+            # AppConfig
+            # =========
+            # | ENV Variable | Type | Required | Default | Description | Constraints    |
+            # ...
+            ```
+        """
+        from dotenvmodel.describe import describe_single
+
+        return describe_single(cls, format=format)
