@@ -2,109 +2,107 @@
 
 import pytest
 
-from dotenvmodel import DotEnvConfig, Field
+from dotenvmodel import DotEnvConfig, Field, MissingFieldError
 
 
 class TestCamelToScreamingSnake:
     """Test CamelCase to SCREAMING_SNAKE_CASE conversion."""
 
-    def test_simple_camel_case(self) -> None:
-        """Test simple CamelCase conversion."""
+    @pytest.mark.parametrize(
+        ("input_name", "expected"),
+        [
+            # Simple cases
+            ("Database", "DATABASE"),
+            ("Config", "CONFIG"),
+            ("Settings", "SETTINGS"),
+            # Two words
+            ("DatabaseConfig", "DATABASE_CONFIG"),
+            ("RedisSettings", "REDIS_SETTINGS"),
+            # Multiple words
+            ("MyAppConfig", "MY_APP_CONFIG"),
+            ("MyDatabaseSettings", "MY_DATABASE_SETTINGS"),
+            ("VeryLongClassNameConfig", "VERY_LONG_CLASS_NAME_CONFIG"),
+            # Acronyms (2 chars - stay together)
+            ("DB", "DB"),
+            ("DBConfig", "DB_CONFIG"),
+            ("MyDBConfig", "MY_DB_CONFIG"),
+            # Acronyms (3+ chars - stay together)
+            ("HTTP", "HTTP"),
+            ("HTTPConfig", "HTTP_CONFIG"),
+            ("HTTPServerConfig", "HTTP_SERVER_CONFIG"),
+            ("MyHTTPServerConfig", "MY_HTTP_SERVER_CONFIG"),
+            ("API", "API"),
+            ("APIConfig", "API_CONFIG"),
+            ("AWSConfig", "AWS_CONFIG"),
+            ("AWSLambdaConfig", "AWS_LAMBDA_CONFIG"),
+            # Numbers
+            ("OAuth2Config", "OAUTH2_CONFIG"),
+            ("V2Config", "V2_CONFIG"),
+            ("Config2", "CONFIG2"),
+            ("My2ndConfig", "MY2ND_CONFIG"),
+            ("S3Config", "S3_CONFIG"),
+            ("EC2Config", "EC2_CONFIG"),
+            # Edge cases
+            ("", ""),
+            ("A", "A"),
+            ("Ab", "AB"),
+            ("AB", "AB"),
+            ("ABc", "ABC"),  # Short sequences don't split (need 2+ uppercase before split)
+            ("ABCd", "AB_CD"),  # 3 uppercase before uppercase+lowercase -> split
+            ("XMLParser", "XML_PARSER"),
+            ("parseXML", "PARSE_XML"),
+            ("getHTTPResponse", "GET_HTTP_RESPONSE"),
+        ],
+    )
+    def test_camel_to_screaming_snake(self, input_name: str, expected: str) -> None:
+        """Test CamelCase to SCREAMING_SNAKE_CASE conversion."""
         from dotenvmodel.prefix import camel_to_screaming_snake
 
-        assert camel_to_screaming_snake("Database") == "DATABASE"
-        assert camel_to_screaming_snake("DatabaseConfig") == "DATABASE_CONFIG"
-        assert camel_to_screaming_snake("MyAppConfig") == "MY_APP_CONFIG"
-
-    def test_acronyms_stay_together(self) -> None:
-        """Test that acronyms like DB, HTTP stay together."""
-        from dotenvmodel.prefix import camel_to_screaming_snake
-
-        assert camel_to_screaming_snake("DB") == "DB"
-        assert camel_to_screaming_snake("DBConfig") == "DB_CONFIG"
-        assert camel_to_screaming_snake("HTTP") == "HTTP"
-        assert camel_to_screaming_snake("HTTPConfig") == "HTTP_CONFIG"
-        assert camel_to_screaming_snake("HTTPServerConfig") == "HTTP_SERVER_CONFIG"
-
-    def test_acronym_in_middle(self) -> None:
-        """Test acronyms in the middle of the name."""
-        from dotenvmodel.prefix import camel_to_screaming_snake
-
-        assert camel_to_screaming_snake("MyDBConfig") == "MY_DB_CONFIG"
-        assert camel_to_screaming_snake("MyHTTPServerConfig") == "MY_HTTP_SERVER_CONFIG"
-
-    def test_numbers(self) -> None:
-        """Test names with numbers."""
-        from dotenvmodel.prefix import camel_to_screaming_snake
-
-        assert camel_to_screaming_snake("OAuth2Config") == "OAUTH2_CONFIG"
-        assert camel_to_screaming_snake("V2Config") == "V2_CONFIG"
-        assert camel_to_screaming_snake("Config2") == "CONFIG2"
-
-    def test_single_word(self) -> None:
-        """Test single word names."""
-        from dotenvmodel.prefix import camel_to_screaming_snake
-
-        assert camel_to_screaming_snake("Config") == "CONFIG"
-        assert camel_to_screaming_snake("Database") == "DATABASE"
-        assert camel_to_screaming_snake("Settings") == "SETTINGS"
-
-    def test_empty_string(self) -> None:
-        """Test empty string."""
-        from dotenvmodel.prefix import camel_to_screaming_snake
-
-        assert camel_to_screaming_snake("") == ""
-
-    def test_already_uppercase(self) -> None:
-        """Test already uppercase strings."""
-        from dotenvmodel.prefix import camel_to_screaming_snake
-
-        assert camel_to_screaming_snake("DB") == "DB"
-        assert camel_to_screaming_snake("HTTP") == "HTTP"
-        assert camel_to_screaming_snake("API") == "API"
+        assert camel_to_screaming_snake(input_name) == expected
 
 
 class TestDerivePrefixFromClassName:
     """Test prefix derivation from class names."""
 
-    def test_single_word_no_prefix(self) -> None:
-        """Test single-word class names have no prefix."""
+    @pytest.mark.parametrize(
+        ("class_name", "expected_prefix"),
+        [
+            # Single word - no prefix
+            ("Config", ""),
+            ("Settings", ""),
+            ("Database", ""),
+            ("Options", ""),
+            # Two words - first word as prefix
+            ("DatabaseConfig", "DATABASE"),
+            ("RedisSettings", "REDIS"),
+            ("AppConfiguration", "APP"),
+            ("ServerOptions", "SERVER"),
+            # Multiple words - all but last
+            ("MyAppConfig", "MY_APP"),
+            ("HTTPServerConfig", "HTTP_SERVER"),
+            ("MyDatabaseSettings", "MY_DATABASE"),
+            ("AWSLambdaConfiguration", "AWS_LAMBDA"),
+            # Acronyms
+            ("DBConfig", "DB"),
+            ("HTTPConfig", "HTTP"),
+            ("AWSConfig", "AWS"),
+            ("APISettings", "API"),
+            ("S3Config", "S3"),
+            # Numbers
+            ("OAuth2Config", "OAUTH2"),
+            ("V2Settings", "V2"),
+            ("EC2Config", "EC2"),
+            # Edge cases
+            ("", ""),
+            ("A", ""),  # Single char = single word
+            ("AB", ""),  # Acronym = single word
+        ],
+    )
+    def test_derive_prefix(self, class_name: str, expected_prefix: str) -> None:
+        """Test prefix derivation from class names."""
         from dotenvmodel.prefix import derive_prefix_from_class_name
 
-        assert derive_prefix_from_class_name("Config") == ""
-        assert derive_prefix_from_class_name("Database") == ""
-        assert derive_prefix_from_class_name("Settings") == ""
-
-    def test_two_word_class_name(self) -> None:
-        """Test two-word class names use first word as prefix."""
-        from dotenvmodel.prefix import derive_prefix_from_class_name
-
-        assert derive_prefix_from_class_name("DatabaseConfig") == "DATABASE"
-        assert derive_prefix_from_class_name("RedisSettings") == "REDIS"
-        assert derive_prefix_from_class_name("AppConfiguration") == "APP"
-
-    def test_multi_word_class_name(self) -> None:
-        """Test multi-word class names use all but last word as prefix."""
-        from dotenvmodel.prefix import derive_prefix_from_class_name
-
-        assert derive_prefix_from_class_name("MyAppConfig") == "MY_APP"
-        assert derive_prefix_from_class_name("HTTPServerConfig") == "HTTP_SERVER"
-        assert derive_prefix_from_class_name("MyDatabaseSettings") == "MY_DATABASE"
-
-    def test_acronym_prefix(self) -> None:
-        """Test acronym class names."""
-        from dotenvmodel.prefix import derive_prefix_from_class_name
-
-        assert derive_prefix_from_class_name("DBConfig") == "DB"
-        assert derive_prefix_from_class_name("HTTPConfig") == "HTTP"
-        assert derive_prefix_from_class_name("AWSConfig") == "AWS"
-
-    def test_numbers_in_name(self) -> None:
-        """Test class names with numbers."""
-        from dotenvmodel.prefix import derive_prefix_from_class_name
-
-        assert derive_prefix_from_class_name("OAuth2Config") == "OAUTH2"
-        assert derive_prefix_from_class_name("V2Settings") == "V2"
+        assert derive_prefix_from_class_name(class_name) == expected_prefix
 
 
 class TestAutoPrefixIntegration:
@@ -228,24 +226,35 @@ class TestAutoPrefixIntegration:
 class TestAutoPrefixWithUnderscore:
     """Test that underscore is auto-inserted between prefix and field."""
 
-    def test_prefix_without_trailing_underscore(self) -> None:
-        """Test prefix without trailing underscore still works."""
+    @pytest.mark.parametrize(
+        ("prefix", "expected_env_var"),
+        [
+            ("APP", "APP_HOST"),
+            ("APP_", "APP_HOST"),
+            ("MY_APP", "MY_APP_HOST"),
+            ("MY_APP_", "MY_APP_HOST"),
+            ("DB", "DB_HOST"),
+            ("DB_", "DB_HOST"),
+        ],
+    )
+    def test_underscore_handling(self, prefix: str, expected_env_var: str) -> None:
+        """Test underscore is auto-inserted correctly."""
 
         class Config(DotEnvConfig):
-            env_prefix = "APP"  # No trailing underscore
             host: str = Field()
 
-        config = Config.load_from_dict({"APP_HOST": "localhost"})
+        Config.env_prefix = prefix
+        config = Config.load_from_dict({expected_env_var: "localhost"})
         assert config.host == "localhost"
 
-    def test_prefix_with_trailing_underscore(self) -> None:
-        """Test prefix with trailing underscore doesn't double up."""
+    def test_empty_prefix_no_underscore(self) -> None:
+        """Test empty prefix doesn't add leading underscore."""
 
         class Config(DotEnvConfig):
-            env_prefix = "APP_"  # With trailing underscore
+            env_prefix = ""
             host: str = Field()
 
-        config = Config.load_from_dict({"APP_HOST": "localhost"})
+        config = Config.load_from_dict({"HOST": "localhost"})
         assert config.host == "localhost"
 
 
@@ -269,11 +278,10 @@ class TestAutoPrefixInheritance:
         assert config.host == "example.com"
         assert config.debug is True
 
-    def test_child_can_override_auto_prefix(self) -> None:
+    def test_child_can_override_with_explicit_prefix(self) -> None:
         """Test child can override with explicit prefix."""
 
         class BaseConfig(DotEnvConfig):
-            # Would auto-derive BASE
             value: str = Field(default="base")
 
         class AppConfig(BaseConfig):
@@ -286,3 +294,251 @@ class TestAutoPrefixInheritance:
         })
         assert config.value == "custom_value"
         assert config.other == "custom_other"
+
+    def test_child_auto_derives_own_prefix_not_parent(self) -> None:
+        """Test child with no explicit prefix uses its own name, not parent's."""
+
+        class BaseConfig(DotEnvConfig):
+            # Would auto-derive BASE
+            value: str = Field(default="base")
+
+        class MyAppConfig(BaseConfig):
+            # Should auto-derive MY_APP, not BASE
+            other: str = Field(default="app")
+
+        config = MyAppConfig.load_from_dict({
+            "MY_APP_VALUE": "my_value",
+            "MY_APP_OTHER": "my_other",
+        })
+        assert config.value == "my_value"
+        assert config.other == "my_other"
+
+    def test_child_inherits_empty_prefix(self) -> None:
+        """Test child inherits parent's explicit empty prefix."""
+
+        class BaseConfig(DotEnvConfig):
+            env_prefix = ""  # No prefix
+            host: str = Field(default="localhost")
+
+        class AppConfig(BaseConfig):
+            # Should inherit empty prefix, not auto-derive APP
+            debug: bool = Field(default=False)
+
+        config = AppConfig.load_from_dict({
+            "HOST": "example.com",
+            "DEBUG": "true",
+        })
+        assert config.host == "example.com"
+        assert config.debug is True
+
+
+class TestAutoPrefixErrorMessages:
+    """Test that error messages show correct prefixed env var names."""
+
+    def test_missing_field_error_shows_prefixed_name(self) -> None:
+        """Test MissingFieldError shows the prefixed env var name."""
+
+        class DatabaseConfig(DotEnvConfig):
+            # Auto-prefix: DATABASE_
+            host: str = Field()
+
+        with pytest.raises(MissingFieldError) as exc_info:
+            DatabaseConfig.load_from_dict({})
+
+        error_message = str(exc_info.value)
+        assert "DATABASE_HOST" in error_message
+        assert "host" in error_message
+
+    def test_missing_field_error_with_explicit_prefix(self) -> None:
+        """Test MissingFieldError shows explicit prefix in env var name."""
+
+        class Config(DotEnvConfig):
+            env_prefix = "MY_APP"
+            api_key: str = Field()
+
+        with pytest.raises(MissingFieldError) as exc_info:
+            Config.load_from_dict({})
+
+        error_message = str(exc_info.value)
+        assert "MY_APP_API_KEY" in error_message
+
+    def test_missing_field_error_no_prefix(self) -> None:
+        """Test MissingFieldError with no prefix shows just field name."""
+
+        class Config(DotEnvConfig):
+            # Single word = no prefix
+            host: str = Field()
+
+        with pytest.raises(MissingFieldError) as exc_info:
+            Config.load_from_dict({})
+
+        error_message = str(exc_info.value)
+        assert "HOST" in error_message
+        # Should not have a prefix
+        assert "_HOST" not in error_message or error_message.split()[-1] == "HOST"
+
+
+class TestAutoPrefixReload:
+    """Test reload() works correctly with auto-prefix."""
+
+    def test_reload_uses_auto_prefix(self) -> None:
+        """Test reload() respects auto-derived prefix."""
+        import os
+
+        class DatabaseConfig(DotEnvConfig):
+            host: str = Field(default="default")
+
+        # Set up environment
+        os.environ["DATABASE_HOST"] = "initial"
+
+        config = DatabaseConfig.load()
+        assert config.host == "initial"
+
+        # Change environment
+        os.environ["DATABASE_HOST"] = "reloaded"
+
+        config.reload()
+        assert config.host == "reloaded"
+
+        # Cleanup
+        del os.environ["DATABASE_HOST"]
+
+    def test_reload_with_explicit_prefix(self) -> None:
+        """Test reload() respects explicit prefix."""
+        import os
+
+        class DatabaseConfig(DotEnvConfig):
+            env_prefix = "DB"
+            host: str = Field(default="default")
+
+        # Set up environment
+        os.environ["DB_HOST"] = "initial"
+
+        config = DatabaseConfig.load()
+        assert config.host == "initial"
+
+        # Change environment
+        os.environ["DB_HOST"] = "reloaded"
+
+        config.reload()
+        assert config.host == "reloaded"
+
+        # Cleanup
+        del os.environ["DB_HOST"]
+
+
+class TestGetPrefixMethod:
+    """Test the _get_prefix() class method."""
+
+    def test_get_prefix_auto_derived(self) -> None:
+        """Test _get_prefix() returns auto-derived prefix."""
+
+        class DatabaseConfig(DotEnvConfig):
+            host: str = Field()
+
+        assert DatabaseConfig._get_prefix() == "DATABASE"
+
+    def test_get_prefix_explicit(self) -> None:
+        """Test _get_prefix() returns explicit prefix."""
+
+        class DatabaseConfig(DotEnvConfig):
+            env_prefix = "DB"
+            host: str = Field()
+
+        assert DatabaseConfig._get_prefix() == "DB"
+
+    def test_get_prefix_empty(self) -> None:
+        """Test _get_prefix() returns empty for explicit empty prefix."""
+
+        class DatabaseConfig(DotEnvConfig):
+            env_prefix = ""
+            host: str = Field()
+
+        assert DatabaseConfig._get_prefix() == ""
+
+    def test_get_prefix_single_word_class(self) -> None:
+        """Test _get_prefix() returns empty for single-word class."""
+
+        class Config(DotEnvConfig):
+            host: str = Field()
+
+        assert Config._get_prefix() == ""
+
+
+class TestAutoPrefixEdgeCases:
+    """Test edge cases for auto-prefix behavior."""
+
+    def test_all_caps_class_name(self) -> None:
+        """Test class name that is all caps."""
+
+        class HTTPSConfig(DotEnvConfig):
+            port: int = Field(default=443)
+
+        # HTTPS is treated as single word -> HTTPS prefix
+        config = HTTPSConfig.load_from_dict({"HTTPS_PORT": "8443"})
+        assert config.port == 8443
+
+    def test_class_name_with_numbers_only_suffix(self) -> None:
+        """Test class name ending with numbers."""
+
+        class Config2(DotEnvConfig):
+            # Single word (Config2) -> no prefix
+            value: str = Field()
+
+        config = Config2.load_from_dict({"VALUE": "test"})
+        assert config.value == "test"
+
+    def test_field_name_with_underscores(self) -> None:
+        """Test field names that already have underscores."""
+
+        class AppConfig(DotEnvConfig):
+            database_connection_string: str = Field()
+
+        config = AppConfig.load_from_dict({
+            "APP_DATABASE_CONNECTION_STRING": "postgres://localhost"
+        })
+        assert config.database_connection_string == "postgres://localhost"
+
+    def test_multiple_configs_different_auto_prefixes(self) -> None:
+        """Test multiple config classes get their own auto-prefixes."""
+
+        class DatabaseConfig(DotEnvConfig):
+            host: str = Field()
+
+        class RedisConfig(DotEnvConfig):
+            host: str = Field()
+
+        class AppConfig(DotEnvConfig):
+            debug: bool = Field(default=False)
+
+        db = DatabaseConfig.load_from_dict({"DATABASE_HOST": "db.local"})
+        redis = RedisConfig.load_from_dict({"REDIS_HOST": "redis.local"})
+        app = AppConfig.load_from_dict({"APP_DEBUG": "true"})
+
+        assert db.host == "db.local"
+        assert redis.host == "redis.local"
+        assert app.debug is True
+
+    def test_load_from_dict_fallback_to_field_name(self) -> None:
+        """Test load_from_dict falls back to field name if prefixed not found."""
+
+        class AppConfig(DotEnvConfig):
+            # Auto-prefix: APP_
+            host: str = Field()
+
+        # Using field name directly (fallback behavior)
+        config = AppConfig.load_from_dict({"host": "localhost"})
+        assert config.host == "localhost"
+
+    def test_load_from_dict_prefers_prefixed_over_field_name(self) -> None:
+        """Test load_from_dict prefers prefixed env var over field name."""
+
+        class AppConfig(DotEnvConfig):
+            host: str = Field()
+
+        # Both provided - prefixed should win
+        config = AppConfig.load_from_dict({
+            "APP_HOST": "prefixed",
+            "host": "field_name",
+        })
+        assert config.host == "prefixed"
