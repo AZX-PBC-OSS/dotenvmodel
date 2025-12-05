@@ -1,0 +1,27 @@
+{
+  "release-type": "python",
+  "package-name": "dotenvmodel",
+  "packages": {
+    ".": {
+      "component": "dotenvmodel",
+      "release-type": "python",
+      "extra-files": [
+        {
+          "type": "generic",
+          "path": "dotenvmodel/__init__.py",
+          "jsonpath": "$.__version__"
+        }
+      ]
+    }
+  },
+  "changelog-sections": [
+    {"type": "feat", "section": "Features"},
+    {"type": "fix", "section": "Bug Fixes"},
+    {"type": "perf", "section": "Performance Improvements"},
+    {"type": "refactor", "section": "Code Refactoring"},
+    {"type": "docs", "section": "Documentation"},
+    {"type": "chore", "section": "Miscellaneous", "hidden": true}
+  ],
+  "bump-minor-pre-major": true,
+  "bump-patch-for-minor-pre-major": true
+}
