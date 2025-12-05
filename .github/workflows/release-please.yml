@@ -8,26 +8,28 @@ on:
 permissions:
   contents: write
   pull-requests: write
+  id-token: write
+  issues: write
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
           release-type: python
           package-name: dotenvmodel
-
-      - name: Trigger publish workflow
-        if: ${{ steps.release.outputs.release_created }}
-        uses: peter-evans/repository-dispatch@v2
-        with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          event-type: publish-release
-          client-payload: |
-            {
-              "tag_name": "${{ steps.release.outputs.tag_name }}",
-              "version": "${{ steps.release.outputs.version }}"
-            }
+
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.release_created
+    uses: ./.github/workflows/publish.yml
+    with:
+      release_created: true
+      tag_name: ${{ needs.release-please.outputs.tag_name }}
+    secrets: inherit

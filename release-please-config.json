@@ -4,6 +4,7 @@
   "packages": {
     ".": {
       "component": "dotenvmodel",
+      "package-name": "dotenvmodel",
       "release-type": "python",
       "extra-files": [
         {
@@ -16,12 +17,16 @@
   },
   "changelog-sections": [
     {"type": "feat", "section": "Features"},
+    {"type": "feature", "section": "Features"},
     {"type": "fix", "section": "Bug Fixes"},
     {"type": "perf", "section": "Performance Improvements"},
-    {"type": "refactor", "section": "Code Refactoring"},
+    {"type": "revert", "section": "Reverts"},
     {"type": "docs", "section": "Documentation"},
-    {"type": "chore", "section": "Miscellaneous", "hidden": true}
-  ],
-  "bump-minor-pre-major": true,
-  "bump-patch-for-minor-pre-major": true
+    {"type": "style", "section": "Styles", "hidden": true},
+    {"type": "chore", "section": "Miscellaneous Chores", "hidden": true},
+    {"type": "refactor", "section": "Code Refactoring"},
+    {"type": "test", "section": "Tests", "hidden": true},
+    {"type": "build", "section": "Build System"},
+    {"type": "ci", "section": "Continuous Integration"}
+  ]
 }
