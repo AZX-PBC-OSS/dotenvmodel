@@ -1,6 +1,6 @@
 """Type-safe environment configuration with automatic .env file loading."""
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"
 
 from dotenvmodel.config import DotEnvConfig
 from dotenvmodel.exceptions import (
