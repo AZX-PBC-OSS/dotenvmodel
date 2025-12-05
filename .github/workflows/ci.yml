@@ -105,14 +105,14 @@ jobs:
           uv venv test-env
           source test-env/bin/activate
           pip install dist/*.whl
-          python -c "import dotenvmodel; print(dotenvmodel.__version__)"
+          cd /tmp && python -c "import dotenvmodel; print(dotenvmodel.__version__)"
 
       - name: Test installation from source distribution
         run: |
           uv venv test-src-env
           source test-src-env/bin/activate
           pip install dist/*.tar.gz
-          python -c "import dotenvmodel; print(dotenvmodel.__version__)"
+          cd /tmp && python -c "import dotenvmodel; print(dotenvmodel.__version__)"
 
       - name: Upload build artifacts
         uses: actions/upload-artifact@v4
