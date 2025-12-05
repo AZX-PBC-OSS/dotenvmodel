@@ -12,6 +12,9 @@
 - **Developer Experience**: Intuitive Pydantic-style API
 - **Smart .env Loading**: Automatic cascading of `.env`, `.env.{env}`, `.env.{env}.local` files
 - **Configuration Reload**: Reload configuration at runtime without creating new instances
+- **Configuration Documentation**: Generate docs in multiple formats (table, markdown, JSON, HTML, dotenv) with `describe()`
+- **.env.example Generation**: Automatically generate `.env.example` files with type hints, constraints, and examples
+- **File Export**: Save documentation directly to files for integration with build tools and wikis
 - **Environment Prefixes**: Class-level `env_prefix` to namespace environment variables
 - **Validation**: Numeric constraints (ge, le, gt, lt), string constraints (min_length, max_length, regex), choice validation, and collection size constraints (min_items, max_items)
 - **Clear Error Messages**: Helpful validation errors that guide you to fixes
@@ -55,6 +58,9 @@ config = AppConfig.load(env="dev")
 print(f"Connecting to {config.database_url}")  # config.database_url: str
 print(f"Running on port {config.port}")        # config.port: int
 print(f"Debug mode: {config.debug}")           # config.debug: bool
+
+# Generate documentation for your configuration
+print(AppConfig.describe())
 ```
 
 ## Type Safety and IntelliSense
@@ -619,6 +625,293 @@ The `reload()` method:
 - Allows overriding any parameter by passing new values
 - Validates all fields and raises errors if validation fails
 - Returns the same instance (useful for method chaining)
+
+## Configuration Documentation
+
+Generate human-readable documentation for your configuration classes using the `describe()` method. This is useful for:
+
+- **Creating documentation** for your team
+- **Generating `.env.example` files** automatically
+- **Validating configuration** in CI pipelines
+- **Onboarding new developers** quickly
+
+### Generate Documentation for a Single Config
+
+```python
+from dotenvmodel import DotEnvConfig, Field
+
+class AppConfig(DotEnvConfig):
+    database_url: str = Field(description="PostgreSQL connection string")
+    port: int = Field(default=8000, ge=1, le=65535, description="Server port")
+    debug: bool = Field(default=False, description="Enable debug mode")
+    workers: int = Field(default=4, ge=1, le=16, description="Number of worker processes")
+
+# Generate ASCII table (default)
+print(AppConfig.describe())
+```
+
+Output:
+
+```
+AppConfig
+=========
++--------------+------+----------+---------+---------------------------+----------------+
+| ENV Variable | Type | Required | Default | Description               | Constraints    |
++--------------+------+----------+---------+---------------------------+----------------+
+| DATABASE_URL | str  | Yes      | -       | PostgreSQL connection ... | -              |
+| PORT         | int  | No       | 8000    | Server port               | ge=1, le=65535 |
+| DEBUG        | bool | No       | False   | Enable debug mode         | -              |
+| WORKERS      | int  | No       | 4       | Number of worker proces...| ge=1, le=16    |
++--------------+------+----------+---------+---------------------------+----------------+
+```
+
+### Output Formats
+
+**ASCII Table (default)** - Best for terminal output and logging:
+
+```python
+print(AppConfig.describe(output_format="table"))
+```
+
+**Markdown** - Perfect for README files and documentation:
+
+```python
+# Generate markdown documentation
+docs = AppConfig.describe(output_format="markdown")
+
+# Save to file
+with open("CONFIG.md", "w") as f:
+    f.write(docs)
+```
+
+**JSON** - Ideal for CI validation and programmatic processing:
+
+```python
+import json
+
+# Get configuration schema as JSON
+config_spec = AppConfig.describe(output_format="json")
+data = json.loads(config_spec)
+
+# Use for validation, code generation, etc.
+print(data["class_name"])  # "AppConfig"
+print(data["fields"][0]["env_var"])  # "DATABASE_URL"
+```
+
+**HTML** - Styled output for web documentation:
+
+```python
+# Generate HTML with styled tables
+html_docs = AppConfig.describe(output_format="html")
+
+# Save to file
+with open("config.html", "w") as f:
+    f.write(html_docs)
+```
+
+**Dotenv Format** - For generating `.env.example` files:
+
+```python
+# Generate .env.example format
+dotenv_docs = AppConfig.describe(output_format="dotenv")
+print(dotenv_docs)
+```
+
+### File Export
+
+Save documentation directly to files using the `output` parameter:
+
+```python
+# Save as markdown
+AppConfig.describe(output_format="markdown", output="docs/config.md")
+
+# Save as HTML
+AppConfig.describe(output_format="html", output="docs/config.html")
+
+# Save as JSON
+AppConfig.describe(output_format="json", output="config-schema.json")
+```
+
+### Generate `.env.example` Files
+
+Automatically generate `.env.example` files for onboarding new developers:
+
+```python
+from dotenvmodel import DotEnvConfig, Field, SecretStr
+
+class AppConfig(DotEnvConfig):
+    env_prefix = "APP_"
+
+    api_key: str = Field(
+        min_length=32,
+        max_length=64,
+        description="API key for external service"
+    )
+    port: int = Field(
+        default=8000,
+        ge=1,
+        le=65535,
+        description="Server port number"
+    )
+    database_password: SecretStr = Field(
+        default=SecretStr("change_me_in_production"),
+        min_length=8,
+        description="Database connection password"
+    )
+    allowed_hosts: list[str] = Field(
+        default_factory=list,
+        separator=";",
+        min_items=1,
+        max_items=10,
+        description="Allowed hostnames for CORS"
+    )
+
+# Generate and print .env.example
+print(AppConfig.generate_env_example())
+
+# Or save directly to file
+AppConfig.generate_env_example(output=".env.example")
+```
+
+Output in `.env.example`:
+
+```bash
+# Configuration for AppConfig
+# All variables prefixed with: APP_
+
+# API key for external service
+# Type: str | Constraints: min_length=32, max_length=64
+# Example: APP_API_KEY=your_value_here
+APP_API_KEY=
+
+# Server port number
+# Type: int | Constraints: ge=1, le=65535
+# Example: APP_PORT=8000
+# APP_PORT=8000
+
+# Database connection password
+# Type: SecretStr | Constraints: min_length=8
+# APP_DATABASE_PASSWORD=your_secret_here
+
+# Allowed hostnames for CORS
+# Type: list[str] | Constraints: min_items=1, max_items=10, separator=';'
+# Example: APP_ALLOWED_HOSTS=[]
+# APP_ALLOWED_HOSTS=[]
+```
+
+The `.env.example` file includes:
+
+- **Type information** - Shows the expected Python type
+- **Parsing hints** - Explains how to format complex types (e.g., "comma-separated values" for lists)
+- **Constraints** - Documents validation rules (min/max length, numeric ranges, etc.)
+- **Examples** - Shows example values for required fields
+- **Commented defaults** - Optional fields are commented out with their default values
+- **Secret handling** - SecretStr fields are masked appropriately
+
+### Document Multiple Configurations
+
+Use `describe_configs()` to document multiple related configuration classes:
+
+```python
+from dotenvmodel import DotEnvConfig, Field, describe_configs
+
+class DatabaseConfig(DotEnvConfig):
+    env_prefix = "DB_"
+    host: str = Field(description="Database host")
+    port: int = Field(default=5432, description="Database port")
+
+class RedisConfig(DotEnvConfig):
+    env_prefix = "REDIS_"
+    host: str = Field(description="Redis host")
+    port: int = Field(default=6379, description="Redis port")
+
+# Generate documentation for all configs
+all_docs = describe_configs([DatabaseConfig, RedisConfig], output_format="markdown")
+print(all_docs)
+```
+
+### Practical Use Cases
+
+**1. Generate `.env.example` files for onboarding:**
+
+```python
+# Generate .env.example with helpful comments and type information
+AppConfig.generate_env_example(output=".env.example")
+
+# Or combine multiple configs
+from dotenvmodel import describe_configs
+
+with open(".env.example", "w") as f:
+    f.write("# Application Configuration\n\n")
+    f.write("# Copy this file to .env and fill in the values\n\n")
+    for config_cls in [AppConfig, DatabaseConfig, RedisConfig]:
+        f.write(config_cls.generate_env_example())
+        f.write("\n\n")
+```
+
+**2. CI Configuration Validation:**
+
+```python
+import json
+import os
+
+# Get required environment variables from config schema
+spec = json.loads(AppConfig.describe(output_format="json"))
+required_vars = [f["env_var"] for f in spec["fields"] if f["required"]]
+
+# Validate all required vars are set
+missing = [var for var in required_vars if var not in os.environ]
+if missing:
+    print(f"ERROR: Missing required environment variables: {', '.join(missing)}")
+    exit(1)
+```
+
+**3. Developer Onboarding:**
+
+```python
+import os
+
+# Display configuration reference in development mode
+if os.getenv("ENV") == "dev":
+    print("\n" + "=" * 80)
+    print("CONFIGURATION REFERENCE")
+    print("=" * 80)
+    print(AppConfig.describe())
+    print("=" * 80 + "\n")
+```
+
+**4. Generate Documentation Website:**
+
+```python
+from dotenvmodel import describe_configs
+
+# Generate markdown docs for all config classes
+configs = [AppConfig, DatabaseConfig, RedisConfig, CacheConfig]
+
+# Save as markdown
+describe_configs(configs, output_format="markdown", output="docs/configuration.md")
+
+# Or generate HTML version with styling
+describe_configs(configs, output_format="html", output="docs/configuration.html")
+```
+
+**5. Build Tool Integration:**
+
+```python
+# build_docs.py - Run during build process
+from your_app.config import AppConfig, DatabaseConfig
+
+# Generate .env.example for repository
+AppConfig.generate_env_example(output=".env.example")
+
+# Generate markdown docs
+AppConfig.describe(output_format="markdown", output="docs/CONFIG.md")
+
+# Generate HTML for internal wiki
+AppConfig.describe(output_format="html", output="docs/config.html")
+
+print("✓ Configuration documentation generated")
+```
 
 ## Environment Variable Prefixes
 

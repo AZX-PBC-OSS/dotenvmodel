@@ -3,6 +3,7 @@
 __version__ = "0.1.1"
 
 from dotenvmodel.config import DotEnvConfig
+from dotenvmodel.describe import describe_configs, generate_env_example
 from dotenvmodel.exceptions import (
     ConstraintViolationError,
     DotEnvModelError,
@@ -38,5 +39,7 @@ __all__ = [
     "ValidationError",
     "__version__",
     "configure_logging",
+    "describe_configs",
     "disable_logging",
+    "generate_env_example",
 ]
