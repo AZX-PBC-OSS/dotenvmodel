@@ -4,10 +4,13 @@ import json
 import re
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import ParseResult, unquote, urlparse
 from uuid import UUID
 
 from dotenvmodel.exceptions import TypeCoercionError
+
+_T = TypeVar("_T")
 
 
 class SecretStr:
@@ -225,27 +228,46 @@ class RedisDsn(BaseDsn):
         return 0
 
 
-class Json[T]:
-    """
-    A type for parsing JSON strings into Python objects.
+if TYPE_CHECKING:
+    # For type checkers: Json[T] is an alias for T, so config.field has type T
+    Json = _T
+else:
+    # At runtime: Json is a class that supports __class_getitem__ for coercion
 
-    Use this for complex configuration that needs to be passed as JSON.
+    class _JsonMeta(type):
+        """Metaclass for Json to properly handle type annotations."""
 
-    Example:
-        ```python
-        class Config(DotEnvConfig):
-            feature_flags: Json[dict[str, bool]] = Field()
-            # Environment: FEATURE_FLAGS={"new_ui": true, "beta_api": false}
+        def __getitem__(cls, item: type) -> type:
+            """Support generic type syntax Json[T].
 
-            allowed_roles: Json[list[str]] = Field()
-            # Environment: ALLOWED_ROLES=["admin", "user", "guest"]
-        ```
-    """
+            At runtime, this returns a class with __inner_type__ for coercion.
+            """
+            # Create a new class that remembers the inner type for runtime coercion
+            new_cls: type = type(f"Json[{item}]", (cls,), {"__inner_type__": item})
+            return new_cls
 
-    def __class_getitem__(cls, item: type[T]) -> type["Json[T]"]:
-        """Support generic type syntax Json[T]."""
-        # Return a new class that remembers the inner type
-        return type(f"Json[{item}]", (Json,), {"__inner_type__": item})
+    class Json(metaclass=_JsonMeta):
+        """
+        A type for parsing JSON strings into Python objects.
+
+        Use this for complex configuration that needs to be passed as JSON.
+        At runtime, fields annotated as Json[T] will contain the actual T value,
+        not a Json wrapper.
+
+        Example:
+            ```python
+            class Config(DotEnvConfig):
+                feature_flags: Json[dict[str, bool]] = Field()
+                # Environment: FEATURE_FLAGS={"new_ui": true, "beta_api": false}
+                # config.feature_flags is a dict[str, bool] at runtime
+
+                allowed_roles: Json[list[str]] = Field()
+                # Environment: ALLOWED_ROLES=["admin", "user", "guest"]
+                # config.allowed_roles is a list[str] at runtime
+            ```
+        """
+
+        pass
 
 
 def parse_timedelta(value: str) -> timedelta:
@@ -477,4 +499,4 @@ def coerce_json[T](
                 env_var_name=env_var_name,
             )
 
-    return parsed
+    return parsed  # type: ignore[return-value]

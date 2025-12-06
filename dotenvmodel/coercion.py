@@ -6,8 +6,10 @@ from datetime import datetime, timedelta
 from decimal import Decimal
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Literal, Union, get_args, get_origin
 from uuid import UUID
+
+from typing_extensions import TypeForm
 
 from dotenvmodel.exceptions import TypeCoercionError
 
@@ -18,7 +20,7 @@ if TYPE_CHECKING:
 def coerce_value(
     field_name: str,
     value: str | None,
-    field_type: type,
+    field_type: TypeForm[Any],
     env_var_name: str,
     field_info: "FieldInfo | None" = None,
 ) -> Any:
@@ -45,23 +47,20 @@ def coerce_value(
     if origin is Literal:
         return _coerce_literal(field_name, value, field_type, env_var_name)
 
-    # Handle Enum types before Union types
+    # Handle non-optional Enum types directly
+    # Note: Optional[Enum] is handled by Union handler first, which then recursively calls this
     if inspect.isclass(field_type) and issubclass(field_type, Enum):
         return _coerce_enum(field_name, value, field_type, env_var_name)
 
     # Handle Union types (including Optional[T] and str | None)
-    # Check for UnionType (str | None) or typing.Union
-    if origin is types.UnionType or (origin is not None and type(None) in get_args(field_type)):
+    # types.UnionType is for `str | None` syntax, typing.Union is for `Union[str, None]`
+    if origin is types.UnionType or origin is Union:
         args = get_args(field_type)
-        if type(None) in args:
-            # This is Optional[T] or T | None
-            if value is None or value == "":
-                return None
-            # Get the non-None type
-            actual_type = args[0] if args[1] is type(None) else args[1]
-            return coerce_value(field_name, value, actual_type, env_var_name, field_info)
-        else:
-            # Non-Optional Union types (e.g., Union[str, int] or str | int) are not supported
+        # Filter out NoneType to get non-None types
+        non_none_types = [arg for arg in args if arg is not type(None)]
+
+        if len(non_none_types) == len(args):
+            # No None in args - this is a non-Optional Union (e.g., Union[str, int])
             type_names = ", ".join(
                 str(arg.__name__ if hasattr(arg, "__name__") else arg) for arg in args
             )
@@ -73,6 +72,26 @@ def coerce_value(
                 field_type=field_type,
                 env_var_name=env_var_name,
             )
+
+        if len(non_none_types) != 1:
+            # Multiple non-None types (e.g., Union[str, int, None])
+            type_names = ", ".join(
+                str(arg.__name__ if hasattr(arg, "__name__") else arg) for arg in non_none_types
+            )
+            raise TypeCoercionError(
+                field_name=field_name,
+                value=value,
+                error_msg=f"Union types with multiple non-None types are not supported. "
+                f"Got non-None types: {type_names}",
+                field_type=field_type,
+                env_var_name=env_var_name,
+            )
+
+        # This is Optional[T] or T | None
+        if value is None or value == "":
+            return None
+        actual_type = non_none_types[0]
+        return coerce_value(field_name, value, actual_type, env_var_name, field_info)
 
     # Handle other generic types (list, dict, set, tuple)
     if origin is not None and origin not in (Literal,):
@@ -269,7 +288,9 @@ def _coerce_bool(field_name: str, value: str, env_var_name: str) -> bool:
     )
 
 
-def _coerce_literal(field_name: str, value: str | None, field_type: type, env_var_name: str) -> Any:
+def _coerce_literal(
+    field_name: str, value: str | None, field_type: TypeForm[Any], env_var_name: str
+) -> Any:
     """Coerce a value to a Literal type."""
     if value is None:
         raise TypeCoercionError(
@@ -296,7 +317,7 @@ def _coerce_literal(field_name: str, value: str | None, field_type: type, env_va
 def _coerce_generic(
     field_name: str,
     value: str | None,
-    field_type: type,
+    field_type: TypeForm[Any],
     origin: Any,
     env_var_name: str,
     separator: str = ",",

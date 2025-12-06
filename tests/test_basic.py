@@ -161,7 +161,7 @@ class TestRequiredFields:
         """Test required field using ellipsis."""
 
         class Config(DotEnvConfig):
-            secret: str = ...
+            secret: str = ...  # type: ignore[assignment]
 
         with pytest.raises(MissingFieldError):
             Config.load_from_dict({})

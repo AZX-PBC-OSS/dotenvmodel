@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "python-dotenv>=0.19.0",
+    "typing-extensions>=4.15.0",
 ]
 license = { text = "MIT" }
 keywords = ["environment", "config", "dotenv", "settings", "configuration", "env"]
@@ -50,10 +51,10 @@ dev = [
 
 [dependency-groups]
 dev = [
+    "pyright>=1.1.407",
     "pytest>=7.0.0",
     "pytest-cov>=4.0.0",
     "ruff>=0.1.0",
-    "ty>=0.0.1a31",
 ]
 
 [tool.ruff]
@@ -80,9 +81,9 @@ ignore = [
     "E501",   # Line length handled by formatter
 ]
 
-[tool.ty]
-# ty will use the project's Python version for type checking
-# See: https://docs.astral.sh/ty/configuration/
+[tool.pyright]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

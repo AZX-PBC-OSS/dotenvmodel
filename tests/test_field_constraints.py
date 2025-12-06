@@ -48,7 +48,7 @@ class TestFieldConstraintValidation:
     def test_invalid_numeric_constraint_type(self) -> None:
         """Test that non-numeric ge/le/gt/lt values raise TypeError."""
         with pytest.raises(TypeError) as exc_info:
-            Field(ge="10")
+            Field(ge="10")  # type: ignore[arg-type]
 
         assert "ge" in str(exc_info.value)
         assert "int, float, or Decimal" in str(exc_info.value)

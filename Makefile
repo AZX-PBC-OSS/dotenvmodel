@@ -25,7 +25,7 @@ format:
 	uv run ruff check --fix .
 
 type-check:
-	uv run ty check dotenvmodel
+	uv run pyright dotenvmodel
 
 clean:
 	rm -rf build/

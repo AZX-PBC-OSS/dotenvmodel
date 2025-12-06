@@ -66,8 +66,12 @@ class TestBasicEnumSupport:
         assert config.log_level == LogLevel.DEBUG
         assert config.log_level.value == "debug"
 
-    def test_string_enum_by_name_lowercase(self) -> None:
-        """Test string-based enum coercion by name (lowercase)."""
+    def test_string_enum_by_value_lowercase(self) -> None:
+        """Test string-based enum coercion by value (lowercase).
+
+        Note: 'info' matches LogLevel.INFO.value, not the name 'INFO'.
+        Value matching is tried first, then name matching (case-insensitive).
+        """
 
         class Config(DotEnvConfig):
             log_level: LogLevel = Field()
@@ -397,3 +401,136 @@ class TestEnumWithComplexTypes:
         assert config.log_level == LogLevel.ERROR
         assert config.log_level != LogLevel.INFO
         assert config.log_level is LogLevel.ERROR
+
+
+class TestEnumInCollections:
+    """Test enum support in collection types."""
+
+    def test_list_of_enums(self) -> None:
+        """Test list[Enum] coercion."""
+
+        class Config(DotEnvConfig):
+            allowed_levels: list[LogLevel] = Field()
+
+        config = Config.load_from_dict({"ALLOWED_LEVELS": "debug,info,error"})
+        assert config.allowed_levels == [LogLevel.DEBUG, LogLevel.INFO, LogLevel.ERROR]
+        assert all(isinstance(level, LogLevel) for level in config.allowed_levels)
+
+    def test_list_of_enums_by_name(self) -> None:
+        """Test list[Enum] coercion using names."""
+
+        class Config(DotEnvConfig):
+            levels: list[LogLevel] = Field()
+
+        config = Config.load_from_dict({"LEVELS": "DEBUG,INFO,WARNING"})
+        assert config.levels == [LogLevel.DEBUG, LogLevel.INFO, LogLevel.WARNING]
+
+    def test_list_of_enums_invalid_element(self) -> None:
+        """Test list[Enum] with invalid element raises proper error."""
+
+        class Config(DotEnvConfig):
+            levels: list[LogLevel] = Field()
+
+        with pytest.raises(TypeCoercionError) as exc_info:
+            Config.load_from_dict({"LEVELS": "debug,invalid,info"})
+
+        assert "Failed to coerce list element" in str(exc_info.value)
+        assert "invalid" in str(exc_info.value).lower()
+
+    def test_set_of_enums(self) -> None:
+        """Test set[Enum] coercion."""
+
+        class Config(DotEnvConfig):
+            unique_envs: set[Environment] = Field()
+
+        config = Config.load_from_dict({"UNIQUE_ENVS": "dev,staging,dev"})
+        assert config.unique_envs == {Environment.DEV, Environment.STAGING}
+        assert len(config.unique_envs) == 2
+
+    def test_list_of_int_enums(self) -> None:
+        """Test list[IntEnum] coercion."""
+
+        class Config(DotEnvConfig):
+            priorities: list[Priority] = Field()
+
+        config = Config.load_from_dict({"PRIORITIES": "1,3,4"})
+        assert config.priorities == [Priority.LOW, Priority.HIGH, Priority.CRITICAL]
+
+    def test_empty_list_of_enums(self) -> None:
+        """Test empty list[Enum] coercion."""
+
+        class Config(DotEnvConfig):
+            levels: list[LogLevel] = Field()
+
+        config = Config.load_from_dict({"LEVELS": ""})
+        assert config.levels == []
+
+
+class TestEnumWithDuplicateValues:
+    """Test enum with duplicate values (aliases)."""
+
+    def test_enum_with_value_aliases(self) -> None:
+        """Test enum with duplicate values (aliases) returns canonical member."""
+
+        class StatusWithAliases(str, Enum):
+            ACTIVE = "active"
+            RUNNING = "active"  # Alias for ACTIVE
+            IDLE = "idle"
+
+        class Config(DotEnvConfig):
+            status: StatusWithAliases = Field()
+
+        # Should match the canonical member (ACTIVE, not the alias RUNNING)
+        config = Config.load_from_dict({"STATUS": "active"})
+        assert config.status == StatusWithAliases.ACTIVE
+        assert config.status.name == "ACTIVE"
+
+    def test_enum_alias_name_not_matchable(self) -> None:
+        """Test that alias names are not matchable (Python Enum behavior).
+
+        In Python Enums, when iterating over members, only canonical members
+        are yielded. Aliases (members with duplicate values) are not included
+        in iteration. So "RUNNING" cannot be matched by name.
+        """
+
+        class StatusWithAliases(str, Enum):
+            ACTIVE = "active"
+            RUNNING = "active"  # Alias for ACTIVE - not in __members__ iteration
+            IDLE = "idle"
+
+        class Config(DotEnvConfig):
+            status: StatusWithAliases = Field()
+
+        # Alias names are NOT matchable - only canonical member names work
+        with pytest.raises(TypeCoercionError) as exc_info:
+            Config.load_from_dict({"STATUS": "RUNNING"})
+
+        # Error should show only canonical names (ACTIVE, IDLE), not RUNNING
+        error_msg = str(exc_info.value)
+        assert "ACTIVE" in error_msg
+        assert "IDLE" in error_msg
+
+
+class TestOptionalEnumDescribe:
+    """Test that Optional[Enum] shows constraints correctly in describe output."""
+
+    def test_optional_enum_shows_choices_in_constraints(self) -> None:
+        """Test that Optional[Enum] fields show enum choices in constraints."""
+
+        class Config(DotEnvConfig):
+            level: LogLevel | None = Field(default=None)
+
+        output = Config.describe(output_format="table")
+        assert "choices:" in output
+        # Verify enum values are shown
+        assert "debug" in output
+
+    def test_optional_enum_describe_markdown(self) -> None:
+        """Test Optional[Enum] in markdown describe output."""
+
+        class Config(DotEnvConfig):
+            env: Environment | None = Field(default=None)
+
+        output = Config.describe(output_format="markdown")
+        assert "choices:" in output
+        assert "dev" in output

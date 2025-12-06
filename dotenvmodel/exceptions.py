@@ -2,6 +2,8 @@
 
 from typing import Any
 
+from typing_extensions import TypeForm
+
 
 class DotEnvModelError(Exception):
     """Base exception for all dotenvmodel errors."""
@@ -17,7 +19,7 @@ class ValidationError(DotEnvModelError):
         field_name: str,
         value: Any,
         error_msg: str,
-        field_type: type | None = None,
+        field_type: TypeForm[Any] | None = None,
         env_var_name: str | None = None,
     ) -> None:
         self.field_name = field_name
@@ -32,7 +34,8 @@ class ValidationError(DotEnvModelError):
         msg = f"Field '{self.field_name}' validation failed:\n"
         msg += f"  Value: {self.value!r}\n"
         if self.field_type:
-            msg += f"  Expected type: {self.field_type.__name__}\n"
+            type_name = getattr(self.field_type, "__name__", str(self.field_type))
+            msg += f"  Expected type: {type_name}\n"
         msg += f"  Error: {self.error_msg}\n"
         msg += f"  Environment variable: {self.env_var_name}"
         return msg
@@ -42,7 +45,10 @@ class MissingFieldError(ValidationError):
     """Raised when a required field is missing."""
 
     def __init__(
-        self, field_name: str, field_type: type | None = None, env_var_name: str | None = None
+        self,
+        field_name: str,
+        field_type: TypeForm[Any] | None = None,
+        env_var_name: str | None = None,
     ) -> None:
         env_name = env_var_name or field_name.upper()
         super().__init__(
@@ -125,7 +131,7 @@ class MultipleValidationErrors(DotEnvModelError):
             if error.value is not None:
                 msg += f"   Value: {error.value!r}\n"
             msg += f"   Environment variable: {error.env_var_name}\n"
-            if hasattr(error, "constraint"):
-                msg += f"   Constraint: {error.constraint}\n"
+            if hasattr(error, "constraint") and error.constraint is not None:  # type: ignore[attr-defined]
+                msg += f"   Constraint: {error.constraint}\n"  # type: ignore[attr-defined]
             msg += "\n"
         return msg.rstrip()

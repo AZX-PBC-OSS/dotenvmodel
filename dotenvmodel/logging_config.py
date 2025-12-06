@@ -44,15 +44,18 @@ def configure_logging(
         ```
     """
     # Determine log level
+    resolved_level: int
     if level is None:
         env_level = os.getenv("DOTENVMODEL_LOG_LEVEL", "WARNING").upper()
-        level = getattr(logging, env_level, logging.WARNING)
+        resolved_level = getattr(logging, env_level, logging.WARNING)
     elif isinstance(level, str):
-        level = getattr(logging, level.upper(), logging.WARNING)
+        resolved_level = getattr(logging, level.upper(), logging.WARNING)
+    else:
+        resolved_level = level
 
     # Get the dotenvmodel logger
     logger = logging.getLogger("dotenvmodel")
-    logger.setLevel(level)
+    logger.setLevel(resolved_level)
 
     # Remove existing handlers to avoid duplicates
     logger.handlers.clear()

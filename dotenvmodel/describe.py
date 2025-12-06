@@ -10,7 +10,9 @@ import types
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
-from typing import TYPE_CHECKING, Literal, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Literal, Union, get_args, get_origin
+
+from typing_extensions import TypeForm
 
 if TYPE_CHECKING:
     from dotenvmodel.config import DotEnvConfig
@@ -20,6 +22,36 @@ from dotenvmodel.loading import get_env_var_name
 from dotenvmodel.types import SecretStr
 
 OutputFormat = Literal["table", "markdown", "json", "html", "dotenv"]
+
+
+def _extract_enum_from_type(field_type: TypeForm[Any]) -> type[Enum] | None:
+    """
+    Extract enum type from a type annotation, including Union types.
+
+    Args:
+        field_type: The type annotation to check
+
+    Returns:
+        The Enum class if found, None otherwise
+
+    Examples:
+        LogLevel -> LogLevel
+        LogLevel | None -> LogLevel
+        str -> None
+    """
+    # Direct enum check
+    if inspect.isclass(field_type) and issubclass(field_type, Enum):
+        return field_type
+
+    # Check if it's a Union type containing an enum
+    origin = get_origin(field_type)
+    if origin is types.UnionType or origin is Union:
+        for arg in get_args(field_type):
+            if arg is not type(None) and inspect.isclass(arg) and issubclass(arg, Enum):
+                return arg
+
+    return None
+
 
 # Maximum column widths to prevent unbounded table growth
 MAX_WIDTHS = {
@@ -68,7 +100,7 @@ class FieldDescription:
     constraints: str
 
 
-def format_type_name(field_type: type) -> str:
+def format_type_name(field_type: TypeForm[Any]) -> str:
     """
     Format a type annotation as a readable string.
 
@@ -84,10 +116,12 @@ def format_type_name(field_type: type) -> str:
     if field_type is type(None):
         return "None"
 
-    # Handle Enum types
-    if inspect.isclass(field_type) and issubclass(field_type, Enum):
-        values = [str(m.value) for m in field_type]
-        return f"{field_type.__name__} ({', '.join(values)})"
+    # Handle Enum types (including when directly specified, not via Union)
+    enum_type = _extract_enum_from_type(field_type)
+    if enum_type is not None and field_type is enum_type:
+        # Direct enum type (not Optional[Enum])
+        values = [str(m.value) for m in enum_type]
+        return f"{enum_type.__name__} ({', '.join(values)})"
 
     origin = get_origin(field_type)
 
@@ -126,8 +160,9 @@ def format_type_name(field_type: type) -> str:
         return origin_name
 
     # Handle special types and basic types
-    if hasattr(field_type, "__name__"):
-        return field_type.__name__
+    name = getattr(field_type, "__name__", None)
+    if name is not None:
+        return name
 
     # Fallback for edge cases
     return str(field_type)
@@ -213,20 +248,24 @@ def generate_constraint_examples(field_type: type, field_info: FieldInfo) -> dic
         or field_info.gt is not None
         or field_info.lt is not None
     ) and type_name in ("int", "float"):
-        # Determine bounds
-        lower = field_info.ge if field_info.ge is not None else field_info.gt
-        upper = field_info.le if field_info.le is not None else field_info.lt
+        # Determine bounds - use Decimal for arithmetic to preserve precision
+        from decimal import Decimal
+
+        lower_raw = field_info.ge if field_info.ge is not None else field_info.gt
+        upper_raw = field_info.le if field_info.le is not None else field_info.lt
+        lower = Decimal(str(lower_raw)) if lower_raw is not None else None
+        upper = Decimal(str(upper_raw)) if upper_raw is not None else None
 
         if lower is not None and upper is not None:
-            mid = (lower + upper) // 2 if type_name == "int" else (lower + upper) / 2
-            valid.extend([str(lower), str(mid), str(upper)])
+            mid = int((lower + upper) // 2) if type_name == "int" else (lower + upper) / 2
+            valid.extend([str(lower_raw), str(mid), str(upper_raw)])
             invalid.append(f"{lower - 1} (too small)")
             invalid.append(f"{upper + 1} (too large)")
         elif lower is not None:
-            valid.extend([str(lower), str(lower + 10)])
+            valid.extend([str(lower_raw), str(lower + 10)])
             invalid.append(f"{lower - 1} (too small)")
         elif upper is not None:
-            valid.extend([str(upper - 10), str(upper)])
+            valid.extend([str(upper - 10), str(upper_raw)])
             invalid.append(f"{upper + 1} (too large)")
 
         # Type error
@@ -302,14 +341,15 @@ def format_constraints(
     """
     constraints: list[str] = []
 
-    # Handle Enum types - show valid enum values
-    if field_type is not None and inspect.isclass(field_type) and issubclass(field_type, Enum):
-        values = [str(m.value) for m in field_type]
+    # Handle Enum types - show valid enum values (works for both Enum and Optional[Enum])
+    enum_type = _extract_enum_from_type(field_type) if field_type is not None else None
+    if enum_type is not None:
+        values = [str(m.value) for m in enum_type]
         choices_str = ", ".join(values)
         if truncate and len(choices_str) > TRUNCATE_THRESHOLD_MEDIUM:
             choices_str = choices_str[: TRUNCATE_THRESHOLD_MEDIUM - 3] + "..."
         constraints.append(f"choices: {choices_str}")
-        return ", ".join(constraints)
+        # Don't early return - allow combining with other constraints if needed in future
 
     # Numeric constraints
     if field_info.ge is not None:
@@ -356,7 +396,7 @@ def format_constraints(
     return ", ".join(constraints) if constraints else "-"
 
 
-def format_default(field_info: FieldInfo, field_type: type, truncate: bool = True) -> str:
+def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: bool = True) -> str:
     """
     Format default value for display.
 

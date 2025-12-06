@@ -39,6 +39,27 @@ class FieldInfo:
     validation constraints, and documentation.
     """
 
+    # Instance attribute type annotations
+    default: Any
+    default_factory: Callable[[], Any] | None
+    alias: str | None
+    description: str | None
+    ge: int | float | Decimal | None
+    le: int | float | Decimal | None
+    gt: int | float | Decimal | None
+    lt: int | float | Decimal | None
+    min_length: int | None
+    max_length: int | None
+    regex: str | None
+    _compiled_regex: re.Pattern[str] | None
+    choices: list[Any] | None
+    min_items: int | None
+    max_items: int | None
+    uuid_version: int | None
+    separator: str
+    url_unquote: bool
+    required: bool
+
     def __init__(
         self,
         default: Any = _MISSING,
@@ -47,10 +68,10 @@ class FieldInfo:
         alias: str | None = None,
         description: str | None = None,
         # Numeric validation
-        ge: int | float | None = None,
-        le: int | float | None = None,
-        gt: int | float | None = None,
-        lt: int | float | None = None,
+        ge: int | float | Decimal | None = None,
+        le: int | float | Decimal | None = None,
+        gt: int | float | Decimal | None = None,
+        lt: int | float | Decimal | None = None,
         # String validation
         min_length: int | None = None,
         max_length: int | None = None,
@@ -214,10 +235,10 @@ def Field(
     default_factory: Callable[[], Any] | None = None,
     alias: str | None = None,
     description: str | None = None,
-    ge: int | float | None = None,
-    le: int | float | None = None,
-    gt: int | float | None = None,
-    lt: int | float | None = None,
+    ge: int | float | Decimal | None = None,
+    le: int | float | Decimal | None = None,
+    gt: int | float | Decimal | None = None,
+    lt: int | float | Decimal | None = None,
     min_length: int | None = None,
     max_length: int | None = None,
     regex: str | None = None,

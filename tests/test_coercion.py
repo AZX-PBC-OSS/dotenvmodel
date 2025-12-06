@@ -113,17 +113,17 @@ class TestCoerceValue:
 
     def test_coerce_optional_with_value(self) -> None:
         """Test coercing Optional type with value."""
-        result = coerce_value("test_field", "123", int | None, "TEST_FIELD")
+        result = coerce_value("test_field", "123", int | None, "TEST_FIELD")  # type: ignore[arg-type]
         assert result == 123
 
     def test_coerce_optional_with_none(self) -> None:
         """Test coercing Optional type with None."""
-        result = coerce_value("test_field", None, int | None, "TEST_FIELD")
+        result = coerce_value("test_field", None, int | None, "TEST_FIELD")  # type: ignore[arg-type]
         assert result is None
 
     def test_coerce_optional_with_empty_string(self) -> None:
         """Test coercing Optional type with empty string."""
-        result = coerce_value("test_field", "", int | None, "TEST_FIELD")
+        result = coerce_value("test_field", "", int | None, "TEST_FIELD")  # type: ignore[arg-type]
         assert result is None
 
     def test_coerce_list_str(self) -> None:
@@ -153,7 +153,7 @@ class TestCoerceValue:
 
     def test_coerce_literal_type(self) -> None:
         """Test coercing to Literal type."""
-        result = coerce_value("test_field", "dev", Literal["dev", "prod"], "TEST_FIELD")
+        result = coerce_value("test_field", "dev", Literal["dev", "prod"], "TEST_FIELD")  # type: ignore[arg-type]
         assert result == "dev"
 
     def test_coerce_unsupported_type(self) -> None:
@@ -250,19 +250,19 @@ class TestCoerceLiteral:
 
     def test_coerce_literal_valid_value(self) -> None:
         """Test coercing valid literal value."""
-        result = _coerce_literal("field", "dev", Literal["dev", "staging", "prod"], "ENV_VAR")
+        result = _coerce_literal("field", "dev", Literal["dev", "staging", "prod"], "ENV_VAR")  # type: ignore[arg-type]
         assert result == "dev"
 
     def test_coerce_literal_invalid_value(self) -> None:
         """Test coercing invalid literal value raises error."""
         with pytest.raises(TypeCoercionError) as exc_info:
-            _coerce_literal("field", "invalid", Literal["dev", "prod"], "ENV_VAR")
+            _coerce_literal("field", "invalid", Literal["dev", "prod"], "ENV_VAR")  # type: ignore[arg-type]
         assert "must be one of" in str(exc_info.value)
 
     def test_coerce_literal_none_value(self) -> None:
         """Test coercing None to literal raises error."""
         with pytest.raises(TypeCoercionError) as exc_info:
-            _coerce_literal("field", None, Literal["dev", "prod"], "ENV_VAR")
+            _coerce_literal("field", None, Literal["dev", "prod"], "ENV_VAR")  # type: ignore[arg-type]
         assert "cannot be None" in str(exc_info.value)
 
 

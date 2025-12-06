@@ -31,8 +31,8 @@ class TestFormatTypeName:
 
     def test_optional_types(self) -> None:
         """Test optional type formatting."""
-        assert format_type_name(str | None) == "str | None"
-        assert format_type_name(int | None) == "int | None"
+        assert format_type_name(str | None) == "str | None"  # type: ignore[arg-type]
+        assert format_type_name(int | None) == "int | None"  # type: ignore[arg-type]
 
     def test_generic_types(self) -> None:
         """Test generic type formatting."""
@@ -54,42 +54,42 @@ class TestFormatTypeName:
         from collections.abc import Callable
 
         # Test with specific parameter types
-        result = format_type_name(Callable[[int, str], bool])
+        result = format_type_name(Callable[[int, str], bool])  # type: ignore[arg-type]
         assert result == "Callable[[int, str], bool]"
 
         # Test with ellipsis
-        result = format_type_name(Callable[..., str])
+        result = format_type_name(Callable[..., str])  # type: ignore[arg-type]
         assert result == "Callable[[...], str]"
 
         # Test with no parameters
-        result = format_type_name(Callable[[], int])
+        result = format_type_name(Callable[[], int])  # type: ignore[arg-type]
         assert result == "Callable[[], int]"
 
         # Test with single parameter
-        result = format_type_name(Callable[[str], None])
+        result = format_type_name(Callable[[str], None])  # type: ignore[arg-type]
         assert result == "Callable[[str], None]"
 
         # Test with nested types
-        result = format_type_name(Callable[[list[int], dict[str, str]], bool])
+        result = format_type_name(Callable[[list[int], dict[str, str]], bool])  # type: ignore[arg-type]
         assert result == "Callable[[list[int], dict[str, str]], bool]"
 
     def test_annotated_type_formatting(self) -> None:
         """Test Annotated type formatting."""
         from typing import Annotated
 
-        result = format_type_name(Annotated[str, "metadata"])
+        result = format_type_name(Annotated[str, "metadata"])  # type: ignore[arg-type]
         assert "str" in result
 
     def test_literal_type_formatting(self) -> None:
         """Test Literal type formatting."""
         from typing import Literal
 
-        result = format_type_name(Literal["a", "b", "c"])
+        result = format_type_name(Literal["a", "b", "c"])  # type: ignore[arg-type]
         assert "Literal" in result
 
     def test_union_multiple_types(self) -> None:
         """Test Union with multiple non-None types."""
-        result = format_type_name(str | int | float)
+        result = format_type_name(str | int | float)  # type: ignore[arg-type]
         # Should show all types joined with " | "
         assert "str" in result
         assert "int" in result
@@ -100,7 +100,7 @@ class TestFormatTypeName:
         """Test Callable with ellipsis parameter."""
         from collections.abc import Callable
 
-        result = format_type_name(Callable[..., str])
+        result = format_type_name(Callable[..., str])  # type: ignore[arg-type]
         assert "Callable[[...], str]" in result
 
     def test_callable_no_args(self) -> None:
@@ -210,7 +210,7 @@ class TestFormatDefault:
     def test_none_default(self) -> None:
         """Test None default formatting."""
         field_info = FieldInfo(default=None)
-        assert format_default(field_info, str | None) == "None"
+        assert format_default(field_info, str | None) == "None"  # type: ignore[arg-type]
 
     def test_string_default(self) -> None:
         """Test string default formatting."""
@@ -774,7 +774,7 @@ class TestSecretStrMasking:
             api_key: SecretStr = Field(default=SecretStr("my-secret"))
 
         for fmt in ["table", "markdown", "json"]:
-            output = Config.describe(output_format=fmt)
+            output = Config.describe(output_format=fmt)  # type: ignore[arg-type]
             assert "<secret>" in output or '"<secret>"' in output
             assert "my-secret" not in output
 
@@ -1486,7 +1486,7 @@ class TestLineEndings:
 
         # Test each format with Windows line endings
         for fmt in ["table", "markdown", "html", "dotenv"]:
-            output = Config.describe(output_format=fmt, line_ending="\r\n")
+            output = Config.describe(output_format=fmt, line_ending="\r\n")  # type: ignore[arg-type]
             assert "\r\n" in output, f"Format {fmt} should contain \\r\\n line endings"
 
     def test_unix_line_endings_in_describe_configs_json(self) -> None:
@@ -1703,7 +1703,7 @@ class TestDescribeFormattingEdgeCases:
         from dotenvmodel.describe import format_type_name
 
         # Bare Callable without type args
-        result = format_type_name(Callable)
+        result = format_type_name(Callable)  # type: ignore[arg-type]
         assert result == "Callable"
 
         # Create a Callable with args that are not a list/tuple (edge case)
@@ -1711,7 +1711,7 @@ class TestDescribeFormattingEdgeCases:
             from collections.abc import Callable as TypingCallable
 
             # Create partial callable annotation (edge case)
-            result2 = format_type_name(TypingCallable)
+            result2 = format_type_name(TypingCallable)  # type: ignore[arg-type]
             # Should return "Callable" as fallback
             assert "Callable" in result2
         except Exception:
