@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from typing import Any, get_args, get_origin, get_type_hints
 
 from dotenvmodel.fields import _MISSING, FieldInfo, _RequiredSentinel
@@ -14,6 +15,47 @@ def _is_optional_type(field_type: type) -> bool:
         args = get_args(field_type)
         return type(None) in args
     return False
+
+
+def _get_annotations_from_namespace(namespace: dict[str, Any]) -> dict[str, Any]:
+    """Extract annotations from a class namespace dict.
+
+    On Python 3.14+ (PEP 649/749), annotations are lazily evaluated and
+    __annotations__ is not in the namespace during metaclass __new__.
+    Instead, an __annotate_func__ is present and must be called to get
+    the actual annotation values.
+    """
+    if "__annotations__" in namespace:
+        return namespace["__annotations__"]
+
+    if sys.version_info >= (3, 14):
+        import annotationlib
+
+        annotate_func = annotationlib.get_annotate_from_class_namespace(namespace)
+        if annotate_func is not None:
+            try:
+                return annotate_func(annotationlib.Format.VALUE)
+            except Exception:
+                pass
+
+    return {}
+
+
+def _resolve_type_hints(cls: type) -> dict[str, Any]:
+    """Resolve string annotations to actual types.
+
+    Uses get_type_hints which handles both PEP 563 (future import)
+    and Python 3.14+ lazy annotations (PEP 649/749).
+    """
+    field_names = set(cls._fields.keys())  # type: ignore[attr-defined]
+    if not field_names:
+        return {}
+
+    try:
+        hints = get_type_hints(cls)
+        return {k: v for k, v in hints.items() if k in field_names}
+    except Exception:
+        return {}
 
 
 class ConfigMeta(type):
@@ -30,7 +72,7 @@ class ConfigMeta(type):
             if hasattr(base, "_fields"):
                 fields.update(base._fields)  # type: ignore[arg-type]
 
-        hints = namespace.get("__annotations__", {})
+        hints = _get_annotations_from_namespace(namespace)
 
         for field_name, field_type in hints.items():
             if field_name.startswith("_"):
@@ -62,14 +104,19 @@ class ConfigMeta(type):
                 field_info = FieldInfo(default=field_value)
 
             fields[field_name] = (field_type, field_info)
-            namespace.pop(field_name, None)
+            # Set to None instead of removing so __annotate__ can still resolve
+            # the name on Python 3.14+ (PEP 649). FieldInfo objects must not
+            # remain as class attributes since they'd be shared across instances.
+            if field_name in namespace:
+                namespace[field_name] = None
 
         namespace["_fields"] = fields
         cls = super().__new__(mcs, name, bases, namespace)
 
+        # Resolve string annotations (PEP 563 future import or Python 3.14+ lazy annotations)
         if any(isinstance(ft, str) for ft, _ in cls._fields.values()):  # type: ignore[attr-defined]
-            try:
-                resolved = get_type_hints(cls)
+            resolved = _resolve_type_hints(cls)
+            if resolved:
                 new_fields: dict[str, tuple[type, FieldInfo]] = {}
                 for fname, (ftype, finfo) in cls._fields.items():  # type: ignore[attr-defined]
                     rtype = resolved.get(fname, ftype)
@@ -82,7 +129,5 @@ class ConfigMeta(type):
                         finfo.required = False
                     new_fields[fname] = (rtype, finfo)
                 cls._fields = new_fields  # type: ignore[method-assign]
-            except Exception:
-                pass
 
         return cls

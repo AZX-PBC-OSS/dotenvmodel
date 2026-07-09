@@ -63,7 +63,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         - [`load_from_dict`][dotenvmodel.config.DotEnvConfig.load_from_dict]: For testing.
     """
 
-    _fields: dict[str, tuple[type, FieldInfo]]
+    _fields: builtins.dict[str, tuple[type, FieldInfo]]
     _loaded: bool = False
     _load_env: str | None = None  # Store the env used during load
     _load_override: bool = True  # Store the override flag used during load
