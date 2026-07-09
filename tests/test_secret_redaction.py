@@ -1,9 +1,18 @@
 """Secret-redaction regression tests (GitHub issue #27).
 
-These lock in that credentials never surface in plaintext through the four
-paths the security review found: DSN ``repr``/``str``, config ``repr``,
-coercion error messages, generated documentation/.env.example, and the
-``SecretStr`` exception chain.
+Contract after review (PR #29):
+- ``repr(dsn)`` / ``repr(config)`` mask the password (safe display).
+- ``str(dsn)`` / f-strings stay RAW so the DSN is usable as a connection
+  string (drivers read the object's buffer). Masking ``str`` broke that idiom.
+- Exception messages and ``describe()`` / ``generate_env_example()`` mask,
+  including ``Optional[DSN]`` fields.
+- A ``SecretStr`` constraint error carries no plaintext anywhere in its
+  exception chain (``__cause__`` / ``__context__``).
+- ``redact_url_password`` masks userinfo AND sensitive query-string keys.
+
+Known, documented limitation: because DSN types subclass ``str``, raw buffer
+operations (``.encode()``, ``json.dumps``, concatenation) still expose the
+value. Use ``SecretStr`` for values that must never appear in serialized output.
 """
 
 import logging
@@ -12,69 +21,67 @@ import traceback
 import pytest
 
 from dotenvmodel import DotEnvConfig, Field, TypeCoercionError
+from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.types import PostgresDsn, RedisDsn, SecretStr
 
 SECRET = "s3cr3t-pw"
 DSN = f"postgresql://dbuser:{SECRET}@db.example.com:5432/appdb"
 
 
+def _config() -> DotEnvConfig:
+    class Config(DotEnvConfig):
+        database_url: PostgresDsn = Field()
+
+    return Config.load_from_dict({"DATABASE_URL": DSN})
+
+
 class TestDsnDisplayRedaction:
-    """A credential-bearing DSN must not reveal its password when displayed."""
-
-    def _config(self) -> DotEnvConfig:
-        class Config(DotEnvConfig):
-            database_url: PostgresDsn = Field()
-
-        return Config.load_from_dict({"DATABASE_URL": DSN})
+    """repr()-family paths mask the password; str() stays usable."""
 
     def test_repr_of_dsn_masks_password(self) -> None:
-        config = self._config()
-        assert SECRET not in repr(config.database_url)
-
-    def test_str_of_dsn_masks_password(self) -> None:
-        config = self._config()
-        assert SECRET not in str(config.database_url)
-
-    def test_fstring_of_dsn_masks_password(self) -> None:
-        config = self._config()
-        assert SECRET not in f"{config.database_url}"
+        assert SECRET not in repr(_config().database_url)
 
     def test_repr_of_config_masks_dsn_password(self) -> None:
-        config = self._config()
-        assert SECRET not in repr(config)
+        assert SECRET not in repr(_config())
 
-    def test_percent_style_logging_masks_password(self, caplog) -> None:
-        config = self._config()
+    def test_repr_style_logging_masks_password(self, caplog) -> None:
+        config = _config()
         with caplog.at_level(logging.INFO):
-            logging.getLogger("test").info("connecting to %s", config.database_url)
+            logging.getLogger("test").info("connecting to %r", config.database_url)
         assert SECRET not in caplog.text
 
-    def test_masked_form_keeps_useful_structure(self) -> None:
-        config = self._config()
-        shown = str(config.database_url)
-        # host / scheme / user stay visible; only the password is hidden.
+    def test_masked_repr_keeps_useful_structure(self) -> None:
+        shown = repr(_config().database_url)
         assert "db.example.com" in shown
         assert "postgresql" in shown
         assert "dbuser" in shown
 
-    def test_dsn_still_usable_as_connection_string(self) -> None:
-        config = self._config()
-        # The object still carries the real value for drivers, and explicit
-        # component accessors still return the true credential.
-        assert config.database_url == DSN
-        assert config.database_url.password == SECRET
-        assert config.database_url.host == "db.example.com"
-        assert config.database_url.port == 5432
 
-    def test_passwordless_dsn_is_unchanged(self) -> None:
+class TestDsnStillUsable:
+    """The DSN must remain usable as a real connection string."""
+
+    def test_str_returns_the_raw_connection_string(self) -> None:
+        # Reverted the __str__ override: str(dsn) is the real value so the
+        # create_engine(str(url)) / redis.from_url(str(url)) idiom keeps working.
+        assert str(_config().database_url) == DSN
+
+    def test_fstring_returns_raw_value(self) -> None:
+        assert str(SECRET) in f"{_config().database_url}"
+
+    def test_equality_and_accessors_intact(self) -> None:
+        d = _config().database_url
+        assert d == DSN
+        assert d.password == SECRET
+        assert d.host == "db.example.com"
+        assert d.port == 5432
+
+    def test_passwordless_dsn_roundtrips(self) -> None:
         class Config(DotEnvConfig):
             redis_url: RedisDsn = Field()
 
         config = Config.load_from_dict({"REDIS_URL": "redis://localhost:6379/0"})
         assert str(config.redis_url) == "redis://localhost:6379/0"
-        assert repr(config.redis_url) == repr("redis://localhost:6379/0") or (
-            "redis://localhost:6379/0" in repr(config.redis_url)
-        )
+        assert repr(config.redis_url) == repr("redis://localhost:6379/0")
 
 
 class TestDsnCoercionErrorRedaction:
@@ -84,7 +91,6 @@ class TestDsnCoercionErrorRedaction:
         class Config(DotEnvConfig):
             database_url: PostgresDsn = Field()
 
-        # Wrong scheme -> ValueError -> TypeCoercionError, value still has creds.
         bad = f"ftp://dbuser:{SECRET}@db.example.com/appdb"
         with pytest.raises(TypeCoercionError) as exc_info:
             Config.load_from_dict({"DATABASE_URL": bad})
@@ -94,44 +100,69 @@ class TestDsnCoercionErrorRedaction:
 class TestDsnDefaultRedactionInDocs:
     """describe()/generate_env_example() must not print DSN default creds."""
 
-    def _config_cls(self) -> type[DotEnvConfig]:
-        class Config(DotEnvConfig):
-            database_url: PostgresDsn = Field(default=DSN)
+    def _cls(self, annotation: str = "plain") -> type[DotEnvConfig]:
+        if annotation == "optional":
+
+            class Config(DotEnvConfig):
+                database_url: PostgresDsn | None = Field(default=DSN)
+
+        else:
+
+            class Config(DotEnvConfig):
+                database_url: PostgresDsn = Field(default=DSN)
 
         return Config
 
-    def test_describe_table_masks_default_password(self) -> None:
-        assert SECRET not in self._config_cls().describe(output_format="table")
+    def test_describe_table_masks_default(self) -> None:
+        assert SECRET not in self._cls().describe(output_format="table")
 
-    def test_describe_markdown_masks_default_password(self) -> None:
-        assert SECRET not in self._config_cls().describe(output_format="markdown")
+    def test_describe_markdown_masks_default(self) -> None:
+        assert SECRET not in self._cls().describe(output_format="markdown")
 
-    def test_describe_html_masks_default_password(self) -> None:
-        assert SECRET not in self._config_cls().describe(output_format="html")
+    def test_describe_html_masks_default(self) -> None:
+        assert SECRET not in self._cls().describe(output_format="html")
 
-    def test_env_example_masks_default_password(self) -> None:
-        assert SECRET not in self._config_cls().generate_env_example()
+    def test_env_example_masks_default(self) -> None:
+        assert SECRET not in self._cls().generate_env_example()
+
+    def test_optional_dsn_default_masked_in_env_example(self) -> None:
+        # Union/Optional field_type is not a BaseDsn subclass; must still mask.
+        assert SECRET not in self._cls("optional").generate_env_example()
+
+    def test_optional_dsn_default_masked_in_describe(self) -> None:
+        assert SECRET not in self._cls("optional").describe(output_format="markdown")
 
 
 class TestRedactionHelper:
-    """The standalone helper is defensive and safe on arbitrary input."""
+    """The standalone helper masks userinfo and sensitive query keys."""
+
+    def test_userinfo_password_masked(self) -> None:
+        assert redact_url_password(DSN) == "postgresql://dbuser:***@db.example.com:5432/appdb"
+
+    def test_query_string_password_masked(self) -> None:
+        out = redact_url_password("redis://localhost:6379/0?password=s3cr3t&db=0")
+        assert "s3cr3t" not in out
+        assert "db=0" in out
+
+    def test_query_string_token_masked(self) -> None:
+        assert "abc123" not in redact_url_password("https://api.example.com/v1?api_key=abc123")
+
+    def test_ipv6_host_and_port_preserved(self) -> None:
+        out = redact_url_password("postgresql://u:pw@[2001:db8::1]:5432/db")
+        assert "pw" not in out.split("@")[0].split(":")[-1]
+        assert "[2001:db8::1]:5432" in out
 
     def test_unparseable_url_returned_unchanged(self) -> None:
-        from dotenvmodel._redaction import redact_url_password
-
-        # Invalid IPv6 makes urlparse raise when the password is read.
         assert redact_url_password("http://[::1") == "http://[::1"
 
     def test_non_url_string_returned_unchanged(self) -> None:
-        from dotenvmodel._redaction import redact_url_password
-
         assert redact_url_password("just-a-plain-value") == "just-a-plain-value"
 
 
 class TestSecretStrExceptionChain:
-    """SecretStr plaintext must not leak through a chained/contextual traceback."""
+    """SecretStr plaintext must not leak anywhere in the exception chain."""
 
-    def test_full_traceback_has_no_plaintext(self) -> None:
+    def _raise(self) -> Exception:
         secret_value = "super-secret-value-that-is-long"
 
         class Config(DotEnvConfig):
@@ -140,7 +171,18 @@ class TestSecretStrExceptionChain:
         try:
             Config.load_from_dict({"TOKEN": secret_value})
         except Exception as exc:
-            rendered = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
-            assert secret_value not in rendered
-        else:
-            pytest.fail("expected a validation error for the too-short SecretStr")
+            return exc
+        pytest.fail("expected a validation error for the too-short SecretStr")
+
+    def test_full_traceback_has_no_plaintext(self) -> None:
+        exc = self._raise()
+        rendered = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
+        assert "super-secret-value-that-is-long" not in rendered
+
+    def test_no_plaintext_anywhere_in_chain(self) -> None:
+        exc: BaseException | None = self._raise()
+        secret_value = "super-secret-value-that-is-long"
+        while exc is not None:
+            assert secret_value not in str(exc)
+            assert secret_value not in str(getattr(exc, "value", ""))
+            exc = exc.__cause__ or exc.__context__

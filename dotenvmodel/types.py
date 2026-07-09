@@ -148,21 +148,17 @@ class BaseDsn(str):
         return str.__new__(cls, value)
 
     def __repr__(self) -> str:
-        """Return a display form with any password redacted.
+        """Return a redacted ``repr`` with any password masked.
 
-        The instance still behaves as the real connection string for drivers
-        (equality, slicing, and property access use the underlying value); only
-        the human-facing display hides the password.
+        Only ``repr`` is overridden. ``str(dsn)`` and the raw buffer remain the
+        real connection string so the DSN stays usable with database drivers
+        (``create_engine(str(url))``, ``redis.from_url(str(url))``, etc.). This
+        masks the accidental-display path (``repr(config)``, debuggers, ``%r``
+        logging) without breaking functionality. Values that must never appear
+        in serialized output (``json.dumps``, ``.encode()``) should use
+        ``SecretStr`` instead.
         """
         return repr(redact_url_password(str.__str__(self)))
-
-    def __str__(self) -> str:
-        """Return a display form with any password redacted."""
-        return redact_url_password(str.__str__(self))
-
-    def __format__(self, format_spec: str) -> str:
-        """Redact when interpolated (e.g. f-strings, ``%s`` logging)."""
-        return format(redact_url_password(str.__str__(self)), format_spec)
 
     @property
     def parsed(self) -> ParseResult:

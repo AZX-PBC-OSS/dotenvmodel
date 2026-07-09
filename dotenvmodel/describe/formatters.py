@@ -318,6 +318,20 @@ def format_constraints(
     return ", ".join(constraints) if constraints else "-"
 
 
+def _unwrap_optional(field_type: TypeForm[Any]) -> Any:
+    """Return the sole non-None member of an Optional/Union, else the type itself.
+
+    ``PostgresDsn | None`` -> ``PostgresDsn``; a multi-member union or a plain
+    type is returned unchanged.
+    """
+    origin = get_origin(field_type)
+    if origin is types.UnionType or origin is Union:
+        non_none = [a for a in get_args(field_type) if a is not type(None)]
+        if len(non_none) == 1:
+            return non_none[0]
+    return field_type
+
+
 def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: bool = True) -> str:
     """Format default value for display."""
     if field_info.default is _MISSING and field_info.default_factory is None:
@@ -341,13 +355,17 @@ def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: b
     if isinstance(default, Enum):
         return str(default.value)
 
-    if isinstance(field_type, type) and issubclass(field_type, SecretStr):
+    # Unwrap Optional/Union (e.g. `PostgresDsn | None`) so a DSN/SecretStr
+    # default nested in a Union is still recognised and redacted.
+    effective_type = _unwrap_optional(field_type)
+
+    if isinstance(effective_type, type) and issubclass(effective_type, SecretStr):
         return "<secret>"
 
     # DSN defaults may embed credentials; redact the password before display.
     if (
-        isinstance(field_type, type)
-        and issubclass(field_type, BaseDsn)
+        isinstance(effective_type, type)
+        and issubclass(effective_type, BaseDsn)
         and isinstance(default, str)
     ):
         return f'"{redact_url_password(str.__str__(default))}"'
