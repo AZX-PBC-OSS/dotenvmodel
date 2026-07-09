@@ -200,6 +200,66 @@ class TestRedactionHelper:
         assert redact_url_password("just-a-plain-value") == "just-a-plain-value"
 
 
+class TestRedactionInternals:
+    """Direct unit tests pinning the redaction helpers' contracts."""
+
+    def test_is_sensitive_key_exact_tokens(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        for key in ("pwd", "auth", "authorization", "api_key", "apikey", "key", "credential"):
+            assert _is_sensitive_key(key), key
+
+    def test_is_sensitive_key_substring_and_separators(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        for key in ("sslpassword", "db_password", "x-api-key", "clientSecret", "access-token"):
+            assert _is_sensitive_key(key), key
+
+    def test_is_sensitive_key_benign_lookalikes(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        for key in ("author", "keyboard", "mode", "host", "note", "tag", "username"):
+            assert not _is_sensitive_key(key), key
+
+    def test_bare_query_key_without_value_preserved(self) -> None:
+        # A flag-style key with no "=" must be left untouched.
+        assert redact_url_password("https://h/p?flag&password=x") == "https://h/p?flag&password=***"
+
+    def test_blank_sensitive_value_not_corrupted(self) -> None:
+        # Nothing to mask (empty value); the URL must round-trip unchanged.
+        assert redact_url_password("https://h/p?password=&db=1") == "https://h/p?password=&db=1"
+
+    def test_no_sensitive_key_returns_input_unchanged(self) -> None:
+        url = "https://h/p?mode=ssl&region=us-east-1"
+        assert redact_url_password(url) == url
+
+
+class TestUnionHelpers:
+    """Direct unit tests for the describe() union-unwrapping helpers."""
+
+    def test_union_members_plain_type(self) -> None:
+        from dotenvmodel.describe.formatters import _union_members
+
+        assert _union_members(int) == [int]
+
+    def test_union_members_strips_none(self) -> None:
+        from dotenvmodel.describe.formatters import _union_members
+
+        assert _union_members(PostgresDsn | None) == [PostgresDsn]
+
+    def test_is_type_in_union_multi_member(self) -> None:
+        from dotenvmodel.describe.formatters import _is_type_in_union
+        from dotenvmodel.types import BaseDsn
+
+        assert _is_type_in_union(PostgresDsn | RedisDsn | None, BaseDsn)
+
+    def test_is_type_in_union_absent(self) -> None:
+        from dotenvmodel.describe.formatters import _is_type_in_union
+        from dotenvmodel.types import BaseDsn
+
+        assert not _is_type_in_union(int | str, BaseDsn)
+
+
 class TestSecretStrExceptionChain:
     """SecretStr plaintext must not leak anywhere in the exception chain."""
 
