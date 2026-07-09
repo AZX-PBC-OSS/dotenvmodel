@@ -38,6 +38,7 @@ Changelog = "https://github.com/AZX-PBC-OSS/dotenvmodel/blob/main/CHANGELOG.md"
 [tool.uv]
 package = true
 exclude-newer = "48h"
+constraint-dependencies = ["pygments>=2.20.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["dotenvmodel"]
