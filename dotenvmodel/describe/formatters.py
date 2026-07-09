@@ -13,8 +13,9 @@ from typing import Any, Union, get_args, get_origin
 
 from typing_extensions import TypeForm
 
+from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.fields import _MISSING, FieldInfo
-from dotenvmodel.types import SecretStr
+from dotenvmodel.types import BaseDsn, SecretStr
 
 # Maximum column widths to prevent unbounded table growth
 MAX_WIDTHS = {
@@ -342,6 +343,14 @@ def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: b
 
     if isinstance(field_type, type) and issubclass(field_type, SecretStr):
         return "<secret>"
+
+    # DSN defaults may embed credentials; redact the password before display.
+    if (
+        isinstance(field_type, type)
+        and issubclass(field_type, BaseDsn)
+        and isinstance(default, str)
+    ):
+        return f'"{redact_url_password(str.__str__(default))}"'
 
     if isinstance(default, str):
         if truncate and len(default) > TRUNCATE_THRESHOLD_SHORT:

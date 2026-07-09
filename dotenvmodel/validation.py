@@ -52,13 +52,16 @@ def validate_field(field_name: str, value: Any, field_info: FieldInfo, env_var_n
         try:
             _validate_string(field_name, value.get_secret_value(), field_info, env_var_name)
         except ConstraintViolationError as e:
+            # Re-raise with the masked SecretStr as the value, and suppress the
+            # context chain: the caught exception carries the plaintext secret
+            # in its message, which `from None` keeps out of any traceback.
             raise ConstraintViolationError(
                 field_name=e.field_name,
                 value=value,
                 constraint=e.constraint,
                 error_msg=e.error_msg,
                 env_var_name=e.env_var_name,
-            ) from e
+            ) from None
 
     # Choice validation (works for any type)
     if field_info.choices is not None:

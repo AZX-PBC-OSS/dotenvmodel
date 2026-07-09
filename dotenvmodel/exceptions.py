@@ -4,6 +4,15 @@ from typing import Any
 
 from typing_extensions import TypeForm
 
+from dotenvmodel._redaction import redact_url_password
+
+
+def _value_repr(value: Any) -> str:
+    """Repr a field value for error messages, redacting URL passwords."""
+    if isinstance(value, str):
+        return repr(redact_url_password(str.__str__(value)))
+    return repr(value)
+
 
 class DotEnvModelError(Exception):
     """Base exception for all dotenvmodel errors.
@@ -83,7 +92,7 @@ class ValidationError(DotEnvModelError):
     def _format_message(self) -> str:
         """Format a detailed error message."""
         msg = f"Field '{self.field_name}' validation failed:\n"
-        msg += f"  Value: {self.value!r}\n"
+        msg += f"  Value: {_value_repr(self.value)}\n"
         if self.field_type:
             type_name = getattr(self.field_type, "__name__", str(self.field_type))
             msg += f"  Expected type: {type_name}\n"
@@ -182,7 +191,7 @@ class TypeCoercionError(ValidationError):
         if self.field_type:
             type_name = getattr(self.field_type, "__name__", str(self.field_type))
         msg = f"TypeCoercionError: Failed to coerce field '{self.field_name}' to type {type_name}.\n\n"
-        msg += f"Value: {self.value!r}\n"
+        msg += f"Value: {_value_repr(self.value)}\n"
         msg += f"Environment variable: {self.env_var_name}\n"
         msg += f"Error: {self.error_msg}\n"
         msg += f"Hint: Ensure {self.env_var_name} contains a valid {type_name}"
@@ -239,7 +248,7 @@ class ConstraintViolationError(ValidationError):
     def _format_message(self) -> str:
         """Format a detailed error message for constraint violations."""
         msg = f"ConstraintViolationError: Field '{self.field_name}' violates constraint.\n\n"
-        msg += f"Value: {self.value!r}\n"
+        msg += f"Value: {_value_repr(self.value)}\n"
         msg += f"Constraint: {self.constraint}\n"
         msg += f"Error: {self.error_msg}\n"
         msg += f"Hint: Set {self.env_var_name} to a value that satisfies the constraint"
@@ -284,7 +293,7 @@ class MultipleValidationErrors(DotEnvModelError):
             msg += f"{i}. {error.__class__.__name__}: {error.error_msg}\n"
             msg += f"   Field: {error.field_name}\n"
             if error.value is not None:
-                msg += f"   Value: {error.value!r}\n"
+                msg += f"   Value: {_value_repr(error.value)}\n"
             msg += f"   Environment variable: {error.env_var_name}\n"
             if hasattr(error, "constraint") and error.constraint is not None:  # type: ignore[attr-defined]
                 msg += f"   Constraint: {error.constraint}\n"  # type: ignore[attr-defined]

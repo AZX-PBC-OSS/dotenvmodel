@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import ParseResult, unquote, urlparse
 from uuid import UUID
 
+from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.exceptions import TypeCoercionError
 
 _T = TypeVar("_T")
@@ -145,6 +146,23 @@ class BaseDsn(str):
             raise ValueError("URL must have a host")
 
         return str.__new__(cls, value)
+
+    def __repr__(self) -> str:
+        """Return a display form with any password redacted.
+
+        The instance still behaves as the real connection string for drivers
+        (equality, slicing, and property access use the underlying value); only
+        the human-facing display hides the password.
+        """
+        return repr(redact_url_password(str.__str__(self)))
+
+    def __str__(self) -> str:
+        """Return a display form with any password redacted."""
+        return redact_url_password(str.__str__(self))
+
+    def __format__(self, format_spec: str) -> str:
+        """Redact when interpolated (e.g. f-strings, ``%s`` logging)."""
+        return format(redact_url_password(str.__str__(self)), format_spec)
 
     @property
     def parsed(self) -> ParseResult:
