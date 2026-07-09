@@ -4,24 +4,35 @@ import json
 import re
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
+from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import ParseResult, unquote, urlparse
 from uuid import UUID
 
 from dotenvmodel.exceptions import TypeCoercionError
 
+_T = TypeVar("_T")
+
 
 class SecretStr:
-    """
-    A string type that hides its value in logs and repr output.
+    """A string type that hides its value in logs and repr output.
 
     Use this for sensitive data like API keys, passwords, and tokens to prevent
     them from appearing in logs, error messages, or debugging output.
 
+    When to use:
+        - For API keys, passwords, tokens, and other secrets
+        - When config values might be logged or printed
+        - When you want to prevent accidental secret exposure in repr/str
+
+    When NOT to use:
+        - For non-sensitive values (use `str` instead)
+        - When you need to pickle the value (SecretStr prevents pickling for security)
+
     Security features:
-    - Hidden in str/repr output
-    - Name-mangled attribute to prevent accidental access
-    - Prevents pickling to avoid serialization leaks
-    - Immutable to prevent modification
+        - Hidden in str/repr output (shows `**********`)
+        - Name-mangled attribute to prevent accidental access
+        - Prevents pickling to avoid serialization leaks
+        - Immutable to prevent modification after creation
 
     Example:
         ```python
@@ -30,9 +41,13 @@ class SecretStr:
             password: SecretStr = Field(min_length=8)
 
         config = Config.load()
-        print(config.api_key)  # SecretStr('**********')
-        print(config.api_key.get_secret_value())  # 'actual-secret-key'
+        print(config.api_key)                    # SecretStr('**********')
+        print(repr(config.api_key))              # "SecretStr('**********')"
+        print(config.api_key.get_secret_value()) # 'actual-secret-key'
         ```
+
+    See Also:
+        - [`Field`][dotenvmodel.fields.Field]: For defining SecretStr fields with constraints.
     """
 
     __slots__ = ("__secret",)
@@ -75,16 +90,35 @@ class SecretStr:
 
 
 class BaseDsn(str):
-    """
-    Base class for DSN (Data Source Name) types.
+    """Base class for DSN (Data Source Name) types.
 
     This base class provides common URL validation and parsing functionality
-    that can be extended by specific DSN types.
+    that can be extended by specific DSN types. You typically don't use this
+    directly — use `HttpUrl`, `PostgresDsn`, or `RedisDsn` instead.
 
-    Args:
+    When to subclass:
+        - When you need a custom DSN type with specific scheme validation
+        - When you need parsed URL components as properties
+
+    Class Attributes:
         allowed_schemes: Tuple of allowed URL schemes (e.g., ("http", "https"))
-        require_host: Whether the URL must have a host/netloc component
-        default_port: Default port number for this DSN type
+        require_host: Whether the URL must have a host/netloc component (default True)
+        default_port: Default port number when not specified in the URL
+
+    Properties:
+        parsed: The `urllib.parse.ParseResult` for the URL
+        scheme: URL scheme (e.g., "https")
+        host: URL hostname
+        port: URL port number (or `default_port` if not specified)
+        path: URL path
+        query: URL query string
+        username: URL username (or None)
+        password: URL password, URL-decoded (or None)
+
+    See Also:
+        - [`HttpUrl`][dotenvmodel.types.HttpUrl]: For HTTP/HTTPS URLs.
+        - [`PostgresDsn`][dotenvmodel.types.PostgresDsn]: For PostgreSQL DSNs.
+        - [`RedisDsn`][dotenvmodel.types.RedisDsn]: For Redis DSNs.
     """
 
     # Class attributes that subclasses should override
@@ -156,35 +190,75 @@ class BaseDsn(str):
 
 
 class HttpUrl(BaseDsn):
-    """
-    A URL type that validates HTTP/HTTPS URLs.
+    """A URL type that validates HTTP/HTTPS URLs.
 
     Validates that the URL has a valid format and uses http or https scheme.
+    Works like a string but provides parsed URL components as properties.
+
+    When to use:
+        - For API endpoint URLs
+        - For web service URLs
+        - When you need to access URL components (host, port, path)
+
+    Allowed schemes: `http`, `https`
+    Default port: None (uses port from URL or protocol default)
 
     Example:
         ```python
         class Config(DotEnvConfig):
             api_url: HttpUrl = Field()
             # Environment: API_URL=https://api.example.com/v1
+
+        config = Config.load()
+        print(config.api_url)       # https://api.example.com/v1
+        print(config.api_url.host)  # api.example.com
+        print(config.api_url.port)  # None (no explicit port)
+        print(config.api_url.path)  # /v1
         ```
+
+    See Also:
+        - [`BaseDsn`][dotenvmodel.types.BaseDsn]: Base class with all properties.
+        - [`PostgresDsn`][dotenvmodel.types.PostgresDsn]: For PostgreSQL DSNs.
+        - [`RedisDsn`][dotenvmodel.types.RedisDsn]: For Redis DSNs.
     """
 
     allowed_schemes = ("http", "https")
 
 
 class PostgresDsn(BaseDsn):
-    """
-    A DSN type for PostgreSQL database URLs.
+    """A DSN type for PostgreSQL database URLs.
 
     Validates that the URL follows PostgreSQL connection string format.
-    Accepts both postgresql:// and postgres:// schemes.
+    Accepts both `postgresql://` and `postgres://` schemes.
+    Default port is 5432 if not specified in the URL.
+
+    When to use:
+        - For PostgreSQL connection strings
+        - When you need to extract database name, username, or password
+
+    Allowed schemes: `postgresql`, `postgres`
+    Default port: 5432
+
+    Additional Properties:
+        database: Database name extracted from the URL path
 
     Example:
         ```python
         class Config(DotEnvConfig):
             database_url: PostgresDsn = Field()
-            # Environment: DATABASE_URL=postgresql://user:pass@localhost:5432/db
+            # Environment: DATABASE_URL=postgresql://user:pass@localhost:5432/mydb
+
+        config = Config.load()
+        print(config.database_url.host)      # localhost
+        print(config.database_url.port)      # 5432
+        print(config.database_url.database)  # mydb
+        print(config.database_url.username)  # user
+        print(config.database_url.password)  # pass (URL-decoded)
         ```
+
+    See Also:
+        - [`BaseDsn`][dotenvmodel.types.BaseDsn]: Base class with all properties.
+        - [`HttpUrl`][dotenvmodel.types.HttpUrl]: For HTTP/HTTPS URLs.
     """
 
     allowed_schemes = ("postgresql", "postgres")
@@ -197,18 +271,37 @@ class PostgresDsn(BaseDsn):
 
 
 class RedisDsn(BaseDsn):
-    """
-    A DSN type for Redis URLs.
+    """A DSN type for Redis URLs.
 
     Validates that the URL follows Redis connection string format.
-    Accepts both redis:// and rediss:// (SSL) schemes.
+    Accepts both `redis://` and `rediss://` (SSL) schemes.
+    Default port is 6379 if not specified in the URL.
+
+    When to use:
+        - For Redis connection strings
+        - When you need to extract the database number
+
+    Allowed schemes: `redis`, `rediss` (SSL)
+    Default port: 6379
+
+    Additional Properties:
+        database: Redis database number extracted from the URL path (default 0)
 
     Example:
         ```python
         class Config(DotEnvConfig):
             redis_url: RedisDsn = Field()
             # Environment: REDIS_URL=redis://localhost:6379/0
+
+        config = Config.load()
+        print(config.redis_url.host)      # localhost
+        print(config.redis_url.port)      # 6379
+        print(config.redis_url.database)  # 0
         ```
+
+    See Also:
+        - [`BaseDsn`][dotenvmodel.types.BaseDsn]: Base class with all properties.
+        - [`PostgresDsn`][dotenvmodel.types.PostgresDsn]: For PostgreSQL DSNs.
     """
 
     allowed_schemes = ("redis", "rediss")
@@ -225,44 +318,99 @@ class RedisDsn(BaseDsn):
         return 0
 
 
-class Json[T]:
-    """
-    A type for parsing JSON strings into Python objects.
+if TYPE_CHECKING:
+    # For type checkers: Json[T] is an alias for T, so config.field has type T
+    Json = _T
+else:
+    # At runtime: Json is a class that supports __class_getitem__ for coercion
 
-    Use this for complex configuration that needs to be passed as JSON.
+    class _JsonMeta(type):
+        """Metaclass for Json to properly handle type annotations."""
 
-    Example:
-        ```python
-        class Config(DotEnvConfig):
-            feature_flags: Json[dict[str, bool]] = Field()
-            # Environment: FEATURE_FLAGS={"new_ui": true, "beta_api": false}
+        def __getitem__(cls, item: type) -> type:
+            """Support generic type syntax Json[T].
 
-            allowed_roles: Json[list[str]] = Field()
-            # Environment: ALLOWED_ROLES=["admin", "user", "guest"]
-        ```
-    """
+            At runtime, this returns a class with __inner_type__ for coercion.
+            """
+            # Create a new class that remembers the inner type for runtime coercion
+            new_cls: type = type(f"Json[{item}]", (cls,), {"__inner_type__": item})
+            return new_cls
 
-    def __class_getitem__(cls, item: type[T]) -> type["Json[T]"]:
-        """Support generic type syntax Json[T]."""
-        # Return a new class that remembers the inner type
-        return type(f"Json[{item}]", (Json,), {"__inner_type__": item})
+    class Json(metaclass=_JsonMeta):
+        """A type for parsing JSON strings into Python objects.
+
+        Use this for complex configuration that needs to be passed as JSON.
+        The inner type parameter is used for documentation and basic type validation.
+
+        When to use:
+            - For feature flags stored as JSON objects
+            - For lists of complex values
+            - When a config value is naturally a JSON structure
+
+        When NOT to use:
+            - For simple values (use str, int, bool, etc.)
+            - For comma-separated lists (use `list[str]` with separator)
+
+        Type Validation:
+            - `Json[dict]` validates that the parsed result is a dict
+            - `Json[list]` validates that the parsed result is a list
+            - Other inner types are accepted but not deeply validated
+
+        Example:
+            ```python
+            class Config(DotEnvConfig):
+                # JSON object
+                feature_flags: Json[dict[str, bool]] = Field()
+                # Environment: FEATURE_FLAGS={"new_ui": true, "beta_api": false}
+
+                # JSON array
+                allowed_roles: Json[list[str]] = Field()
+                # Environment: ALLOWED_ROLES=["admin", "user", "guest"]
+
+                # JSON without type validation
+                raw_config: Json = Field()
+                # Environment: RAW_CONFIG={"nested": {"value": 42}}
+
+            config = Config.load()
+            assert config.feature_flags == {"new_ui": True, "beta_api": False}
+            assert config.allowed_roles == ["admin", "user", "guest"]
+            ```
+
+        See Also:
+            - [`Field`][dotenvmodel.fields.Field]: For defining Json fields.
+        """
+
+        pass
 
 
 def parse_timedelta(value: str) -> timedelta:
-    """
-    Parse a human-readable duration string into a timedelta.
+    """Parse a human-readable duration string into a timedelta.
+
+    When to use:
+        - Called automatically when a field is typed as `timedelta`
+        - Can be called directly for parsing durations outside of config
 
     Supports formats like:
-    - Plain integers: "90" (seconds)
-    - With units: "1h30m", "90s", "1.5h", "2d"
+        - Plain integers: "90" (seconds)
+        - With units: "1h30m", "90s", "1.5h", "2d"
+        - Combined: "1d2h30m"
 
-    Units:
-    - ms: milliseconds
-    - s: seconds
-    - m: minutes
-    - h: hours
-    - d: days
-    - w: weeks
+    Units (case-insensitive):
+        - ms: milliseconds
+        - s: seconds
+        - m: minutes
+        - h: hours
+        - d: days
+        - w: weeks
+
+    Args:
+        value: Duration string (e.g., "90", "1h30m", "2d")
+
+    Returns:
+        timedelta object representing the parsed duration
+
+    Raises:
+        ValueError: If the format is invalid
 
     Example:
         >>> parse_timedelta("90")
@@ -271,15 +419,12 @@ def parse_timedelta(value: str) -> timedelta:
         timedelta(seconds=5400)
         >>> parse_timedelta("2d")
         timedelta(days=2)
+        >>> parse_timedelta("500ms")
+        timedelta(milliseconds=500)
 
-    Args:
-        value: Duration string
-
-    Returns:
-        timedelta object
-
-    Raises:
-        ValueError: If the format is invalid
+    See Also:
+        - [`coerce_timedelta`][dotenvmodel.types.coerce_timedelta]: Wrapper that raises
+          `TypeCoercionError` instead of `ValueError`.
     """
     # Try parsing as plain number (seconds)
     try:
@@ -287,14 +432,14 @@ def parse_timedelta(value: str) -> timedelta:
     except ValueError:
         pass
 
-    # Parse format like "1h30m", "90s", etc.
-    pattern = r"([\d.]+)(ms|s|m|h|d|w)"
+    # Parse format like "1h30m", "90s", "-30m", etc.
+    pattern = r"(-?[\d.]+)(ms|s|m|h|d|w)"
     matches = re.findall(pattern, value.lower())
 
     if not matches:
         raise ValueError(
             f"Invalid timedelta format: {value}. "
-            "Expected format like '90' (seconds), '1h30m', '2d', etc."
+            "Expected format like '90' (seconds), '1h30m', '-30m', '2d', etc."
         )
 
     total_seconds = 0.0
@@ -318,8 +463,11 @@ def parse_timedelta(value: str) -> timedelta:
 
 
 def coerce_datetime(value: str, field_name: str, env_var_name: str) -> datetime:
-    """
-    Coerce a string to datetime using ISO 8601 format.
+    """Coerce a string to datetime using ISO 8601 format.
+
+    When to use:
+        - Called automatically when a field is typed as `datetime`
+        - Can be called directly for parsing outside of config
 
     Args:
         value: ISO 8601 datetime string
@@ -345,12 +493,15 @@ def coerce_datetime(value: str, field_name: str, env_var_name: str) -> datetime:
 
 
 def coerce_timedelta(value: str, field_name: str, env_var_name: str) -> timedelta:
-    """
-    Coerce a string to timedelta.
+    """Coerce a string to timedelta.
+
+    When to use:
+        - Called automatically when a field is typed as `timedelta`
+        - Can be called directly for parsing outside of config
 
     Supports:
-    - Plain integers: "90" (seconds)
-    - Human-readable: "1h30m", "90s", "2d"
+        - Plain integers: "90" (seconds)
+        - Human-readable: "1h30m", "90s", "2d"
 
     Args:
         value: Duration string
@@ -376,8 +527,11 @@ def coerce_timedelta(value: str, field_name: str, env_var_name: str) -> timedelt
 
 
 def coerce_uuid(value: str, field_name: str, env_var_name: str) -> UUID:
-    """
-    Coerce a string to UUID.
+    """Coerce a string to UUID.
+
+    When to use:
+        - Called automatically when a field is typed as `UUID`
+        - Can be called directly for parsing outside of config
 
     Args:
         value: UUID string (with or without hyphens)
@@ -403,8 +557,11 @@ def coerce_uuid(value: str, field_name: str, env_var_name: str) -> UUID:
 
 
 def coerce_decimal(value: str, field_name: str, env_var_name: str) -> Decimal:
-    """
-    Coerce a string to Decimal.
+    """Coerce a string to Decimal.
+
+    When to use:
+        - Called automatically when a field is typed as `Decimal`
+        - Can be called directly for parsing outside of config
 
     Args:
         value: Numeric string
@@ -432,8 +589,11 @@ def coerce_decimal(value: str, field_name: str, env_var_name: str) -> Decimal:
 def coerce_json[T](
     value: str, field_name: str, env_var_name: str, expected_type: type[T] | None = None
 ) -> T:
-    """
-    Parse JSON string and optionally validate against expected type.
+    """Parse JSON string and optionally validate against expected type.
+
+    When to use:
+        - Called automatically when a field is typed as `Json[T]`
+        - Can be called directly for parsing JSON outside of config
 
     Args:
         value: JSON string
@@ -477,4 +637,4 @@ def coerce_json[T](
                 env_var_name=env_var_name,
             )
 
-    return parsed
+    return parsed  # type: ignore[return-value]

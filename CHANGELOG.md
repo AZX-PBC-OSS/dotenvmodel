@@ -5,27 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.2.0](https://github.com/AZX-PBC/dotenvmodel/compare/v0.1.1...v0.2.0) (2025-12-05)
+## [0.2.0](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.1.1...v0.2.0) (2025-12-05)
 
 
 ### Features
 
-* add describe functionality for configuration classes and related tests ([#6](https://github.com/AZX-PBC/dotenvmodel/issues/6)) ([49767ea](https://github.com/AZX-PBC/dotenvmodel/commit/49767ea34e8216706a0071072cb92452890451f3))
+* add describe functionality for configuration classes and related tests ([#6](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/6)) ([49767ea](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/49767ea34e8216706a0071072cb92452890451f3))
 
-## [0.1.1](https://github.com/AZX-PBC/dotenvmodel/compare/v0.1.0...v0.1.1) (2025-12-05)
+## [0.1.1](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.1.0...v0.1.1) (2025-12-05)
 
 
 ### Bug Fixes
 
-* update PyPI publishing workflow configuration ([f854abb](https://github.com/AZX-PBC/dotenvmodel/commit/f854abb08272c51e1a872d4062230f8b2e7d5c21))
-* update PyPI publishing workflow configuration ([8c3ed30](https://github.com/AZX-PBC/dotenvmodel/commit/8c3ed301b7aa3fffcffb2343a0f194cce639832a))
+* update PyPI publishing workflow configuration ([f854abb](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/f854abb08272c51e1a872d4062230f8b2e7d5c21))
+* update PyPI publishing workflow configuration ([8c3ed30](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/8c3ed301b7aa3fffcffb2343a0f194cce639832a))
 
 ## 0.1.0 (2025-12-05)
 
 
 ### Features
 
-* v0.1.0 - Complete type-safe environment configuration library ([#1](https://github.com/AZX-PBC/dotenvmodel/issues/1)) ([7e9b2a9](https://github.com/AZX-PBC/dotenvmodel/commit/7e9b2a9cf01db778b0855df40745eac1d2134de5))
+* v0.1.0 - Complete type-safe environment configuration library ([#1](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/1)) ([7e9b2a9](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/7e9b2a9cf01db778b0855df40745eac1d2134de5))
 
 ## [0.1.0] - 2025-12-05
 
@@ -103,4 +103,4 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - No known security issues
 
-[0.1.0]: https://github.com/azxio/dotenvmodel/releases/tag/v0.1.0
+[0.1.0]: https://github.com/AZX-PBC-OSS/dotenvmodel/releases/tag/v0.1.0

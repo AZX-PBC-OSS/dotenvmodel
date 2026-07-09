@@ -29,15 +29,86 @@ class _RequiredSentinel:
 # Public sentinel value for required fields
 # Type checkers will see this as Any to avoid type errors
 Required: Any = _RequiredSentinel()
+"""Sentinel value marking a field as required.
+
+Use this as a class attribute value instead of `Field()` when you want
+to be explicit that a field is required. Functionally identical to
+`Field()` with no arguments.
+
+When to use:
+    - When you prefer the explicit `Required` syntax over `Field()`
+    - For readability when a field has no constraints or defaults
+
+Example:
+    ```python
+    class Config(DotEnvConfig):
+        database_url: str = Required
+        api_key: str = Required
+        debug: bool = Field(default=False)  # Optional
+    ```
+
+See Also:
+    - [`Field`][dotenvmodel.fields.Field]: For fields with defaults or constraints.
+"""
 
 
 class FieldInfo:
-    """
-    Information about a configuration field.
+    """Information about a configuration field.
 
     This class holds all metadata about a field including its default value,
-    validation constraints, and documentation.
+    validation constraints, and documentation. You typically don't create
+    `FieldInfo` directly — use the `Field()` function instead.
+
+    When to use directly:
+        - Rarely. Use `Field()` in almost all cases.
+        - When introspecting field metadata via `get_fields()`
+
+    Attributes:
+        default: Default value if env var not set (or `_MISSING` if required)
+        default_factory: Callable that returns a default value (for mutable defaults)
+        alias: Alternative environment variable name (overrides prefix)
+        description: Human-readable description for documentation
+        ge: Greater-than-or-equal constraint (>=)
+        le: Less-than-or-equal constraint (<=)
+        gt: Greater-than constraint (>)
+        lt: Less-than constraint (<)
+        min_length: Minimum string length
+        max_length: Maximum string length
+        regex: Regular expression pattern to match
+        choices: List of allowed values
+        min_items: Minimum items in a collection
+        max_items: Maximum items in a collection
+        uuid_version: Required UUID version (1, 3, 4, or 5)
+        separator: Delimiter for parsing list/set/tuple/dict from string (default ",")
+        url_unquote: Whether to URL-unquote SecretStr values (default True)
+        required: Whether the field is required (computed from default)
+
+    See Also:
+        - [`Field`][dotenvmodel.fields.Field]: The function you should use to create fields.
     """
+
+    # Instance attribute type annotations
+    default: Any
+    default_factory: Callable[[], Any] | None
+    alias: str | None
+    description: str | None
+    ge: int | float | Decimal | None
+    le: int | float | Decimal | None
+    gt: int | float | Decimal | None
+    lt: int | float | Decimal | None
+    min_length: int | None
+    max_length: int | None
+    regex: str | None
+    _compiled_regex: re.Pattern[str] | None
+    choices: list[Any] | None
+    min_items: int | None
+    max_items: int | None
+    uuid_version: int | None
+    separator: str
+    url_unquote: bool
+    resolve_path: bool
+    require_exists: bool
+    required: bool
 
     def __init__(
         self,
@@ -47,10 +118,10 @@ class FieldInfo:
         alias: str | None = None,
         description: str | None = None,
         # Numeric validation
-        ge: int | float | None = None,
-        le: int | float | None = None,
-        gt: int | float | None = None,
-        lt: int | float | None = None,
+        ge: int | float | Decimal | None = None,
+        le: int | float | Decimal | None = None,
+        gt: int | float | Decimal | None = None,
+        lt: int | float | Decimal | None = None,
         # String validation
         min_length: int | None = None,
         max_length: int | None = None,
@@ -66,6 +137,9 @@ class FieldInfo:
         separator: str = ",",
         # SecretStr options
         url_unquote: bool = True,
+        # Path options
+        resolve_path: bool = True,
+        require_exists: bool = False,
     ) -> None:
         # Validate that only one default mechanism is used
         if default is not _MISSING and default is not ... and default_factory is not None:
@@ -152,6 +226,10 @@ class FieldInfo:
         # SecretStr options
         self.url_unquote = url_unquote
 
+        # Path options
+        self.resolve_path = resolve_path
+        self.require_exists = require_exists
+
         # Mark if field is required
         self.required = default is _MISSING and default_factory is None
 
@@ -214,10 +292,10 @@ def Field(
     default_factory: Callable[[], Any] | None = None,
     alias: str | None = None,
     description: str | None = None,
-    ge: int | float | None = None,
-    le: int | float | None = None,
-    gt: int | float | None = None,
-    lt: int | float | None = None,
+    ge: int | float | Decimal | None = None,
+    le: int | float | Decimal | None = None,
+    gt: int | float | Decimal | None = None,
+    lt: int | float | Decimal | None = None,
     min_length: int | None = None,
     max_length: int | None = None,
     regex: str | None = None,
@@ -227,30 +305,70 @@ def Field(
     uuid_version: int | None = None,
     separator: str = ",",
     url_unquote: bool = True,
+    resolve_path: bool = True,
+    require_exists: bool = False,
 ) -> Any:
-    """
-    Define a configuration field with validation and default values.
+    """Define a configuration field with validation and default values.
+
+    When to use:
+        - Always use `Field()` (or `Required`) to define config fields
+        - Use `Field()` with no arguments for a required string field
+        - Use `Field(...)` (ellipsis) for any required field — Pydantic-style
+        - Use `Field(default=value)` for optional fields with defaults
+
+    When to use `default` vs `default_factory`:
+        - Use `default` for immutable values (str, int, float, bool, None)
+        - Use `default_factory` for mutable values (list, dict, set) to avoid
+          shared mutable state between instances
 
     Args:
-        default: Default value if environment variable not set
-        default_factory: Callable that returns default value (for mutable defaults)
-        alias: Alternative environment variable name to read from
-        description: Human-readable description for documentation
-        ge: Greater than or equal to (>=)
-        le: Less than or equal to (<=)
-        gt: Greater than (>)
-        lt: Less than (<)
-        min_length: Minimum string length
-        max_length: Maximum string length
-        regex: Regular expression pattern to match
-        choices: List of allowed values
-        min_items: Minimum number of items in collection (list, set, tuple, dict)
-        max_items: Maximum number of items in collection (list, set, tuple, dict)
-        uuid_version: Required UUID version (1, 3, 4, or 5)
-        separator: Separator for list/set/tuple parsing (default: ",")
+        default: Default value if environment variable not set. Use `...` (ellipsis)
+            or omit for required fields. Use a value for optional fields.
+        default_factory: Callable that returns a default value. Use this instead of
+            `default` for mutable defaults like `list` or `dict`.
+            Example: `default_factory=list`
+        alias: Alternative environment variable name to read from. When set, the
+            field name is not used for env var lookup, and `env_prefix` is NOT applied.
+            Example: `alias="DATABASE_URL"` reads from `DATABASE_URL` regardless of prefix.
+        description: Human-readable description shown in `describe()` output and
+            `generate_env_example()` files. Useful for team documentation.
+        ge: Greater than or equal to (>=). For int, float, and Decimal fields.
+            Example: `ge=1` ensures value >= 1
+        le: Less than or equal to (<=). For int, float, and Decimal fields.
+            Example: `le=65535` ensures value <= 65535
+        gt: Greater than (>). For int, float, and Decimal fields.
+            Example: `gt=0` ensures value > 0
+        lt: Less than (<). For int, float, and Decimal fields.
+            Example: `lt=100` ensures value < 100
+        min_length: Minimum string length (inclusive). For str and SecretStr fields.
+            Example: `min_length=8` ensures string is at least 8 characters
+        max_length: Maximum string length (inclusive). For str and SecretStr fields.
+            Example: `max_length=128` ensures string is at most 128 characters
+        regex: Regular expression pattern the string must match (using `re.match`).
+            For str and SecretStr fields. Example: `regex=r'^[a-z]+$'`
+        choices: List of allowed values. The env var value must be in this list
+            (after type coercion). Example: `choices=["dev", "test", "prod"]`
+        min_items: Minimum number of items in a collection (list, set, tuple, dict).
+            Example: `min_items=1` ensures at least one item
+        max_items: Maximum number of items in a collection (list, set, tuple, dict).
+            Example: `max_items=10` ensures at most 10 items
+        uuid_version: Required UUID version (1, 3, 4, or 5). For UUID fields.
+            Example: `uuid_version=4` ensures the UUID is version 4
+        separator: Delimiter for parsing list/set/tuple/dict from a string.
+            Default is comma (","). Example: `separator=";"` for semicolon-delimited
+        url_unquote: Whether to URL-unquote SecretStr values (default True).
+            Useful when secrets come from URL-encoded env vars.
 
     Returns:
-        FieldInfo instance containing field metadata
+        FieldInfo instance containing field metadata. Used by the `DotEnvConfig`
+        metaclass to discover and process fields.
+
+    Raises:
+        ValueError: If both `default` and `default_factory` are specified,
+            if constraint values are invalid (e.g., `ge > le`),
+            if `min_length > max_length`, or if `uuid_version` is not 1/3/4/5
+        TypeError: If numeric constraints (`ge`, `le`, `gt`, `lt`) are not
+            int, float, or Decimal
 
     Example:
         ```python
@@ -258,14 +376,20 @@ def Field(
             # Required field (no default)
             database_url: str = Field()
 
+            # Required field (Pydantic-style with ellipsis)
+            api_key: str = Field(...)
+
             # Optional with default
             debug: bool = Field(default=False)
 
             # With validation
             port: int = Field(default=8000, ge=1, le=65535)
 
-            # With alias
+            # With alias (overrides env_prefix)
             postgres_dsn: str = Field(alias="DATABASE_URL")
+
+            # Mutable default with default_factory
+            hosts: list[str] = Field(default_factory=list)
 
             # List with custom separator
             tags: list[str] = Field(default_factory=list, separator=";")
@@ -275,7 +399,17 @@ def Field(
 
             # UUID version constraint
             tenant_id: UUID = Field(uuid_version=4)
+
+            # Choice validation
+            env: str = Field(default="dev", choices=["dev", "test", "prod"])
+
+            # SecretStr with length constraint
+            api_key: SecretStr = Field(min_length=32)
         ```
+
+    See Also:
+        - [`Required`][dotenvmodel.fields.Required]: Sentinel for required fields.
+        - [`FieldInfo`][dotenvmodel.fields.FieldInfo]: The class returned by `Field()`.
     """
     return FieldInfo(
         default=default,
@@ -295,4 +429,6 @@ def Field(
         uuid_version=uuid_version,
         separator=separator,
         url_unquote=url_unquote,
+        resolve_path=resolve_path,
+        require_exists=require_exists,
     )

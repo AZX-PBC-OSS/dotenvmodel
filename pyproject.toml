@@ -9,7 +9,7 @@ description = "Type-safe environment configuration with automatic .env file load
 readme = "README.md"
 requires-python = ">=3.12"
 authors = [
-    { name = "Rich Evans", email = "re@azx.io" }
+    { name = "AZX, PBC.", email = "oss@azx.io" }
 ]
 classifiers = [
     "Development Status :: 3 - Alpha",
@@ -18,42 +18,44 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Programming Language :: Python :: 3.15",
     "Topic :: Software Development :: Libraries :: Python Modules",
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
 dependencies = [
-    "python-dotenv>=0.19.0",
+    "python-dotenv>=1.2.2",
+    "typing-extensions>=4.16.0",
 ]
 license = { text = "MIT" }
 keywords = ["environment", "config", "dotenv", "settings", "configuration", "env"]
 
 [project.urls]
-Homepage = "https://github.com/AZX-PBC/dotenvmodel"
-Repository = "https://github.com/AZX-PBC/dotenvmodel"
-Issues = "https://github.com/AZX-PBC/dotenvmodel/issues"
-Changelog = "https://github.com/AZX-PBC/dotenvmodel/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/AZX-PBC-OSS/dotenvmodel"
+Repository = "https://github.com/AZX-PBC-OSS/dotenvmodel"
+Issues = "https://github.com/AZX-PBC-OSS/dotenvmodel/issues"
+Changelog = "https://github.com/AZX-PBC-OSS/dotenvmodel/blob/main/CHANGELOG.md"
 
 [tool.uv]
 package = true
+exclude-newer = "48h"
+constraint-dependencies = ["pygments>=2.20.0"]
 
 [tool.hatch.build.targets.wheel]
 packages = ["dotenvmodel"]
 
-[project.optional-dependencies]
-dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "mypy>=1.0.0",
-    "ruff>=0.1.0",
-]
-
 [dependency-groups]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-cov>=4.0.0",
-    "ruff>=0.1.0",
-    "ty>=0.0.1a31",
+    "mkdocs>=1.6.1",
+    "mkdocs-material>=9.7.6",
+    "mkdocstrings[python]>=1.0.4",
+    "pip-audit>=2.10.1",
+    "pyright>=1.1.411",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.20",
+    "ty>=0.0.56",
 ]
 
 [tool.ruff]

@@ -1,0 +1,124 @@
+site_name: dotenvmodel
+site_description: Type-safe environment configuration with automatic .env file loading
+site_url: https://AZX-PBC-OSS.github.io/dotenvmodel/
+repo_url: https://github.com/AZX-PBC-OSS/dotenvmodel
+repo_name: AZX-PBC-OSS/dotenvmodel
+edit_uri: edit/main/docs/
+
+theme:
+  name: material
+  features:
+    - navigation.tabs
+    - navigation.tabs.sticky
+    - navigation.sections
+    - navigation.expand
+    - navigation.indexes
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+    - content.code.annotate
+    - content.action.edit
+    - toc.follow
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: indigo
+      accent: indigo
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  font:
+    text: Roboto
+    code: Roboto Mono
+  icon:
+    repo: fontawesome/brands/github
+
+plugins:
+  - search
+  - mkdocstrings:
+      handlers:
+        python:
+          paths: [.]
+          options:
+            docstring_style: google
+            show_source: true
+            show_signature_annotations: true
+            separate_signature: true
+            show_root_heading: true
+            show_root_full_path: false
+            members_order: source
+            merge_init_into_class: true
+            show_if_no_docstring: true
+            heading_level: 2
+
+markdown_extensions:
+  - admonition
+  - codehilite:
+      guess_lang: false
+  - footnotes
+  - tables
+  - toc:
+      permalink: true
+  - attr_list
+  - md_in_html
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.tasklist:
+      custom_checkbox: true
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: getting-started/installation.md
+      - Quick Start: getting-started/quick-start.md
+  - Guides:
+      - Field Definitions: guides/fields.md
+      - Supported Types: guides/types.md
+      - Validation: guides/validation.md
+      - Loading Configuration: guides/loading.md
+      - Environment Prefixes: guides/prefixes.md
+      - Configuration Documentation: guides/configuration-docs.md
+      - Error Handling: guides/error-handling.md
+      - Logging: guides/logging.md
+  - API Reference:
+      - Package Overview: api-reference/dotenvmodel.md
+      - DotEnvConfig: api-reference/config.md
+      - Metaclass: api-reference/metaclass.md
+      - Fields: api-reference/fields.md
+      - Types: api-reference/types.md
+      - Exceptions: api-reference/exceptions.md
+      - Describe: api-reference/describe.md
+      - Describe Formatters: api-reference/describe-formatters.md
+      - Describe Renderers: api-reference/describe-renderers.md
+      - Loading: api-reference/loading.md
+      - Coercion: api-reference/coercion.md
+      - Validation: api-reference/validation.md
+      - Logging Config: api-reference/logging-config.md
+      - Constants: api-reference/constants.md
+  - Examples:
+      - Complete Application: examples/complete-app.md
+  - Changelog: changelog.md
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/AZX-PBC-OSS/dotenvmodel
+    - icon: fontawesome/brands/python
+      link: https://pypi.org/project/dotenvmodel/
