@@ -21,7 +21,7 @@ class TestPathType:
             config_path: Path = Field()
 
         config = Config.load_from_dict({"CONFIG_PATH": "/etc/app/config"})
-        assert config.config_path == Path("/etc/app/config")
+        assert config.config_path == Path("/etc/app/config").resolve()
         assert isinstance(config.config_path, Path)
 
     def test_path_with_default(self) -> None:
@@ -34,13 +34,14 @@ class TestPathType:
         assert config.log_dir == Path("/var/log")
 
     def test_path_relative(self) -> None:
-        """Test relative path."""
+        """Test relative path is resolved by default."""
 
         class Config(DotEnvConfig):
             data_dir: Path = Field()
 
         config = Config.load_from_dict({"DATA_DIR": "data/output"})
-        assert config.data_dir == Path("data/output")
+        assert config.data_dir == Path("data/output").resolve()
+        assert config.data_dir.is_absolute()
 
 
 class TestUUIDType:

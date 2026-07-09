@@ -9,17 +9,31 @@ from dotenvmodel.fields import FieldInfo
 
 
 def validate_field(field_name: str, value: Any, field_info: FieldInfo, env_var_name: str) -> None:
-    """
-    Validate a field value against its constraints.
+    """Validate a field value against its constraints.
+
+    When to use:
+        - Called automatically by `DotEnvConfig.load()` after type coercion
+        - Call directly if you need to validate a value outside of config loading
+
+    Validates:
+        - Numeric constraints: `ge`, `le`, `gt`, `lt` (for int, float, Decimal)
+        - String constraints: `min_length`, `max_length`, `regex` (for str, SecretStr)
+        - Choice validation: `choices` (for any type)
+        - Collection size: `min_items`, `max_items` (for list, set, tuple, dict)
+        - UUID version: `uuid_version` (for UUID)
 
     Args:
-        field_name: Name of the field being validated
-        value: Value to validate
+        field_name: Name of the field being validated (for error messages)
+        value: Value to validate (already type-coerced)
         field_info: Field metadata containing validation constraints
-        env_var_name: Name of the environment variable
+        env_var_name: Name of the environment variable (for error messages)
 
     Raises:
-        ConstraintViolationError: If validation fails
+        ConstraintViolationError: If any constraint is violated
+
+    See Also:
+        - [`FieldInfo`][dotenvmodel.fields.FieldInfo]: Contains all constraint definitions.
+        - [`ConstraintViolationError`][dotenvmodel.exceptions.ConstraintViolationError]: Exception on failure.
     """
     # Skip validation for None values (handled by type coercion)
     if value is None:
@@ -35,8 +49,16 @@ def validate_field(field_name: str, value: Any, field_info: FieldInfo, env_var_n
     if isinstance(value, str):
         _validate_string(field_name, value, field_info, env_var_name)
     elif isinstance(value, SecretStr):
-        # Validate the secret value as a string
-        _validate_string(field_name, value.get_secret_value(), field_info, env_var_name)
+        try:
+            _validate_string(field_name, value.get_secret_value(), field_info, env_var_name)
+        except ConstraintViolationError as e:
+            raise ConstraintViolationError(
+                field_name=e.field_name,
+                value=value,
+                constraint=e.constraint,
+                error_msg=e.error_msg,
+                env_var_name=e.env_var_name,
+            ) from e
 
     # Choice validation (works for any type)
     if field_info.choices is not None:

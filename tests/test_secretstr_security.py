@@ -21,7 +21,7 @@ class TestSecretStrSecurity:
 
         # Old attribute name should not exist
         with pytest.raises(AttributeError):
-            _ = config.api_key._value
+            _ = config.api_key._value  # type: ignore[attr-defined]
 
     def test_prevent_direct_attribute_access_new_name(self) -> None:
         """Test that direct _secret attribute access is blocked (name mangling)."""
@@ -33,7 +33,7 @@ class TestSecretStrSecurity:
 
         # Direct _secret access should be blocked due to name mangling
         with pytest.raises(AttributeError):
-            _ = config.api_key._secret
+            _ = config.api_key._secret  # type: ignore[attr-defined]
 
     def test_get_secret_value_works(self) -> None:
         """Test that get_secret_value() is the correct way to access the secret."""
@@ -91,7 +91,7 @@ class TestSecretStrSecurity:
         # The mangled name should be accessible (for testing purposes)
         # but this is intentionally obscure
         assert hasattr(secret, "_SecretStr__secret")
-        assert secret._SecretStr__secret == "test-value"
+        assert secret._SecretStr__secret == "test-value"  # type: ignore[attr-defined]
 
         # But the unmangled name should not exist
         assert not hasattr(secret, "__secret")
@@ -115,3 +115,18 @@ class TestSecretStrSecurity:
         # SecretStr object is in dict, but when converted to string it's hidden
         assert str(config_dict["api_key"]) == "**********"
         assert config_dict["public_value"] == "visible"
+
+    def test_validation_error_hides_secret_value(self) -> None:
+        """Test that SecretStr values are masked in validation error messages."""
+
+        from dotenvmodel.exceptions import ConstraintViolationError
+
+        class Config(DotEnvConfig):
+            api_key: SecretStr = Field(min_length=32)
+
+        with pytest.raises(ConstraintViolationError) as exc_info:
+            Config.load_from_dict({"API_KEY": "short-secret"})
+
+        error_msg = str(exc_info.value)
+        assert "short-secret" not in error_msg
+        assert "**********" in error_msg

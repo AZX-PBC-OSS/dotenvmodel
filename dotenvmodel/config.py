@@ -3,106 +3,40 @@
 import builtins
 import logging
 from pathlib import Path
-from typing import Any, Literal, Self, get_args, get_origin, get_type_hints
+from typing import Any, Literal, Self
 
+from dotenvmodel._constants import LOGGER_NAME
 from dotenvmodel.coercion import coerce_value
 from dotenvmodel.exceptions import (
     MissingFieldError,
     MultipleValidationErrors,
     ValidationError,
 )
-from dotenvmodel.fields import _MISSING, FieldInfo, _RequiredSentinel
+from dotenvmodel.fields import FieldInfo
 from dotenvmodel.loading import get_env_var, get_env_var_name, load_env_files
+from dotenvmodel.metaclass import ConfigMeta
 from dotenvmodel.validation import validate_field
 
-# Module-level logger
-logger = logging.getLogger("dotenvmodel")
-
-
-def _is_optional_type(field_type: type) -> bool:
-    """Check if a type is Optional (Union with None)."""
-    origin = get_origin(field_type)
-    # For Union types (including str | None syntax which creates UnionType)
-    if origin is not None:
-        args = get_args(field_type)
-        # Check if None is one of the union members
-        return type(None) in args
-    return False
-
-
-class ConfigMeta(type):
-    """Metaclass for DotEnvConfig that discovers field definitions."""
-
-    def __new__(mcs, name: str, bases: tuple[type, ...], namespace: dict[str, Any]) -> type:
-        # Inherit fields from parent classes
-        fields: dict[str, tuple[type, FieldInfo]] = {}
-        for base in bases:
-            if hasattr(base, "_fields"):
-                # Copy parent fields
-                fields.update(base._fields)  # type: ignore[arg-type]
-
-        # Get type hints for the class
-        hints = namespace.get("__annotations__", {})
-
-        # Discover fields from class attributes (can override parent fields)
-        for field_name, field_type in hints.items():
-            # Skip private attributes
-            if field_name.startswith("_"):
-                continue
-
-            # Skip class-level configuration attributes (not config fields)
-            if field_name == "env_prefix":
-                continue
-
-            # Get the field value from namespace
-            field_value = namespace.get(field_name, _MISSING)
-
-            # Handle different field value types
-            if isinstance(field_value, FieldInfo):
-                field_info = field_value
-                # If field is Optional and has no default, default to None
-                if (
-                    field_info.default is _MISSING
-                    and field_info.default_factory is None
-                    and _is_optional_type(field_type)
-                ):
-                    field_info.default = None
-                    field_info.required = False  # Update required flag
-            elif isinstance(field_value, _RequiredSentinel):
-                # User used Required sentinel
-                field_info = FieldInfo()
-            elif field_value is _MISSING:
-                # No default provided
-                if _is_optional_type(field_type):
-                    # Optional types default to None
-                    field_info = FieldInfo(default=None)
-                else:
-                    # Non-optional types are required
-                    field_info = FieldInfo()
-            elif field_value is ...:
-                # Ellipsis means required
-                field_info = FieldInfo()
-            else:
-                # Regular default value
-                field_info = FieldInfo(default=field_value)
-
-            fields[field_name] = (field_type, field_info)
-
-            # Remove field from namespace to avoid conflicts
-            namespace.pop(field_name, None)
-
-        # Store fields in the class
-        namespace["_fields"] = fields
-
-        return super().__new__(mcs, name, bases, namespace)
+logger = logging.getLogger(LOGGER_NAME)
 
 
 class DotEnvConfig(metaclass=ConfigMeta):
-    """
-    Base class for type-safe environment configuration.
+    """Base class for type-safe environment configuration.
 
     Subclass this to define your configuration schema using type annotations
-    and Field descriptors.
+    and `Field()` descriptors. The metaclass automatically discovers fields,
+    and `load()` reads from environment variables and `.env` files.
+
+    When to use:
+        - When you need type-safe configuration from environment variables
+        - When you want automatic `.env` file loading with cascading
+        - When you need validation constraints on config values
+        - When you want IDE autocomplete and type checker support for config
+
+    When NOT to use:
+        - If you need configuration from YAML/TOML/JSON files (this library
+          is specifically for environment variables and `.env` files)
+        - If you need non-optional Union types (e.g., `str | int`)
 
     Example:
         ```python
@@ -122,6 +56,11 @@ class DotEnvConfig(metaclass=ConfigMeta):
         config = AppConfig.load(env="dev")
         print(config.database_url)
         ```
+
+    See Also:
+        - [`Field`][dotenvmodel.fields.Field]: For defining field constraints and defaults.
+        - [`load`][dotenvmodel.config.DotEnvConfig.load]: For loading from environment.
+        - [`load_from_dict`][dotenvmodel.config.DotEnvConfig.load_from_dict]: For testing.
     """
 
     _fields: dict[str, tuple[type, FieldInfo]]
@@ -187,6 +126,55 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
         return value
 
+    def _load_fields(
+        self,
+        env_source: dict[str, str] | None,
+        *,
+        validate: bool = True,
+    ) -> None:
+        """Process all fields from the given source, setting attributes on self.
+
+        Args:
+            env_source: If None, reads from environment variables. If a dict,
+                reads from the dict (for load_from_dict / testing).
+            validate: Whether to perform validation (default True).
+
+        Raises:
+            ValidationError: If any field fails validation. Collects all errors
+                and raises them together.
+        """
+        cls = self.__class__
+        prefix = getattr(cls, "env_prefix", "")
+        errors: list[ValidationError] = []
+
+        for field_name, (field_type, field_info) in cls._fields.items():
+            env_var_name = get_env_var_name(field_name, field_info.alias, prefix)
+
+            if env_source is not None:
+                raw_value = env_source.get(env_var_name)
+                if raw_value is None:
+                    raw_value = env_source.get(field_name)
+            else:
+                raw_value = get_env_var(field_name, field_info.alias, prefix)
+
+            try:
+                value = self._process_field(
+                    field_name,
+                    field_type,
+                    field_info,
+                    raw_value,
+                    env_var_name,
+                    validate=validate,
+                )
+                setattr(self, field_name, value)
+            except ValidationError as e:
+                errors.append(e)
+
+        if errors:
+            if len(errors) == 1:
+                raise errors[0]
+            raise MultipleValidationErrors(errors)
+
     @classmethod
     def load(
         cls,
@@ -195,22 +183,35 @@ class DotEnvConfig(metaclass=ConfigMeta):
         override: bool = True,
         env_dir: Path | None = None,
     ) -> Self:
-        """
-        Load configuration from environment variables and .env files.
+        """Load configuration from environment variables and .env files.
+
+        When to use:
+            - In application startup to load config from the environment
+            - When you want automatic `.env` file cascading
+            - When you need validated, type-safe configuration
+
+        When NOT to use:
+            - In tests: use `load_from_dict()` instead for deterministic test data
+            - If you already have values in a dict: use `load_from_dict()`
 
         Args:
             env: Environment name (e.g., "dev", "prod", "test"). If None, reads from
-                ENV environment variable, defaults to "dev"
+                the `ENV` environment variable, defaults to "dev"
             override: If True, .env file values override existing environment variables.
-                If False, existing env vars take precedence
-            env_dir: Optional custom base directory for .env files
+                If False, existing env vars take precedence over .env files
+            env_dir: Custom base directory for .env files. If None, uses
+                the `DOTENV_DIR` environment variable or current working directory
 
         Returns:
             Instance of the config class with all fields populated and validated
 
         Raises:
-            ValidationError: If required fields are missing or validation fails
-            FileNotFoundError: If custom env_dir path doesn't exist
+            MissingFieldError: If a required field is not set in any source
+            TypeCoercionError: If a value cannot be coerced to the field type
+            ConstraintViolationError: If a value fails validation constraints
+            MultipleValidationErrors: If multiple fields fail validation simultaneously
+            FileNotFoundError: If `env_dir` is provided but doesn't exist
+            ValueError: If `env` contains invalid characters (path traversal protection)
 
         Example:
             ```python
@@ -224,52 +225,27 @@ class DotEnvConfig(metaclass=ConfigMeta):
             config = Config.load(override=False)
 
             # Custom .env file location
+            from pathlib import Path
             config = Config.load(env_dir=Path("/app/config"))
             ```
+
+        See Also:
+            - [`reload`][dotenvmodel.config.DotEnvConfig.reload]: Reload after env changes.
+            - [`load_from_dict`][dotenvmodel.config.DotEnvConfig.load_from_dict]: For testing.
         """
         logger.info(f"Loading {cls.__name__} configuration")
 
-        # Load .env files first
         load_env_files(env=env, override=override, env_dir=env_dir)
 
-        # Create instance and load fields
         instance = cls()
-        errors: list[ValidationError] = []
-
-        # Get type hints for the class
-        get_type_hints(cls)
-
         logger.debug(f"Processing {len(cls._fields)} field(s)")
 
-        # Get the class prefix (if any)
-        prefix = getattr(cls, "env_prefix", "")
-
-        # Process each field
-        for field_name, (field_type, field_info) in cls._fields.items():
-            env_var_name = get_env_var_name(field_name, field_info.alias, prefix)
-            raw_value = get_env_var(field_name, field_info.alias, prefix)
-
-            try:
-                value = instance._process_field(
-                    field_name, field_type, field_info, raw_value, env_var_name
-                )
-                setattr(instance, field_name, value)
-            except ValidationError as e:
-                errors.append(e)
-
-        # If there were validation errors, raise them
-        if errors:
-            logger.error(f"Configuration loading failed with {len(errors)} error(s)")
-            if len(errors) == 1:
-                raise errors[0]
-            else:
-                raise MultipleValidationErrors(errors)
+        instance._load_fields(None)
 
         logger.info(f"{cls.__name__} configuration loaded successfully")
         logger.debug(f"Loaded fields: {', '.join(cls._fields.keys())}")
 
         instance._loaded = True
-        # Store load parameters for reload()
         instance._load_env = env
         instance._load_override = override
         instance._load_env_dir = env_dir
@@ -282,15 +258,19 @@ class DotEnvConfig(metaclass=ConfigMeta):
         override: bool | None = None,
         env_dir: Path | None = None,
     ) -> Self:
-        """
-        Reload configuration from environment variables and .env files.
+        """Reload configuration from environment variables and .env files.
 
         This method reloads all fields from the environment, allowing you to
         pick up changes to environment variables or .env files without creating
         a new instance.
 
+        When to use:
+            - After receiving a SIGHUP signal to hot-reload configuration
+            - After programmatically changing environment variables
+            - When switching environments at runtime (e.g., dev to prod)
+
         By default, this uses the same parameters (env, override, env_dir) that
-        were used during the original load() call. You can override any of these
+        were used during the original `load()` call. You can override any of these
         by passing new values.
 
         Args:
@@ -299,68 +279,47 @@ class DotEnvConfig(metaclass=ConfigMeta):
             override: If True, .env file values override existing environment variables.
                 If False, existing env vars take precedence. If None, uses the
                 override value from the original load() call
-            env_dir: Optional custom base directory for .env files. If None, uses
+            env_dir: Custom base directory for .env files. If None, uses
                 the env_dir from the original load() call
 
         Returns:
-            Self (the same instance with reloaded values)
+            Self (the same instance with reloaded values, useful for method chaining)
 
         Raises:
-            ValidationError: If required fields are missing or validation fails
-            FileNotFoundError: If custom env_dir path doesn't exist
+            MissingFieldError: If a required field is not set after reload
+            TypeCoercionError: If a value cannot be coerced after reload
+            ConstraintViolationError: If a value fails validation after reload
+            MultipleValidationErrors: If multiple fields fail after reload
 
         Example:
             ```python
             config = AppConfig.load(env="dev", override=True)
 
             # ... later, environment variables change ...
+            import os
+            os.environ["PORT"] = "9000"
 
-            config.reload()  # Reloads with env="dev", override=True
+            # Reload picks up the new value
+            config.reload()
+            print(config.port)  # 9000
 
             # Or reload with different parameters
             config.reload(env="prod")  # Switch to prod environment
             ```
+
+        See Also:
+            - [`load`][dotenvmodel.config.DotEnvConfig.load]: Initial loading.
         """
         logger.info(f"Reloading {self.__class__.__name__} configuration")
 
-        # Use stored parameters if not explicitly provided
         reload_env = env if env is not None else self._load_env
         reload_override = override if override is not None else self._load_override
         reload_env_dir = env_dir if env_dir is not None else self._load_env_dir
 
-        # Load .env files first
         load_env_files(env=reload_env, override=reload_override, env_dir=reload_env_dir)
 
-        errors: list[ValidationError] = []
-
-        # Get type hints for the class
-        get_type_hints(self.__class__)
-
         logger.debug(f"Reloading {len(self._fields)} field(s)")
-
-        # Get the class prefix (if any)
-        prefix = getattr(self.__class__, "env_prefix", "")
-
-        # Process each field
-        for field_name, (field_type, field_info) in self._fields.items():
-            env_var_name = get_env_var_name(field_name, field_info.alias, prefix)
-            raw_value = get_env_var(field_name, field_info.alias, prefix)
-
-            try:
-                value = self._process_field(
-                    field_name, field_type, field_info, raw_value, env_var_name
-                )
-                setattr(self, field_name, value)
-            except ValidationError as e:
-                errors.append(e)
-
-        # If there were validation errors, raise them
-        if errors:
-            logger.error(f"Configuration reload failed with {len(errors)} error(s)")
-            if len(errors) == 1:
-                raise errors[0]
-            else:
-                raise MultipleValidationErrors(errors)
+        self._load_fields(None)
 
         logger.info(f"{self.__class__.__name__} configuration reloaded successfully")
         logger.debug(f"Reloaded fields: {', '.join(self._fields.keys())}")
@@ -374,18 +333,31 @@ class DotEnvConfig(metaclass=ConfigMeta):
         *,
         validate: bool = True,
     ) -> Self:
-        """
-        Load configuration from a dictionary (useful for testing).
+        """Load configuration from a dictionary (useful for testing).
+
+        When to use:
+            - In unit tests for deterministic, isolated config loading
+            - When you have config values from a non-env source (e.g., a database)
+            - When you want to bypass .env file loading entirely
+
+        When NOT to use:
+            - In production: use `load()` to read from environment and .env files
 
         Args:
-            data: Dictionary mapping field names (or aliases) to string values
-            validate: Whether to perform validation (default True)
+            data: Dictionary mapping environment variable names (or field names) to
+                string values. Keys can be either the env var name (e.g., "DATABASE_URL")
+                or the field name (e.g., "database_url") — env var names take precedence
+            validate: Whether to perform validation (default True). Set to False
+                to skip validation for performance or testing edge cases
 
         Returns:
-            Instance of the config class
+            Instance of the config class with all fields populated
 
         Raises:
-            ValidationError: If validation fails
+            MissingFieldError: If a required field is missing from the dict
+            TypeCoercionError: If a value cannot be coerced to the field type
+            ConstraintViolationError: If a value fails validation constraints
+            MultipleValidationErrors: If multiple fields fail validation simultaneously
 
         Example:
             ```python
@@ -394,55 +366,24 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 "DEBUG": "true",
                 "PORT": "8000",
             })
+
+            # Skip validation
+            config = Config.load_from_dict(data, validate=False)
             ```
+
+        See Also:
+            - [`load`][dotenvmodel.config.DotEnvConfig.load]: For production loading.
         """
         instance = cls()
-        errors: list[ValidationError] = []
-
-        # Get type hints for the class
-        get_type_hints(cls)
-
-        # Get the class prefix (if any)
-        prefix = getattr(cls, "env_prefix", "")
-
-        # Process each field
-        for field_name, (field_type, field_info) in cls._fields.items():
-            env_var_name = get_env_var_name(field_name, field_info.alias, prefix)
-
-            # Try to get value from dict using env var name or field name
-            raw_value = data.get(env_var_name)
-            if raw_value is None:
-                raw_value = data.get(field_name)
-
-            try:
-                value = instance._process_field(
-                    field_name,
-                    field_type,
-                    field_info,
-                    raw_value,
-                    env_var_name,
-                    validate=validate,
-                )
-                setattr(instance, field_name, value)
-            except ValidationError as e:
-                errors.append(e)
-
-        # If there were validation errors, raise them
-        if errors:
-            if len(errors) == 1:
-                raise errors[0]
-            else:
-                raise MultipleValidationErrors(errors)
-
+        instance._load_fields(data, validate=validate)
         instance._loaded = True
         return instance
 
     def dict(self) -> dict[str, Any]:
-        """
-        Return configuration as a dictionary with actual values.
+        """Return configuration as a dictionary with actual values.
 
         Returns:
-            Dictionary mapping field names to their values
+            Dictionary mapping field names to their current values
 
         Example:
             ```python
@@ -450,6 +391,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
             print(config.dict())
             # {'database_url': 'postgresql://...', 'debug': True, 'port': 8000}
             ```
+
+        See Also:
+            - [`get`][dotenvmodel.config.DotEnvConfig.get]: Get a single value with default.
         """
         result = {}
         for field_name in self._fields:
@@ -458,20 +402,22 @@ class DotEnvConfig(metaclass=ConfigMeta):
         return result
 
     def get(self, key: str, default: Any = None) -> Any:
-        """
-        Get a configuration value by key with optional default.
+        """Get a configuration value by key with optional default.
 
         Args:
-            key: Field name
-            default: Default value if field not found
+            key: Field name to look up
+            default: Default value if field not found (default None)
 
         Returns:
-            Field value or default
+            Field value if the field exists and is set, otherwise the default value
 
         Example:
             ```python
-            timeout = config.get('timeout', 30)
+            timeout = config.get('timeout', 30)  # Returns 30 if timeout not set
             ```
+
+        See Also:
+            - [`dict`][dotenvmodel.config.DotEnvConfig.dict]: Get all values as dict.
         """
         return getattr(self, key, default)
 
@@ -485,8 +431,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
     @classmethod
     def get_fields(cls) -> builtins.dict[str, tuple[type, FieldInfo]]:
-        """
-        Get all fields defined on this configuration class.
+        """Get all fields defined on this configuration class.
 
         Returns a copy of the fields dictionary to prevent external modification.
 
@@ -495,14 +440,13 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
         Example:
             ```python
-            class AppConfig(DotEnvConfig):
-                port: int = Field(default=8000)
-                debug: bool = Field(default=False)
-
             fields = AppConfig.get_fields()
             for name, (field_type, field_info) in fields.items():
-                print(f"{name}: {field_type}")
+                print(f"{name}: {field_type}, required={field_info.required}")
             ```
+
+        See Also:
+            - [`FieldInfo`][dotenvmodel.fields.FieldInfo]: Field metadata class.
         """
         return cls._fields.copy()
 

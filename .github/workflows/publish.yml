@@ -13,13 +13,14 @@ on:
     types: [published]
   workflow_dispatch:
 
+permissions:
+  id-token: write
+  contents: read
+
 jobs:
   publish:
     runs-on: ubuntu-latest
     if: inputs.release_created || github.event_name == 'release' || github.event_name == 'workflow_dispatch'
-    permissions:
-      id-token: write
-      contents: read
 
     steps:
     - uses: actions/checkout@v4
@@ -42,9 +43,4 @@ jobs:
       run: uv build
 
     - name: Publish to PyPI
-      env:
-        TWINE_USERNAME: __token__
-        TWINE_PASSWORD: ${{ secrets.PYPI_TOKEN }}
-      run: |
-        uv tool install twine
-        uv tool run twine upload dist/*
+      run: uv publish

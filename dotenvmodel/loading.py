@@ -16,30 +16,48 @@ def load_env_files(
     override: bool = True,
     env_dir: Path | None = None,
 ) -> dict[str, str]:
-    """
-    Load environment variables from cascading .env files.
+    """Load environment variables from cascading .env files.
 
     This function implements Node.js-style .env file cascading, loading files
     in the following order (later files override earlier):
-    1. .env (base configuration)
-    2. .env.local (local base overrides)
-    3. .env.{env} (environment-specific)
-    4. .env.{env}.local (local environment overrides)
+    1. `.env` (base configuration)
+    2. `.env.local` (local base overrides)
+    3. `.env.{env}` (environment-specific)
+    4. `.env.{env}.local` (local environment overrides)
+
+    When to use:
+        - Called automatically by `DotEnvConfig.load()` — you rarely call this directly
+        - Call directly if you need to load .env files without creating a config
 
     Args:
         env: Environment name (e.g., "dev", "prod", "test"). If None, reads from
-            ENV environment variable, defaults to "dev"
+            the `ENV` environment variable, defaults to "dev"
         override: If True, .env file values override existing environment variables.
             If False, existing env vars take precedence
-        env_dir: Optional custom base directory for .env files. If None, uses
-            DOTENV_DIR environment variable or current working directory
+        env_dir: Custom base directory for .env files. If None, uses
+            the `DOTENV_DIR` environment variable or current working directory
 
     Returns:
         Dictionary of all environment variables after loading
 
+    Raises:
+        ValueError: If `env` contains invalid characters (only alphanumeric,
+            hyphens, and underscores allowed — prevents path traversal)
+        FileNotFoundError: If `env_dir` is provided but doesn't exist
+
     Example:
-        >>> load_env_files(env="dev", override=True)
-        {'DATABASE_URL': 'postgresql://localhost/myapp_dev', ...}
+        ```python
+        # Load .env files for dev environment
+        env_vars = load_env_files(env="dev", override=True)
+
+        # Use custom directory
+        from pathlib import Path
+        load_env_files(env="prod", env_dir=Path("/app/config"))
+        ```
+
+    See Also:
+        - [`DotEnvConfig.load`][dotenvmodel.config.DotEnvConfig.load]: Loads config and .env files.
+        - [`get_env_var`][dotenvmodel.loading.get_env_var]: Get a single env var by field name.
     """
     # Determine environment
     if env is None:
@@ -102,16 +120,24 @@ def load_env_files(
 
 
 def get_env_var(field_name: str, alias: str | None = None, prefix: str | None = None) -> str | None:
-    """
-    Get environment variable value by field name or alias.
+    """Get environment variable value by field name or alias.
+
+    When to use:
+        - Called internally by `DotEnvConfig.load()` — rarely called directly
+        - Use directly if you need to check a config env var without loading the full config
 
     Args:
-        field_name: Name of the field
-        alias: Optional alias for the environment variable
-        prefix: Optional prefix to prepend to the environment variable name
+        field_name: Name of the field (converted to UPPER_CASE for env var lookup)
+        alias: Optional alias that overrides the field name for env var lookup.
+            When provided, `prefix` is NOT applied.
+        prefix: Optional class-level prefix to prepend to the env var name.
+            Not applied when `alias` is provided.
 
     Returns:
-        Environment variable value or None if not set
+        Environment variable value as string, or None if not set
+
+    See Also:
+        - [`get_env_var_name`][dotenvmodel.loading.get_env_var_name]: Get just the name, not the value.
     """
     # Use alias if provided, otherwise convert field_name to UPPER_CASE
     env_var_name = alias if alias else field_name.upper()
@@ -124,16 +150,32 @@ def get_env_var(field_name: str, alias: str | None = None, prefix: str | None = 
 
 
 def get_env_var_name(field_name: str, alias: str | None = None, prefix: str | None = None) -> str:
-    """
-    Get the environment variable name for a field.
+    """Get the environment variable name for a field.
+
+    When to use:
+        - For generating documentation or .env.example files
+        - For error messages that reference the env var name
+        - Called internally during config loading
 
     Args:
-        field_name: Name of the field
-        alias: Optional alias for the environment variable
-        prefix: Optional prefix to prepend to the environment variable name
+        field_name: Name of the field (converted to UPPER_CASE for env var lookup)
+        alias: Optional alias that overrides the field name. When provided,
+            `prefix` is NOT applied.
+        prefix: Optional class-level prefix to prepend. Not applied when
+            `alias` is provided.
 
     Returns:
-        Environment variable name
+        The environment variable name string
+
+    Example:
+        ```python
+        get_env_var_name("database_url")           # "DATABASE_URL"
+        get_env_var_name("host", prefix="DB_")     # "DB_HOST"
+        get_env_var_name("dsn", alias="DATABASE")  # "DATABASE" (no prefix)
+        ```
+
+    See Also:
+        - [`get_env_var`][dotenvmodel.loading.get_env_var]: Get the value, not just the name.
     """
     # Use alias if provided, otherwise convert field_name to UPPER_CASE
     env_var_name = alias if alias else field_name.upper()

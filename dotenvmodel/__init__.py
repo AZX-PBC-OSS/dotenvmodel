@@ -1,7 +1,43 @@
-"""Type-safe environment configuration with automatic .env file loading."""
+"""Type-safe environment configuration with automatic .env file loading.
+
+dotenvmodel combines Pydantic-style field definitions with intelligent .env
+file cascading inspired by Node.js dotenv patterns.
+
+Quick Start:
+    ```python
+    from dotenvmodel import DotEnvConfig, Field
+
+    class AppConfig(DotEnvConfig):
+        database_url: str = Field()
+        port: int = Field(default=8000, ge=1, le=65535)
+        debug: bool = Field(default=False)
+
+    config = AppConfig.load(env="dev")
+    print(config.port)  # 8000
+    ```
+
+Public API:
+    - `DotEnvConfig`: Base class for type-safe configuration
+    - `Field`: Define fields with defaults, validation, and aliases
+    - `Required`: Sentinel for required fields (alternative to `Field()`)
+    - `SecretStr`: String type that hides values in logs
+    - `HttpUrl`, `PostgresDsn`, `RedisDsn`: URL/DSN types with validation
+    - `Json`: Type for parsing JSON strings
+    - `describe_configs`: Generate docs for multiple config classes
+    - `generate_env_example`: Generate .env.example files
+    - `configure_logging`, `disable_logging`: Logging utilities
+    - `DotEnvModelError`, `ValidationError`, `MissingFieldError`,
+      `TypeCoercionError`, `ConstraintViolationError`, `MultipleValidationErrors`:
+      Exception hierarchy
+"""
 
 __version__ = "0.2.0"
+__author__ = "AZX, PBC."
+__email__ = "oss@azx.io"
+__license__ = "MIT"
+__url__ = "https://github.com/AZX-PBC-OSS/dotenvmodel"
 
+from dotenvmodel._constants import LOGGER_NAME
 from dotenvmodel.config import DotEnvConfig
 from dotenvmodel.describe import describe_configs, generate_env_example
 from dotenvmodel.exceptions import (
@@ -23,6 +59,7 @@ from dotenvmodel.types import (
 )
 
 __all__ = [
+    "LOGGER_NAME",
     "ConstraintViolationError",
     "DotEnvConfig",
     "DotEnvModelError",

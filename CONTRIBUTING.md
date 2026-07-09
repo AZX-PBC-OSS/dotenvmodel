@@ -13,7 +13,7 @@ Thank you for your interest in contributing to dotenvmodel! We appreciate your t
 
 1. **Clone the repository:**
    ```bash
-   git clone https://github.com/azxio/dotenvmodel.git
+   git clone https://github.com/AZX-PBC-OSS/dotenvmodel.git
    cd dotenvmodel
    ```
 
@@ -24,7 +24,7 @@ Thank you for your interest in contributing to dotenvmodel! We appreciate your t
    uv sync --dev
    ```
 
-   This will create a virtual environment and install all necessary dependencies including pytest, mypy, ruff, and other development tools.
+   This will create a virtual environment and install all necessary dependencies including pytest, pyright, ruff, and other development tools.
 
 ## Running Tests
 
@@ -76,14 +76,14 @@ The project is configured with the following pytest settings (in `pyproject.toml
 
 ### Type Checking
 
-The project uses `ty` (a wrapper around pyright) for type checking:
+The project uses `pyright` for type checking:
 
 ```bash
 # Run type checking
-uv run ty check
+uv run pyright dotenvmodel
 
 # Type check specific file
-uv run ty check dotenvmodel/core.py
+uv run pyright dotenvmodel/core.py
 ```
 
 ### Linting and Formatting
@@ -113,7 +113,7 @@ Before submitting a PR, run all quality checks:
 uv run pytest
 
 # Run type checking
-uv run ty check
+uv run pyright dotenvmodel
 
 # Run linting
 uv run ruff check dotenvmodel
@@ -160,7 +160,7 @@ uv run ruff format --check dotenvmodel
    uv run pytest
 
    # Check types
-   uv run ty check
+   uv run pyright dotenvmodel
 
    # Check linting
    uv run ruff check dotenvmodel
@@ -180,7 +180,7 @@ uv run ruff format --check dotenvmodel
 
 2. **Ensure type checking passes:**
    ```bash
-   uv run ty check
+   uv run pyright dotenvmodel
    ```
 
 3. **Ensure code is properly formatted:**
@@ -368,9 +368,9 @@ raise ValueError("Invalid format")
 
 ## Getting Help
 
-- **Questions?** Open a [GitHub Discussion](https://github.com/azxio/dotenvmodel/discussions)
-- **Bug Reports?** Open an [Issue](https://github.com/azxio/dotenvmodel/issues)
-- **Feature Requests?** Open an [Issue](https://github.com/azxio/dotenvmodel/issues) with the `enhancement` label
+- **Questions?** Open a [GitHub Discussion](https://github.com/AZX-PBC-OSS/dotenvmodel/discussions)
+- **Bug Reports?** Open an [Issue](https://github.com/AZX-PBC-OSS/dotenvmodel/issues)
+- **Feature Requests?** Open an [Issue](https://github.com/AZX-PBC-OSS/dotenvmodel/issues) with the `enhancement` label
 
 ## License
 

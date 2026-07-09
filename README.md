@@ -139,7 +139,13 @@ from pathlib import Path
 class Config(DotEnvConfig):
     config_path: Path = Field(default=Path("/etc/app"))
     # Environment: CONFIG_PATH=/opt/myapp/config
-    # Result: config.config_path == Path("/opt/myapp/config")
+    # Result: config.config_path == Path("/opt/myapp/config").resolve()
+
+    # Paths are resolved by default (expanduser + resolve):
+    # ~/logs becomes /home/user/logs
+    # ./output becomes /cwd/output
+    # To keep paths raw, use resolve_path=False:
+    log_dir: Path = Field(resolve_path=False)
 ```
 
 ### Collection Types
@@ -553,7 +559,7 @@ disable_logging()
 
 ```python
 import logging
-from dotenvmodel import configure_logging
+from dotenvmodel import configure_logging, LOGGER_NAME
 
 # Use custom format
 configure_logging(
@@ -562,11 +568,34 @@ configure_logging(
 )
 
 # Or configure directly with standard logging
-logger = logging.getLogger("dotenvmodel")
+logger = logging.getLogger(LOGGER_NAME)
 logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
 handler.setFormatter(logging.Formatter('%(message)s'))
 logger.addHandler(handler)
+```
+
+### Integration with Application Logging
+
+dotenvmodel uses a named logger (`"dotenvmodel"`) that integrates with the standard logging module. For structured logging or log aggregation (e.g., in FastAPI/gunicorn):
+
+```python
+import logging
+from dotenvmodel import LOGGER_NAME
+
+# Add a JSON formatter for log aggregation
+class JsonFormatter(logging.Formatter):
+    def format(self, record: logging.LogRecord) -> str:
+        import json
+        return json.dumps({
+            "logger": record.name,
+            "level": record.levelname,
+            "message": record.getMessage(),
+        })
+
+handler = logging.StreamHandler()
+handler.setFormatter(JsonFormatter())
+logging.getLogger(LOGGER_NAME).addHandler(handler)
 ```
 
 ## Configuration Methods
@@ -1173,6 +1202,14 @@ def test_with_fixture(test_config):
 
 ## Known Limitations
 
+### Thread Safety
+
+`DotEnvConfig` instances are **not thread-safe** during `reload()`. If multiple threads call `reload()` on the same instance concurrently, field values may become inconsistent. In multi-threaded server environments (FastAPI, gunicorn, etc.):
+
+- Call `load()` once at startup and share the immutable instance
+- If you need to reload, use a lock or create a new instance via `load()` instead of calling `reload()` on a shared instance
+- Avoid calling `reload()` while request handlers are reading config values
+
 ### Union Types (Non-Optional)
 
 Non-optional Union types like `str | int` or `Union[str, int]` are not currently supported. Only Optional unions (types with `None`) work:
@@ -1209,5 +1246,4 @@ Contributions are welcome! Please feel free to submit a Pull Request.
 
 ## Links
 
-- [GitHub Repository](https://github.com/azxio/dotenvmodel)
-- [Full Specification](libraryspec.md)
+- [GitHub Repository](https://github.com/AZX-PBC-OSS/dotenvmodel)
