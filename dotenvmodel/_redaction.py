@@ -5,52 +5,92 @@ import it without creating an import cycle.
 """
 
 import re
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote_plus, urlparse
 
 __all__ = ["redact_url_password"]
 
 _MASK = "***"
 
-# Distinctive substrings: masking any key containing one of these avoids
-# false positives like ``author`` (which merely contains ``auth``).
-_SENSITIVE_SUBSTRINGS = ("password", "passwd", "secret", "token", "apikey")
-
-# Short/ambiguous keys matched exactly or as a separator-delimited token,
-# so ``x-api-key`` masks but ``author`` / ``keyboard`` do not.
-_SENSITIVE_TOKENS = frozenset(
+# Unambiguous secret words. Matched as the whole (separator-stripped) key or as
+# any separator-delimited token, so ``client_secret`` and ``X-Amz-Signature``
+# match while ``secretary`` / ``author`` / ``oauth`` do not.
+_SECRET_WORDS = frozenset(
     {
+        "password",
+        "passwd",
         "pwd",
-        "auth",
-        "authorization",
-        "api_key",
-        "api-key",
-        "apikey",
-        "key",
+        "passphrase",
+        "passcode",
+        "secret",
         "credential",
         "credentials",
+        "apikey",
+        "auth",
+        "authorization",
+        "signature",
+        "sig",
+        "hmac",
+        "jwt",
+        "bearer",
+        "sessionid",
+        "otp",
+        "sas",
     }
 )
 
+# Long words distinctive enough to match as a substring of the stripped key
+# (catches ``sslpassword`` / ``x-api-key`` without hitting benign lookalikes).
+_SECRET_SUBSTRINGS = ("password", "passphrase", "passcode", "signature", "apikey")
+
+# Qualifiers that make a trailing ``key`` token a secret (``api_key`` yes,
+# ``sort_key`` / ``public_key`` no).
+_KEY_QUALIFIERS = frozenset(
+    {"api", "access", "secret", "private", "client", "encryption", "signing", "master", "session"}
+)
+
+_SEPARATORS = re.compile(r"[-_.]+")
+
 
 def _is_sensitive_key(key: str) -> bool:
-    """True if a query/fragment key names a credential."""
-    k = unquote(key).lower()
-    if k in _SENSITIVE_TOKENS:
+    """True if a query/fragment key names a credential.
+
+    Uses token-boundary matching (not naive substring) so it catches
+    ``passphrase``/``signature``/``X-Amz-Signature`` while leaving benign
+    lookalikes like ``tokenizer``/``sort_key``/``secretary`` untouched.
+    """
+    raw = unquote_plus(key).strip()
+    if not raw:
+        return False
+
+    # Split camelCase (clientSecret -> client, secret) then separators.
+    k = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", raw).lower()
+    tokens = _SEPARATORS.split(k)
+    stripped = "".join(tokens)
+
+    if stripped in _SECRET_WORDS or any(t in _SECRET_WORDS for t in tokens):
         return True
-    if any(sub in k for sub in _SENSITIVE_SUBSTRINGS):
+    if any(sub in stripped for sub in _SECRET_SUBSTRINGS):
         return True
-    return any(part in _SENSITIVE_TOKENS for part in re.split(r"[-_]", k))
+    # ``token`` only as the whole key or a trailing token (access_token), never a
+    # prefix (token_endpoint) or part of a word (tokenizer).
+    if tokens[-1] == "token" and (len(tokens) > 1 or k == "token"):
+        return True
+    # ``key`` only when qualified as a credential (api_key), not sort_key.
+    if len(tokens) > 1 and tokens[-1] == "key" and tokens[-2] in _KEY_QUALIFIERS:
+        return True
+    return False
 
 
 def _redact_pairs(component: str) -> tuple[str, bool]:
-    """Mask sensitive values in an ``&``-separated key=value string.
+    """Mask sensitive values in a ``&``/``;``-separated key=value string.
 
-    Non-sensitive pairs are preserved byte-for-byte (no re-encoding), so a
-    benign ``note=a%20b`` is not normalised to ``note=a+b``. Returns the
-    (possibly rewritten) component and whether anything changed.
+    Non-sensitive pairs are preserved byte-for-byte (no re-encoding) when
+    nothing changes. If a secret is masked the component is re-joined with
+    ``&`` (normalising any legacy ``;`` separator), which is display-only.
+    Returns the (possibly rewritten) component and whether anything changed.
     """
     changed = False
-    parts = component.split("&")
+    parts = re.split(r"[&;]", component)
     for i, part in enumerate(parts):
         key, sep, value = part.partition("=")
         if sep and value and _is_sensitive_key(key):

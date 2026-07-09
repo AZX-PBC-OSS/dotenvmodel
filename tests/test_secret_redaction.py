@@ -173,8 +173,7 @@ class TestRedactionHelper:
         out = redact_url_password("https://h/p?note=a%20b&password=x&tag=1&tag=2")
         assert "note=a%20b" in out  # not normalized to a+b
         assert "tag=1" in out and "tag=2" in out
-        assert "x" not in out.split("password=")[1][:1] if "password=" in out else True
-        assert "***" in out
+        assert "password=***" in out  # value masked, key preserved
 
     def test_lookalike_key_not_masked(self) -> None:
         # 'author' contains 'auth' but is not a secret; must survive.
@@ -203,22 +202,79 @@ class TestRedactionHelper:
 class TestRedactionInternals:
     """Direct unit tests pinning the redaction helpers' contracts."""
 
-    def test_is_sensitive_key_exact_tokens(self) -> None:
+    def test_is_sensitive_key_secret_words(self) -> None:
         from dotenvmodel._redaction import _is_sensitive_key
 
-        for key in ("pwd", "auth", "authorization", "api_key", "apikey", "key", "credential"):
+        for key in (
+            "password",
+            "pwd",
+            "passphrase",
+            "passcode",
+            "secret",
+            "token",
+            "auth",
+            "authorization",
+            "api_key",
+            "apikey",
+            "credential",
+            "signature",
+            "sig",
+            "jwt",
+            "bearer",
+            "sessionid",
+            "hmac",
+        ):
             assert _is_sensitive_key(key), key
 
-    def test_is_sensitive_key_substring_and_separators(self) -> None:
+    def test_is_sensitive_key_empty(self) -> None:
         from dotenvmodel._redaction import _is_sensitive_key
 
-        for key in ("sslpassword", "db_password", "x-api-key", "clientSecret", "access-token"):
+        assert not _is_sensitive_key("")
+        assert not _is_sensitive_key("   ")
+
+    def test_is_sensitive_key_secret_compounds(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        for key in (
+            "sslpassword",
+            "sslpassphrase",
+            "db_password",
+            "x-api-key",
+            "clientSecret",
+            "access-token",
+            "access_token",
+            "refresh_token",
+            "client_secret",
+            "private_key",
+            "access_key",
+            "X-Amz-Signature",
+        ):
             assert _is_sensitive_key(key), key
 
-    def test_is_sensitive_key_benign_lookalikes(self) -> None:
+    def test_is_sensitive_key_benign(self) -> None:
         from dotenvmodel._redaction import _is_sensitive_key
 
-        for key in ("author", "keyboard", "mode", "host", "note", "tag", "username"):
+        for key in (
+            "author",
+            "keyboard",
+            "mode",
+            "host",
+            "note",
+            "tag",
+            "username",
+            "tokenizer",
+            "tokens",
+            "token_endpoint",
+            "token_type",
+            "secretary",
+            "sort_key",
+            "public_key",
+            "partition_key",
+            "cache_key",
+            "routing_key",
+            "foreign_key",
+            "monkey",
+        ):
             assert not _is_sensitive_key(key), key
 
     def test_bare_query_key_without_value_preserved(self) -> None:
@@ -232,6 +288,33 @@ class TestRedactionInternals:
     def test_no_sensitive_key_returns_input_unchanged(self) -> None:
         url = "https://h/p?mode=ssl&region=us-east-1"
         assert redact_url_password(url) == url
+
+    def test_presigned_url_signature_masked(self) -> None:
+        # The signature IS the credential in an AWS/Azure presigned URL.
+        out = redact_url_password(
+            "https://s3.example.com/o?X-Amz-Credential=AKIA&X-Amz-Signature=abcdef"
+        )
+        assert "abcdef" not in out
+        assert "***" in out
+
+    def test_benign_key_containing_token_not_masked(self) -> None:
+        url = "https://h/v1?tokenizer=cl100k&token_endpoint=/oauth&sort_key=name"
+        assert redact_url_password(url) == url
+
+    def test_semicolon_separated_sensitive_pair_masked(self) -> None:
+        # ';' must not let a password ride inside another key's value (leak)...
+        leak = redact_url_password("https://h/p?a=1;password=x")
+        assert "password=x" not in leak
+        assert "***" in leak
+        # ...and must not drop the non-sensitive neighbour (data loss).
+        drop = redact_url_password("https://h/p?password=secret;db=0")
+        assert "secret" not in drop
+        assert "db=0" in drop
+
+    def test_base64_value_with_equals_masked_whole(self) -> None:
+        out = redact_url_password("https://h/cb?signature=Zm9vYmFy==")
+        assert "Zm9vYmFy" not in out
+        assert "***" in out
 
 
 class TestUnionHelpers:
