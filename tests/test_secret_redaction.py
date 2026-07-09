@@ -132,6 +132,14 @@ class TestDsnDefaultRedactionInDocs:
     def test_optional_dsn_default_masked_in_describe(self) -> None:
         assert SECRET not in self._cls("optional").describe(output_format="markdown")
 
+    def test_multi_member_union_dsn_default_masked(self) -> None:
+        # A DSN default in a multi-member union must still be masked.
+        class Config(DotEnvConfig):
+            database_url: PostgresDsn | RedisDsn | None = Field(default=DSN)
+
+        assert SECRET not in Config.generate_env_example()
+        assert SECRET not in Config.describe(output_format="markdown")
+
 
 class TestRedactionHelper:
     """The standalone helper masks userinfo and sensitive query keys."""
@@ -142,10 +150,43 @@ class TestRedactionHelper:
     def test_query_string_password_masked(self) -> None:
         out = redact_url_password("redis://localhost:6379/0?password=s3cr3t&db=0")
         assert "s3cr3t" not in out
+        assert "***" in out
         assert "db=0" in out
 
     def test_query_string_token_masked(self) -> None:
-        assert "abc123" not in redact_url_password("https://api.example.com/v1?api_key=abc123")
+        out = redact_url_password("https://api.example.com/v1?api_key=abc123")
+        assert "abc123" not in out
+        assert "***" in out
+
+    def test_sslpassword_query_masked(self) -> None:
+        # libpq's sslpassword must be caught (substring match, not exact set).
+        out = redact_url_password("postgresql://h/db?sslmode=require&sslpassword=secret")
+        assert "secret" not in out
+        assert "sslmode=require" in out
+
+    def test_hyphenated_and_prefixed_secret_keys_masked(self) -> None:
+        assert "abc" not in redact_url_password("https://h/p?x-api-key=abc")
+        assert "abc" not in redact_url_password("https://h/p?db_password=abc")
+
+    def test_benign_query_params_preserved_verbatim(self) -> None:
+        # Masking a sensitive key must not re-encode unrelated params.
+        out = redact_url_password("https://h/p?note=a%20b&password=x&tag=1&tag=2")
+        assert "note=a%20b" in out  # not normalized to a+b
+        assert "tag=1" in out and "tag=2" in out
+        assert "x" not in out.split("password=")[1][:1] if "password=" in out else True
+        assert "***" in out
+
+    def test_lookalike_key_not_masked(self) -> None:
+        # 'author' contains 'auth' but is not a secret; must survive.
+        out = redact_url_password("https://h/p?author=jane&mode=ssl")
+        assert out == "https://h/p?author=jane&mode=ssl"
+
+    def test_fragment_secret_masked(self) -> None:
+        # OAuth implicit-flow style secret in the fragment.
+        out = redact_url_password("https://api.example.com/cb#access_token=abc123&state=xyz")
+        assert "abc123" not in out
+        assert "***" in out
+        assert "state=xyz" in out
 
     def test_ipv6_host_and_port_preserved(self) -> None:
         out = redact_url_password("postgresql://u:pw@[2001:db8::1]:5432/db")

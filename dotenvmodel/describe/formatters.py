@@ -318,18 +318,21 @@ def format_constraints(
     return ", ".join(constraints) if constraints else "-"
 
 
-def _unwrap_optional(field_type: TypeForm[Any]) -> Any:
-    """Return the sole non-None member of an Optional/Union, else the type itself.
+def _union_members(field_type: TypeForm[Any]) -> list[Any]:
+    """Return the non-None members of an Optional/Union, else ``[field_type]``.
 
-    ``PostgresDsn | None`` -> ``PostgresDsn``; a multi-member union or a plain
-    type is returned unchanged.
+    Handles multi-member unions (``PostgresDsn | RedisDsn | None``) so a DSN or
+    SecretStr anywhere in the union is still recognised for redaction.
     """
     origin = get_origin(field_type)
     if origin is types.UnionType or origin is Union:
-        non_none = [a for a in get_args(field_type) if a is not type(None)]
-        if len(non_none) == 1:
-            return non_none[0]
-    return field_type
+        return [a for a in get_args(field_type) if a is not type(None)]
+    return [field_type]
+
+
+def _is_type_in_union(field_type: TypeForm[Any], target: type) -> bool:
+    """True if any member of ``field_type`` is a subclass of ``target``."""
+    return any(isinstance(m, type) and issubclass(m, target) for m in _union_members(field_type))
 
 
 def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: bool = True) -> str:
@@ -355,19 +358,13 @@ def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: b
     if isinstance(default, Enum):
         return str(default.value)
 
-    # Unwrap Optional/Union (e.g. `PostgresDsn | None`) so a DSN/SecretStr
-    # default nested in a Union is still recognised and redacted.
-    effective_type = _unwrap_optional(field_type)
-
-    if isinstance(effective_type, type) and issubclass(effective_type, SecretStr):
+    # Recognise DSN/SecretStr even inside an Optional/multi-member Union
+    # (e.g. `PostgresDsn | RedisDsn | None`) so nested defaults are redacted.
+    if _is_type_in_union(field_type, SecretStr):
         return "<secret>"
 
     # DSN defaults may embed credentials; redact the password before display.
-    if (
-        isinstance(effective_type, type)
-        and issubclass(effective_type, BaseDsn)
-        and isinstance(default, str)
-    ):
+    if _is_type_in_union(field_type, BaseDsn) and isinstance(default, str):
         return f'"{redact_url_password(str.__str__(default))}"'
 
     if isinstance(default, str):
