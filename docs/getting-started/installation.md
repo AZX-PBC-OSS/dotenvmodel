@@ -5,7 +5,7 @@ dotenvmodel is a pure-Python library with minimal dependencies. It runs on Pytho
 ## Requirements
 
 !!! warning "Python 3.12+ required"
-    dotenvmodel requires **Python 3.12 or newer**. It uses modern type syntax such as `str | None` and `list[str]` that is only fully supported on 3.12+. If you need to support older Python versions, pin to a compatible library instead.
+    dotenvmodel requires **Python 3.12 or newer**. It is tested on Python 3.12, 3.13, 3.14, and 3.15. It uses modern type syntax such as `str | None` and `list[str]` that is only fully supported on 3.12+. If you need to support older Python versions, pin to a compatible library instead.
 
 dotenvmodel has only two runtime dependencies, so it stays lightweight:
 
