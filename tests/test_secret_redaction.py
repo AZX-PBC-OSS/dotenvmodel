@@ -96,6 +96,16 @@ class TestDsnCoercionErrorRedaction:
             Config.load_from_dict({"DATABASE_URL": bad})
         assert SECRET not in str(exc_info.value)
 
+    def test_malformed_url_does_not_leak_password_in_exception(self) -> None:
+        # urlparse() raises on this (bad IPv6) — the fallback must still mask.
+        class Config(DotEnvConfig):
+            database_url: PostgresDsn = Field()
+
+        bad = f"postgresql://user:{SECRET}@[::1:5432/db"
+        with pytest.raises(TypeCoercionError) as exc_info:
+            Config.load_from_dict({"DATABASE_URL": bad})
+        assert SECRET not in str(exc_info.value)
+
 
 class TestDsnDefaultRedactionInDocs:
     """describe()/generate_env_example() must not print DSN default creds."""
@@ -231,6 +241,8 @@ class TestRedactionInternals:
 
         assert not _is_sensitive_key("")
         assert not _is_sensitive_key("   ")
+        assert not _is_sensitive_key("_")  # all-separator key -> no tokens
+        assert not _is_sensitive_key("--")
 
     def test_is_sensitive_key_secret_compounds(self) -> None:
         from dotenvmodel._redaction import _is_sensitive_key
@@ -301,20 +313,65 @@ class TestRedactionInternals:
         url = "https://h/v1?tokenizer=cl100k&token_endpoint=/oauth&sort_key=name"
         assert redact_url_password(url) == url
 
-    def test_semicolon_separated_sensitive_pair_masked(self) -> None:
-        # ';' must not let a password ride inside another key's value (leak)...
-        leak = redact_url_password("https://h/p?a=1;password=x")
-        assert "password=x" not in leak
-        assert "***" in leak
-        # ...and must not drop the non-sensitive neighbour (data loss).
-        drop = redact_url_password("https://h/p?password=secret;db=0")
-        assert "secret" not in drop
-        assert "db=0" in drop
+    def test_semicolon_is_data_not_a_separator(self) -> None:
+        # Per the WHATWG URL standard (and Python 3.10+ parse_qsl), only '&'
+        # separates params; a ';' stays inside its value. A secret value that
+        # contains ';' is masked whole (no tail leak).
+        out = redact_url_password("https://h/p?password=secret;db=0")
+        assert "secret" not in out
+        assert out == "https://h/p?password=***"
 
     def test_base64_value_with_equals_masked_whole(self) -> None:
         out = redact_url_password("https://h/cb?signature=Zm9vYmFy==")
         assert "Zm9vYmFy" not in out
         assert "***" in out
+
+    def test_unparseable_url_still_masks_userinfo(self) -> None:
+        # Even when urlparse raises, a userinfo password must be masked.
+        out = redact_url_password("postgresql://user:s3cret@[::1:5432/db")
+        assert "s3cret" not in out
+        assert "***" in out
+
+    def test_password_value_with_semicolon_masked_whole(self) -> None:
+        # A ';' inside a secret value must not leak the tail.
+        out = redact_url_password("https://h/p?password=se;cret&db=0")
+        assert "cret" not in out
+        assert "db=0" in out
+
+    def test_semicolon_in_benign_value_preserved(self) -> None:
+        # ';' is data, not a separator: a benign value keeps it verbatim.
+        out = redact_url_password("https://h/p?filter=a;b&password=x")
+        assert "filter=a;b" in out
+        assert "password=***" in out
+
+    def test_more_secret_keys_masked(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        for key in (
+            "totp",
+            "client_assertion",
+            "HMACKey",
+            "storage_account_key",
+            "Ocp-Apim-Subscription-Key",
+            "pass",
+            "access_token",
+        ):
+            assert _is_sensitive_key(key), key
+
+    def test_more_benign_keys_not_masked(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        for key in (
+            "page_token",
+            "next_token",
+            "continuation_token",
+            "passwordless",
+            "signature_method",
+            "auth_type",
+            "token_endpoint",
+            "authorization_endpoint",
+        ):
+            assert not _is_sensitive_key(key), key
 
 
 class TestUnionHelpers:

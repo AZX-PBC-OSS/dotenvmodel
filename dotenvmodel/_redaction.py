@@ -11,9 +11,10 @@ __all__ = ["redact_url_password"]
 
 _MASK = "***"
 
-# Unambiguous secret words. Matched as the whole (separator-stripped) key or as
-# any separator-delimited token, so ``client_secret`` and ``X-Amz-Signature``
-# match while ``secretary`` / ``author`` / ``oauth`` do not.
+# Secret words: a key is sensitive when one of these is the WHOLE key or its
+# LAST token. Keying on the last token means ``access_token``/``client_secret``
+# match while ``token_endpoint``/``signature_method``/``auth_type`` (benign
+# ``*_endpoint``/``*_method``/``*_type`` suffixes) do not.
 _SECRET_WORDS = frozenset(
     {
         "password",
@@ -25,8 +26,6 @@ _SECRET_WORDS = frozenset(
         "credential",
         "credentials",
         "apikey",
-        "auth",
-        "authorization",
         "signature",
         "sig",
         "hmac",
@@ -34,63 +33,114 @@ _SECRET_WORDS = frozenset(
         "bearer",
         "sessionid",
         "otp",
+        "totp",
         "sas",
+        "assertion",
+        "authorization",
+        "token",
+        "key",
     }
 )
 
-# Long words distinctive enough to match as a substring of the stripped key
-# (catches ``sslpassword`` / ``x-api-key`` without hitting benign lookalikes).
-_SECRET_SUBSTRINGS = ("password", "passphrase", "passcode", "signature", "apikey")
+# Short/common words that are a credential only as the ENTIRE key, so
+# ``pass``/``auth`` mask but ``pass_through``/``auth_type``/``auth_url`` do not.
+_SECRET_WHOLE_ONLY = frozenset({"pass", "auth"})
 
-# Qualifiers that make a trailing ``key`` token a secret (``api_key`` yes,
-# ``sort_key`` / ``public_key`` no).
-_KEY_QUALIFIERS = frozenset(
-    {"api", "access", "secret", "private", "client", "encryption", "signing", "master", "session"}
+# Glued (separator-less) suffixes, e.g. ``sslpassword`` / ``xapikey``.
+_SECRET_SUFFIXES = ("password", "passphrase", "passcode", "signature", "apikey")
+
+# Qualifiers that make a trailing ``key`` benign (``sort_key``), i.e. NOT a
+# credential — everything else with a trailing ``key`` is masked.
+_BENIGN_KEY_QUALIFIERS = frozenset(
+    {
+        "sort",
+        "public",
+        "partition",
+        "cache",
+        "routing",
+        "foreign",
+        "primary",
+        "order",
+        "group",
+        "grouping",
+        "unique",
+        "composite",
+        "natural",
+        "shard",
+        "sharding",
+        "hash",
+        "cluster",
+        "dedup",
+        "dedupe",
+        "idempotency",
+    }
 )
 
+# Qualifiers that make a trailing ``token`` benign (a pagination cursor).
+_BENIGN_TOKEN_QUALIFIERS = frozenset(
+    {
+        "page",
+        "next",
+        "prev",
+        "previous",
+        "continuation",
+        "cursor",
+        "sync",
+        "resume",
+        "skip",
+        "offset",
+    }
+)
+
+# Split camelCase and ACRONYMBoundaries (HMACKey -> HMAC, Key).
+_CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 _SEPARATORS = re.compile(r"[-_.]+")
+# Fallback for unparseable URLs: mask the userinfo password (scheme://user:PW@).
+_USERINFO_PW = re.compile(r"(://[^:/?#@\s]*:)[^@/?#\s]+(@)")
 
 
 def _is_sensitive_key(key: str) -> bool:
     """True if a query/fragment key names a credential.
 
-    Uses token-boundary matching (not naive substring) so it catches
-    ``passphrase``/``signature``/``X-Amz-Signature`` while leaving benign
-    lookalikes like ``tokenizer``/``sort_key``/``secretary`` untouched.
+    Matches a secret word as the whole key or its last token (so
+    ``access_token`` masks but ``token_endpoint`` does not), with benign-qualifier
+    carve-outs for ``key``/``token`` and a suffix check for glued forms like
+    ``sslpassword``.
     """
     raw = unquote_plus(key).strip()
     if not raw:
         return False
 
-    # Split camelCase (clientSecret -> client, secret) then separators.
-    k = re.sub(r"(?<=[a-z0-9])(?=[A-Z])", "_", raw).lower()
-    tokens = _SEPARATORS.split(k)
+    k = _CAMEL.sub("_", raw).lower()
+    tokens = [t for t in _SEPARATORS.split(k) if t]
+    if not tokens:
+        return False
     stripped = "".join(tokens)
+    last = tokens[-1]
+    prev = tokens[-2] if len(tokens) > 1 else None
 
-    if stripped in _SECRET_WORDS or any(t in _SECRET_WORDS for t in tokens):
+    if stripped in _SECRET_WHOLE_ONLY:
         return True
-    if any(sub in stripped for sub in _SECRET_SUBSTRINGS):
+    if last in _SECRET_WORDS:
+        if last == "key" and (prev is None or prev in _BENIGN_KEY_QUALIFIERS):
+            return False  # bare/sort/public key is not a credential
+        if last == "token" and prev in _BENIGN_TOKEN_QUALIFIERS:
+            return False  # pagination cursor, not a credential
         return True
-    # ``token`` only as the whole key or a trailing token (access_token), never a
-    # prefix (token_endpoint) or part of a word (tokenizer).
-    if tokens[-1] == "token" and (len(tokens) > 1 or k == "token"):
-        return True
-    # ``key`` only when qualified as a credential (api_key), not sort_key.
-    if len(tokens) > 1 and tokens[-1] == "key" and tokens[-2] in _KEY_QUALIFIERS:
+    if any(stripped.endswith(sfx) for sfx in _SECRET_SUFFIXES):
         return True
     return False
 
 
 def _redact_pairs(component: str) -> tuple[str, bool]:
-    """Mask sensitive values in a ``&``/``;``-separated key=value string.
+    """Mask sensitive values in an ``&``-separated key=value string.
 
-    Non-sensitive pairs are preserved byte-for-byte (no re-encoding) when
-    nothing changes. If a secret is masked the component is re-joined with
-    ``&`` (normalising any legacy ``;`` separator), which is display-only.
+    Per the WHATWG URL standard, ``&`` is the only separator; a ``;`` is data
+    and stays inside its value. Non-sensitive pairs are preserved byte-for-byte.
     Returns the (possibly rewritten) component and whether anything changed.
     """
     changed = False
-    parts = re.split(r"[&;]", component)
+    parts = component.split("&")
     for i, part in enumerate(parts):
         key, sep, value = part.partition("=")
         if sep and value and _is_sensitive_key(key):
@@ -112,7 +162,9 @@ def redact_url_password(value: str) -> str:
     try:
         parsed = urlparse(value)
     except (ValueError, TypeError):
-        return value
+        # Malformed URL (e.g. bad IPv6) — urlparse can't help, but a userinfo
+        # password must still not leak, so fall back to a regex mask.
+        return _USERINFO_PW.sub(rf"\1{_MASK}\2", value)
 
     netloc = parsed.netloc
     changed = False
