@@ -73,6 +73,18 @@ _BENIGN_KEY_QUALIFIERS = frozenset(
         "dedup",
         "dedupe",
         "idempotency",
+        # storage / DB object identifiers (the value is a name/path, not a secret)
+        "object",
+        "index",
+        "row",
+        "blob",
+        "map",
+        "bucket",
+        "range",
+        "lookup",
+        "search",
+        "query",
+        "filter",
     }
 )
 
@@ -84,13 +96,43 @@ _BENIGN_TOKEN_QUALIFIERS = frozenset(
         "prev",
         "previous",
         "continuation",
+        "continue",
         "cursor",
         "sync",
         "resume",
         "skip",
         "offset",
+        "start",
+        "before",
+        "after",
+        "pagination",
     }
 )
+
+# Prefixes that make a glued (separator-less) ``*key``/``*token``/``*secret``
+# compound a credential: ``secretkey``, ``accesstoken``, ``clientsecret``.
+_CREDENTIAL_PREFIXES = frozenset(
+    {
+        "secret",
+        "access",
+        "private",
+        "api",
+        "client",
+        "signing",
+        "encryption",
+        "refresh",
+        "session",
+        "shared",
+        "master",
+        "auth",
+        "bearer",
+        "consumer",
+        "sas",
+    }
+)
+# The ambiguous words whose carve-outs must run even if the glued key is a
+# whole secret word — so a bare ``key``/``token`` is not masked by the whole-word check.
+_AMBIGUOUS = frozenset({"key", "token"})
 
 # Split camelCase and ACRONYMBoundaries (HMACKey -> HMAC, Key).
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
@@ -121,6 +163,10 @@ def _is_sensitive_key(key: str) -> bool:
 
     if stripped in _SECRET_WHOLE_ONLY:
         return True
+    # A secret word spanning separators (session_id -> sessionid), but not the
+    # ambiguous key/token, which still need their carve-outs below.
+    if stripped in _SECRET_WORDS and stripped not in _AMBIGUOUS:
+        return True
     if last in _SECRET_WORDS:
         # A secret-word last token is a credential unless it's a benign carve-out:
         # a bare/sort/public `key`, or a pagination-cursor `token`.
@@ -128,7 +174,21 @@ def _is_sensitive_key(key: str) -> bool:
             last == "token" and prev in _BENIGN_TOKEN_QUALIFIERS
         )
         return not benign
+    if _is_glued_credential(stripped):
+        return True
     return any(stripped.endswith(sfx) for sfx in _SECRET_SUFFIXES)
+
+
+def _is_glued_credential(stripped: str) -> bool:
+    """True for separator-less compounds like ``secretkey`` / ``accesstoken``."""
+    for suffix in ("key", "token", "secret", "password"):
+        if (
+            stripped.endswith(suffix)
+            and len(stripped) > len(suffix)
+            and stripped[: -len(suffix)] in _CREDENTIAL_PREFIXES
+        ):
+            return True
+    return False
 
 
 def _redact_pairs(component: str) -> tuple[str, bool]:
@@ -161,9 +221,17 @@ def redact_url_password(value: str) -> str:
     try:
         parsed = urlparse(value)
     except (ValueError, TypeError):
-        # Malformed URL (e.g. bad IPv6) — urlparse can't help, but a userinfo
-        # password must still not leak, so fall back to a regex mask.
-        return _USERINFO_PW.sub(rf"\1{_MASK}\2", value)
+        # Malformed URL (e.g. bad IPv6). urlparse can't help, but neither the
+        # userinfo password nor a query/fragment secret may leak, so mask the
+        # userinfo by regex and redact the (splittable) query and fragment.
+        masked = _USERINFO_PW.sub(rf"\1{_MASK}\2", value)
+        head, hsep, frag = masked.partition("#")
+        head, qsep, query = head.partition("?")
+        if qsep:
+            query = _redact_pairs(query)[0]
+        if hsep:
+            frag = _redact_pairs(frag)[0]
+        return head + qsep + query + hsep + frag
 
     netloc = parsed.netloc
     changed = False

@@ -332,6 +332,43 @@ class TestRedactionInternals:
         assert "s3cret" not in out
         assert "***" in out
 
+    def test_unparseable_url_still_masks_query_secret(self) -> None:
+        # Malformed URL (bad IPv6) that also carries a query secret must not
+        # leak it (this reintroduced the issue-#27 leak via a one-char typo).
+        out = redact_url_password("redis://[::1:6379?password=s3cret")
+        assert "s3cret" not in out
+        out2 = redact_url_password("postgresql://user:pw@[::1:5432/db?sslpassword=SECRET")
+        assert "SECRET" not in out2 and "pw" not in out2.split("@")[0].split(":")[-1]
+        # Fragment secret on a malformed URL must also be masked.
+        out3 = redact_url_password("redis://[::1:6379#access_token=abc123")
+        assert "abc123" not in out3
+
+    def test_separated_session_id_masked(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        for key in ("sessionid", "session_id", "sessionId", "SESSION_ID"):
+            assert _is_sensitive_key(key), key
+
+    def test_glued_compound_secrets_masked(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        for key in (
+            "secretkey",
+            "accesskey",
+            "privatekey",
+            "accesstoken",
+            "clientsecret",
+            "refreshtoken",
+        ):
+            assert _is_sensitive_key(key), key
+        assert "AKIA" not in redact_url_password("https://h/p?secretkey=AKIAEXAMPLE")
+
+    def test_benign_identifier_keys_not_masked(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        for key in ("object_key", "index_key", "row_key", "continue_token", "start_token"):
+            assert not _is_sensitive_key(key), key
+
     def test_password_value_with_semicolon_masked_whole(self) -> None:
         # A ';' inside a secret value must not leak the tail.
         out = redact_url_password("https://h/p?password=se;cret&db=0")
