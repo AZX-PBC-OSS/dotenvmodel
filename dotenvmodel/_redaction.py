@@ -122,14 +122,13 @@ def _is_sensitive_key(key: str) -> bool:
     if stripped in _SECRET_WHOLE_ONLY:
         return True
     if last in _SECRET_WORDS:
-        if last == "key" and (prev is None or prev in _BENIGN_KEY_QUALIFIERS):
-            return False  # bare/sort/public key is not a credential
-        if last == "token" and prev in _BENIGN_TOKEN_QUALIFIERS:
-            return False  # pagination cursor, not a credential
-        return True
-    if any(stripped.endswith(sfx) for sfx in _SECRET_SUFFIXES):
-        return True
-    return False
+        # A secret-word last token is a credential unless it's a benign carve-out:
+        # a bare/sort/public `key`, or a pagination-cursor `token`.
+        benign = (last == "key" and (prev is None or prev in _BENIGN_KEY_QUALIFIERS)) or (
+            last == "token" and prev in _BENIGN_TOKEN_QUALIFIERS
+        )
+        return not benign
+    return any(stripped.endswith(sfx) for sfx in _SECRET_SUFFIXES)
 
 
 def _redact_pairs(component: str) -> tuple[str, bool]:
