@@ -369,6 +369,28 @@ class TestRedactionInternals:
         for key in ("object_key", "index_key", "row_key", "continue_token", "start_token"):
             assert not _is_sensitive_key(key), key
 
+    def test_versioned_secret_keys_masked(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        for key in ("auth_token_v2", "access_key_v1", "refresh_token_v3", "api_key_2"):
+            assert _is_sensitive_key(key), key
+        # ...but a versioned benign key stays benign.
+        for key in ("page_token_v2", "sort_key_v1"):
+            assert not _is_sensitive_key(key), key
+
+    def test_ssl_key_path_not_masked(self) -> None:
+        from dotenvmodel._redaction import _is_sensitive_key
+
+        # ssl_key / sslkey is a path to a key file, not a secret value.
+        assert not _is_sensitive_key("ssl_key")
+        assert not _is_sensitive_key("sslkey")
+
+    def test_at_sign_in_password_fully_masked_on_fallback(self) -> None:
+        # Malformed URL whose password contains a literal '@' must not leak a tail.
+        out = redact_url_password("postgresql://u:p@ss@[::1:5432/db")
+        assert "p@ss" not in out
+        assert "ss@" not in out
+
     def test_password_value_with_semicolon_masked_whole(self) -> None:
         # A ';' inside a secret value must not leak the tail.
         out = redact_url_password("https://h/p?password=se;cret&db=0")

@@ -85,6 +85,8 @@ _BENIGN_KEY_QUALIFIERS = frozenset(
         "search",
         "query",
         "filter",
+        # ssl_key/sslkey is a path to a key file, not a secret value
+        "ssl",
     }
 )
 
@@ -137,8 +139,12 @@ _AMBIGUOUS = frozenset({"key", "token"})
 # Split camelCase and ACRONYMBoundaries (HMACKey -> HMAC, Key).
 _CAMEL = re.compile(r"(?<=[a-z0-9])(?=[A-Z])|(?<=[A-Z])(?=[A-Z][a-z])")
 _SEPARATORS = re.compile(r"[-_.]+")
+# A trailing version token (v2 / 3) that should not hide the real last token.
+_VERSION = re.compile(r"v?\d+")
 # Fallback for unparseable URLs: mask the userinfo password (scheme://user:PW@).
-_USERINFO_PW = re.compile(r"(://[^:/?#@\s]*:)[^@/?#\s]+(@)")
+# The password class allows '@'/':' and backtracks to the last '@' before the
+# path, so an unescaped '@' in the password is still fully masked.
+_USERINFO_PW = re.compile(r"(://[^:/?#@\s]*:)[^/?#\s]+(@)")
 
 
 def _is_sensitive_key(key: str) -> bool:
@@ -155,6 +161,9 @@ def _is_sensitive_key(key: str) -> bool:
 
     k = _CAMEL.sub("_", raw).lower()
     tokens = [t for t in _SEPARATORS.split(k) if t]
+    # Drop a trailing version token so `auth_token_v2` reads as `auth_token`.
+    while len(tokens) > 1 and _VERSION.fullmatch(tokens[-1]):
+        tokens = tokens[:-1]
     if not tokens:
         return False
     stripped = "".join(tokens)
