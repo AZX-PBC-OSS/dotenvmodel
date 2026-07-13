@@ -49,16 +49,16 @@ def validate_field(field_name: str, value: Any, field_info: FieldInfo, env_var_n
     if isinstance(value, str):
         _validate_string(field_name, value, field_info, env_var_name)
     elif isinstance(value, SecretStr):
-        try:
-            _validate_string(field_name, value.get_secret_value(), field_info, env_var_name)
-        except ConstraintViolationError as e:
-            raise ConstraintViolationError(
-                field_name=e.field_name,
-                value=value,
-                constraint=e.constraint,
-                error_msg=e.error_msg,
-                env_var_name=e.env_var_name,
-            ) from e
+        # Check the plaintext for length/regex, but report the masked SecretStr.
+        # No plaintext-bearing exception is ever constructed, so nothing can
+        # leak via the exception chain (__cause__/__context__).
+        _validate_string(
+            field_name,
+            value.get_secret_value(),
+            field_info,
+            env_var_name,
+            report_value=value,
+        )
 
     # Choice validation (works for any type)
     if field_info.choices is not None:
@@ -114,12 +114,25 @@ def _validate_numeric(
         )
 
 
-def _validate_string(field_name: str, value: str, field_info: FieldInfo, env_var_name: str) -> None:
-    """Validate string constraints (min_length, max_length, regex)."""
+def _validate_string(
+    field_name: str,
+    value: str,
+    field_info: FieldInfo,
+    env_var_name: str,
+    report_value: object | None = None,
+) -> None:
+    """Validate string constraints (min_length, max_length, regex).
+
+    ``value`` is the plaintext used for the checks; ``report_value`` (when given,
+    e.g. the masking ``SecretStr`` wrapper) is what appears in any raised error,
+    so the plaintext never enters an exception.
+    """
+    reported = value if report_value is None else report_value
+
     if field_info.min_length is not None and len(value) < field_info.min_length:
         raise ConstraintViolationError(
             field_name=field_name,
-            value=value,
+            value=reported,
             constraint=f"min_length={field_info.min_length}",
             error_msg=f"String must be at least {field_info.min_length} characters long",
             env_var_name=env_var_name,
@@ -128,7 +141,7 @@ def _validate_string(field_name: str, value: str, field_info: FieldInfo, env_var
     if field_info.max_length is not None and len(value) > field_info.max_length:
         raise ConstraintViolationError(
             field_name=field_name,
-            value=value,
+            value=reported,
             constraint=f"max_length={field_info.max_length}",
             error_msg=f"String must be at most {field_info.max_length} characters long",
             env_var_name=env_var_name,
@@ -141,7 +154,7 @@ def _validate_string(field_name: str, value: str, field_info: FieldInfo, env_var
     ):
         raise ConstraintViolationError(
             field_name=field_name,
-            value=value,
+            value=reported,
             constraint=f"regex={field_info.regex!r}",
             error_msg=f"String must match pattern: {field_info.regex}",
             env_var_name=env_var_name,

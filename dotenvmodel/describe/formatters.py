@@ -13,8 +13,9 @@ from typing import Any, Union, get_args, get_origin
 
 from typing_extensions import TypeForm
 
+from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.fields import _MISSING, FieldInfo
-from dotenvmodel.types import SecretStr
+from dotenvmodel.types import BaseDsn, SecretStr
 
 # Maximum column widths to prevent unbounded table growth
 MAX_WIDTHS = {
@@ -317,6 +318,23 @@ def format_constraints(
     return ", ".join(constraints) if constraints else "-"
 
 
+def _union_members(field_type: TypeForm[Any]) -> list[Any]:
+    """Return the non-None members of an Optional/Union, else ``[field_type]``.
+
+    Handles multi-member unions (``PostgresDsn | RedisDsn | None``) so a DSN or
+    SecretStr anywhere in the union is still recognised for redaction.
+    """
+    origin = get_origin(field_type)
+    if origin is types.UnionType or origin is Union:
+        return [a for a in get_args(field_type) if a is not type(None)]
+    return [field_type]
+
+
+def _is_type_in_union(field_type: TypeForm[Any], target: type) -> bool:
+    """True if any member of ``field_type`` is a subclass of ``target``."""
+    return any(isinstance(m, type) and issubclass(m, target) for m in _union_members(field_type))
+
+
 def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: bool = True) -> str:
     """Format default value for display."""
     if field_info.default is _MISSING and field_info.default_factory is None:
@@ -340,8 +358,14 @@ def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: b
     if isinstance(default, Enum):
         return str(default.value)
 
-    if isinstance(field_type, type) and issubclass(field_type, SecretStr):
+    # Recognise DSN/SecretStr even inside an Optional/multi-member Union
+    # (e.g. `PostgresDsn | RedisDsn | None`) so nested defaults are redacted.
+    if _is_type_in_union(field_type, SecretStr):
         return "<secret>"
+
+    # DSN defaults may embed credentials; redact the password before display.
+    if _is_type_in_union(field_type, BaseDsn) and isinstance(default, str):
+        return f'"{redact_url_password(str.__str__(default))}"'
 
     if isinstance(default, str):
         if truncate and len(default) > TRUNCATE_THRESHOLD_SHORT:

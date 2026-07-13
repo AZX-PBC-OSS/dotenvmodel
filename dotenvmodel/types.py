@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING, TypeVar
 from urllib.parse import ParseResult, unquote, urlparse
 from uuid import UUID
 
+from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.exceptions import TypeCoercionError
 
 _T = TypeVar("_T")
@@ -145,6 +146,19 @@ class BaseDsn(str):
             raise ValueError("URL must have a host")
 
         return str.__new__(cls, value)
+
+    def __repr__(self) -> str:
+        """Return a redacted ``repr`` with any password masked.
+
+        Only ``repr`` is overridden. ``str(dsn)`` and the raw buffer remain the
+        real connection string so the DSN stays usable with database drivers
+        (``create_engine(str(url))``, ``redis.from_url(str(url))``, etc.). This
+        masks the accidental-display path (``repr(config)``, debuggers, ``%r``
+        logging) without breaking functionality. Values that must never appear
+        in serialized output (``json.dumps``, ``.encode()``) should use
+        ``SecretStr`` instead.
+        """
+        return repr(redact_url_password(str.__str__(self)))
 
     @property
     def parsed(self) -> ParseResult:
