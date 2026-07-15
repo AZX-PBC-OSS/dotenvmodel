@@ -70,9 +70,7 @@ class TestNestedConfigOverrides:
         assert config.nested.name == "nested-default"
 
     def test_nested_prefix_is_independent_of_parent_prefix(self) -> None:
-        config = Outer.load_from_dict(
-            {"APP_TOP": "override", "APP_NESTED_NAME": "override-nested"}
-        )
+        config = Outer.load_from_dict({"APP_TOP": "override", "APP_NESTED_NAME": "override-nested"})
 
         assert config.top == "override"
         assert config.nested.name == "override-nested"
@@ -99,9 +97,7 @@ class TestNestedConfigValidation:
             nested: Nested = Field(default_factory=Nested)
 
         with pytest.raises(MultipleValidationErrors) as exc_info:
-            OuterWithConstraint.load_from_dict(
-                {"APP_TOP": "999", "APP_NESTED_PORT": "999"}
-            )
+            OuterWithConstraint.load_from_dict({"APP_TOP": "999", "APP_NESTED_PORT": "999"})
 
         assert len(exc_info.value.errors) == 2
         field_names = {e.field_name for e in exc_info.value.errors}
@@ -130,9 +126,7 @@ class TestNestedConfigValidation:
             nested: TwoConstrainedFields = Field(default_factory=TwoConstrainedFields)
 
         with pytest.raises(MultipleValidationErrors) as exc_info:
-            OuterWithTwoConstrainedNested.load_from_dict(
-                {"APP_TWO_A": "999", "APP_TWO_B": "999"}
-            )
+            OuterWithTwoConstrainedNested.load_from_dict({"APP_TWO_A": "999", "APP_TWO_B": "999"})
 
         assert len(exc_info.value.errors) == 2
         field_names = {e.field_name for e in exc_info.value.errors}
