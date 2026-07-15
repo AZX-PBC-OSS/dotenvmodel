@@ -78,6 +78,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         raw_value: str | None,
         env_var_name: str,
         *,
+        env_source: builtins.dict[str, str] | None = None,
         validate: bool = True,
     ) -> Any:
         """
@@ -89,6 +90,10 @@ class DotEnvConfig(metaclass=ConfigMeta):
             field_info: Field metadata
             raw_value: Raw string value from environment (or None)
             env_var_name: Environment variable name for error messages
+            env_source: The source passed to the enclosing `_load_fields` call
+                (None for real env vars, or a dict for `load_from_dict`).
+                Forwarded to nested `DotEnvConfig` fields so they resolve
+                from the same source as their parent.
             validate: Whether to perform validation (default: True)
 
         Returns:
@@ -98,6 +103,33 @@ class DotEnvConfig(metaclass=ConfigMeta):
             MissingFieldError: If required field is missing
             ValidationError: If validation fails
         """
+        # Nested DotEnvConfig fields (e.g. `oidc: OIDCSettings`) are not a
+        # scalar to coerce — a nested config resolves its own fields from
+        # the same env_source using its own env_prefix, so it must always
+        # go through _load_fields() regardless of whether raw_value (the
+        # value of an env var literally named after the field, which no
+        # one sets) is present. A bare `field_type()` here would silently
+        # produce an unloaded instance whose fields never got populated.
+        #
+        # Note: this only matches a plain `type` — `Optional[Nested]` /
+        # `Nested | None` is a Union, not a `type`, so it does NOT take
+        # this branch and instead falls through to the Optional handling
+        # in coerce_value(), which just returns None for a missing literal
+        # env var without trying the nested prefix. See
+        # TestOptionalNestedConfigLimitation below — tracked as a known
+        # follow-up, not fixed here.
+        #
+        # Note: field_info.required is deliberately not consulted here —
+        # a `Field()`-required (no default) nested config now always
+        # resolves successfully using the nested class's own defaults,
+        # rather than raising MissingFieldError. "Required" is expressed
+        # on the nested class's own fields instead. See
+        # TestRequiredNestedConfigField below for the pinned behavior.
+        if isinstance(field_type, type) and issubclass(field_type, DotEnvConfig):
+            nested = field_type()
+            nested._load_fields(env_source, validate=validate)
+            return nested
+
         # Handle missing values
         if raw_value is None:
             if field_info.required:
@@ -164,11 +196,18 @@ class DotEnvConfig(metaclass=ConfigMeta):
                     field_info,
                     raw_value,
                     env_var_name,
+                    env_source=env_source,
                     validate=validate,
                 )
                 setattr(self, field_name, value)
             except ValidationError as e:
                 errors.append(e)
+            except MultipleValidationErrors as e:
+                # Raised when a nested DotEnvConfig field (see
+                # _process_field) has multiple invalid fields of its own —
+                # flatten into this level's collection instead of letting
+                # it escape uncaught past the aggregation loop.
+                errors.extend(e.errors)
 
         if errors:
             if len(errors) == 1:

@@ -1008,6 +1008,30 @@ redis = RedisConfig.load()      # Reads REDIS_HOST, REDIS_PORT
 app = AppConfig.load()          # Reads APP_NAME, APP_VERSION
 ```
 
+### Nested Configuration
+
+A field typed as another `DotEnvConfig` subclass is loaded as a nested config, resolving its own fields (including defaults) from its own `env_prefix` — independently of the parent's prefix:
+
+```python
+class OIDCSettings(DotEnvConfig):
+    env_prefix = "WARDEN_OIDC_"
+    issuer: str = Field(default="")
+    session_max_age_seconds: int = Field(default=28800)
+
+class Settings(DotEnvConfig):
+    env_prefix = "WARDEN_"
+    service_name: str = Field(default="warden")
+    oidc: OIDCSettings = Field(default_factory=OIDCSettings)
+
+settings = Settings.load_from_dict({
+    "WARDEN_OIDC_SESSION_MAX_AGE_SECONDS": "3600",
+})
+settings.oidc.session_max_age_seconds  # 3600 (overridden)
+settings.oidc.issuer                   # "" (nested default, not the parent's prefix)
+```
+
+Nested `env_prefix` values are **absolute, not concatenated** with the parent's — `OIDCSettings.env_prefix` above is `WARDEN_OIDC_` in full, not appended to `Settings.env_prefix`. `.load()`, `.load_from_dict()`, and `.reload()` all resolve nested fields the same way. See [Known Limitations](#known-limitations) for `Optional[NestedConfig]` and `describe()` caveats.
+
 ## Error Handling
 
 ### Missing Required Field
@@ -1235,6 +1259,25 @@ config = Config.load()
 # Convert to int if needed in your code
 value_as_int = int(config.value) if config.value.isdigit() else config.value
 ```
+
+### Optional Nested Configuration
+
+`Optional[NestedConfig]` / `NestedConfig | None` fields are **not** supported the way a plain `nested: NestedConfig = Field(default_factory=NestedConfig)` field is — an Optional-typed nested field falls through to ordinary Optional-scalar handling and silently resolves to `None`, discarding any env vars set at the nested prefix:
+
+```python
+class Config(DotEnvConfig):
+    env_prefix = "APP_"
+    nested: NestedConfig | None = Field(default=None)
+
+config = Config.load_from_dict({"APP_NESTED_PORT": "8080"})
+config.nested  # None — the override above is silently ignored
+```
+
+**Workaround**: give the nested field a non-Optional type with `default_factory`, as in [Nested Configuration](#nested-configuration) above. If the nested config is conditionally absent in your app, model that with a `bool`/enum field inside the nested config itself rather than making the field Optional.
+
+### `describe()` / `generate_env_example()` and Nested Configuration
+
+`describe()` and `generate_env_example()` do not recurse into nested config fields — a nested field renders as an opaque, non-functional placeholder (e.g. `APP_NESTED=<NestedConfig()>`) rather than expanding to the nested class's real, settable env vars (e.g. `APP_NESTED_PORT`). Don't rely on generated `.env.example` output to discover a nested config's real variables — read the nested class's own fields (or its own `describe()` output) directly.
 
 ## License
 
