@@ -39,7 +39,11 @@ class Config(DotEnvConfig):
 | `min_length` | `int \| None` | Minimum string length (inclusive). For `str` and `SecretStr`. |
 | `max_length` | `int \| None` | Maximum string length (inclusive). For `str` and `SecretStr`. |
 | `regex` | `str \| None` | Regular expression pattern the string must match. |
+| `starts_with` | `str \| None` | Required string prefix. For `str` and `SecretStr`. |
+| `ends_with` | `str \| None` | Required string suffix. For `str` and `SecretStr`. |
+| `strip` | `bool \| str \| re.Pattern \| None` | Strip mode applied to the raw string before coercion. `None` inherits the class-level `strip_strings`; `True` strips whitespace; `False` disables; a non-empty `str` is a char set (`value.strip(chars)`); a compiled pattern removes every match. |
 | `choices` | `list[Any] \| None` | List of allowed values (validated after type coercion). |
+| `validator` | `Callable[[Any, ValidatorContext], Any] \| None` | Custom hook receiving the coerced, validated value plus context; its return value becomes the final value. |
 | `min_items` | `int \| None` | Minimum items in a collection (`list`, `set`, `tuple`, `dict`). |
 | `max_items` | `int \| None` | Maximum items in a collection (`list`, `set`, `tuple`, `dict`). |
 | `uuid_version` | `int \| None` | Required UUID version (`1`, `3`, `4`, or `5`). |
@@ -49,7 +53,7 @@ class Config(DotEnvConfig):
 | `require_exists` | `bool` | Whether a `Path` field must point to an existing path. Default: `False`. |
 
 !!! info "Validation parameters"
-    The validation parameters (`ge`, `le`, `gt`, `lt`, `min_length`, `max_length`, `regex`, `choices`, `min_items`, `max_items`, `uuid_version`) are documented in detail in the [Validation guide](validation.md).
+    The validation parameters (`ge`, `le`, `gt`, `lt`, `min_length`, `max_length`, `regex`, `starts_with`, `ends_with`, `choices`, `validator`, `min_items`, `max_items`, `uuid_version`) are documented in detail in the [Validation guide](validation.md).
 
 ---
 
@@ -130,6 +134,9 @@ There are three equivalent ways to mark a field as required. All produce identic
 !!! warning "Never use mutable defaults"
     Using `default=[]` or `default={}` shares the same object across all instances. Always use `default_factory=list` or `default_factory=dict` instead. `Field()` raises a `ValueError` if you specify both `default` and `default_factory`.
 
+!!! note "`str` defaults are coerced and validated for non-`str` field types"
+    A `str` default for a non-`str` field type is coerced to the declared type and run through validation at load — e.g. a `bool` default of `'false'` becomes `False`, a `SecretStr` default becomes a masked `SecretStr`, and a `PostgresDsn` default is validated (a bad scheme raises at load) with its password redacted in `repr`. Non-`str` defaults (e.g. `int 8000`, `default_factory=list`) and `str` defaults for `str`-typed fields are left untouched.
+
 ---
 
 ## Aliases
@@ -183,6 +190,45 @@ class Config(DotEnvConfig):
 ```
 
 See the [Configuration Documentation guide](configuration-docs.md) for examples of how descriptions appear in generated output.
+
+---
+
+## String Stripping
+
+The `strip` parameter cleans raw string values **before** coercion and validation. It applies to string-like fields: `str`, `SecretStr`, their `Optional` forms, `str` subclasses (`HttpUrl`, `PostgresDsn`, `RedisDsn`), and `Literal["a", "b"]` fields whose every member is `str`.
+
+```python
+import re
+
+class Config(DotEnvConfig):
+    # Whitespace strip: "  hello  " -> "hello"
+    name: str = Field(strip=True)
+
+    # Char-set strip (str.strip(chars) semantics): ",'hello'," -> "hello"
+    tag: str = Field(strip=",'\"")
+
+    # Regex strip: removes every match, anywhere in the string
+    key: SecretStr = Field(strip=re.compile(r"^['\"]+|['\"]+$"))
+```
+
+Set the `strip_strings` class attribute to strip every string-like field by default; per-field `strip` overrides it:
+
+```python
+class Config(DotEnvConfig):
+    strip_strings: bool = True
+
+    name: str = Field()                # stripped (inherits class setting)
+    literal: str = Field(strip=False)  # per-field override wins
+```
+
+!!! note "Stripping is processing, not validation"
+    `strip` runs even with `validate=False`, and constraints see the stripped value — `min_length` checks the final length, and a whitespace-only value for an `Optional[str]` field strips to `""`, which maps to `None`.
+
+!!! note "Strip runs before URL-unquoting on `SecretStr`"
+    For `SecretStr` fields, `strip` is applied to the raw value **before** `url_unquote`, so percent-encoded whitespace (e.g. `%20`) survives stripping — it is removed while still percent-encoded, then unquoted. Use a `re.Pattern` strip if you need to strip decoded whitespace.
+
+!!! warning "Use linear-time regex patterns"
+    Both the `regex` constraint and `strip` with an `re.Pattern` run developer-supplied patterns against env values, which can be operator-controlled. Avoid patterns with nested quantifiers (e.g. `(a+)+`, `(a*)*`) that can cause catastrophic backtracking (ReDoS). Prefer anchored, linear-time patterns.
 
 ---
 

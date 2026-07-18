@@ -6,6 +6,7 @@ from uuid import UUID
 
 from dotenvmodel.exceptions import ConstraintViolationError
 from dotenvmodel.fields import FieldInfo
+from dotenvmodel.types import SecretStr
 
 
 def validate_field(field_name: str, value: Any, field_info: FieldInfo, env_var_name: str) -> None:
@@ -44,8 +45,6 @@ def validate_field(field_name: str, value: Any, field_info: FieldInfo, env_var_n
         _validate_numeric(field_name, value, field_info, env_var_name)
 
     # String validation (including SecretStr)
-    from dotenvmodel.types import SecretStr
-
     if isinstance(value, str):
         _validate_string(field_name, value, field_info, env_var_name)
     elif isinstance(value, SecretStr):
@@ -121,7 +120,7 @@ def _validate_string(
     env_var_name: str,
     report_value: object | None = None,
 ) -> None:
-    """Validate string constraints (min_length, max_length, regex).
+    """Validate string constraints (min_length, max_length, regex, starts_with, ends_with).
 
     ``value`` is the plaintext used for the checks; ``report_value`` (when given,
     e.g. the masking ``SecretStr`` wrapper) is what appears in any raised error,
@@ -157,6 +156,24 @@ def _validate_string(
             value=reported,
             constraint=f"regex={field_info.regex!r}",
             error_msg=f"String must match pattern: {field_info.regex}",
+            env_var_name=env_var_name,
+        )
+
+    if field_info.starts_with is not None and not value.startswith(field_info.starts_with):
+        raise ConstraintViolationError(
+            field_name=field_name,
+            value=reported,
+            constraint=f"starts_with={field_info.starts_with!r}",
+            error_msg=f"String must start with: {field_info.starts_with}",
+            env_var_name=env_var_name,
+        )
+
+    if field_info.ends_with is not None and not value.endswith(field_info.ends_with):
+        raise ConstraintViolationError(
+            field_name=field_name,
+            value=reported,
+            constraint=f"ends_with={field_info.ends_with!r}",
+            error_msg=f"String must end with: {field_info.ends_with}",
             env_var_name=env_var_name,
         )
 

@@ -1,12 +1,15 @@
 """Special types for dotenvmodel."""
 
+import inspect
 import json
 import re
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, TypeVar
+from typing import TYPE_CHECKING, Any, TypeVar
 from urllib.parse import ParseResult, unquote, urlparse
 from uuid import UUID
+
+from typing_extensions import TypeForm
 
 from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.exceptions import TypeCoercionError
@@ -330,6 +333,37 @@ class RedisDsn(BaseDsn):
             except ValueError:
                 return 0
         return 0
+
+
+def is_sensitive_type(tp: TypeForm[Any]) -> bool:
+    """True when the (Optional-unwrapped) declared type holds a sensitive value.
+
+    A field is sensitive when its ``Optional``/``Union``-unwrapped type is
+    ``SecretStr`` or a ``BaseDsn`` subclass (e.g. ``HttpUrl``, ``PostgresDsn``,
+    ``RedisDsn``). Masking decisions in ``config.py`` use this on the declared
+    type rather than ``isinstance(value, ...)`` so a default-path value that
+    has not yet been wrapped cannot bypass redaction.
+
+    Args:
+        tp: The field's type annotation
+
+    Returns:
+        True if the field is declared as a sensitive type
+    """
+    from dotenvmodel.coercion import unwrap_optional
+
+    unwrapped = unwrap_optional(tp)
+    return inspect.isclass(unwrapped) and issubclass(unwrapped, (SecretStr, BaseDsn))
+
+
+def is_sensitive_value(value: Any) -> bool:
+    """True when ``value`` is a ``SecretStr`` or ``BaseDsn`` instance.
+
+    Such values mask themselves in ``repr`` (``SecretStr`` shows
+    ``**********``; ``BaseDsn`` redacts any URL password), so they are safe to
+    embed directly in error messages.
+    """
+    return isinstance(value, (SecretStr, BaseDsn))
 
 
 if TYPE_CHECKING:

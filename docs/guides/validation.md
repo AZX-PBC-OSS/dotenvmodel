@@ -6,6 +6,9 @@ Constraints are defined as parameters to `Field()`. This page covers every suppo
 
 For the complete API reference, see [Validation API](../api-reference/validation.md).
 
+!!! note "Empty vs missing values"
+    `Optional[T]` fields map missing **and** empty values to `None` and skip constraints, while plain `str` preserves empty strings as real values. So "validate only if present" is spelled `str | None = Field(default=None, min_length=...)`.
+
 ---
 
 ## Numeric Constraints
@@ -95,6 +98,8 @@ String constraints apply to `str` and `SecretStr` fields.
 | `min_length` | Minimum string length (inclusive) |
 | `max_length` | Maximum string length (inclusive) |
 | `regex` | Regular expression pattern the string must match (uses `re.match`) |
+| `starts_with` | Required string prefix |
+| `ends_with` | Required string suffix |
 
 ### Examples
 
@@ -111,6 +116,10 @@ class Config(DotEnvConfig):
 
     # Regex pattern
     email: str = Field(regex=r'^[\w\.-]+@[\w\.-]+\.\w+$')
+
+    # Required prefix / suffix
+    client_key: str = Field(starts_with="sk-")
+    signed_token: str = Field(ends_with=".sig")
 
     # Combined constraints
     password: str = Field(
@@ -158,6 +167,9 @@ class Config(DotEnvConfig):
 
 !!! note "Regex uses `re.match`"
     The `regex` constraint uses `re.match`, which anchors at the **start** of the string. Include `^` and `$` in your pattern to anchor both ends, as shown in the examples above.
+
+!!! warning "Use linear-time patterns (ReDoS)"
+    `regex` and `strip` with an `re.Pattern` run developer-supplied patterns against env values, which can be operator-controlled. Avoid patterns with nested quantifiers (e.g. `(a+)+`, `(a*)*`) that can cause catastrophic backtracking (ReDoS). Prefer anchored, linear-time patterns.
 
 ---
 
@@ -211,6 +223,44 @@ class Config(DotEnvConfig):
 
 !!! tip "Choices work with any type"
     `choices` validates after type coercion, so you can use it with `int`, `bool`, or any type. For example: `port: int = Field(default=80, choices=[80, 443, 8080])`.
+
+---
+
+## Custom Validators
+
+For logic the built-in constraints can't express, attach a `validator` hook. It receives the **coerced, built-in-constraint-validated** value plus a `ValidatorContext` (field name and resolved env var name), and its return value becomes the final field value — so a hook can also transform.
+
+```python
+from dotenvmodel import DotEnvConfig, Field, SecretStr, ValidatorContext
+
+def check_api_key(value: SecretStr, ctx: ValidatorContext) -> SecretStr:
+    # The hook receives the coerced value: a SecretStr stays wrapped,
+    # so call get_secret_value() to inspect the plaintext.
+    if not value.get_secret_value().startswith("sk-"):
+        # ValueError/TypeError are wrapped in ConstraintViolationError and
+        # aggregate into MultipleValidationErrors like any other failure
+        raise ValueError(f"{ctx.env_var_name} must start with 'sk-'")
+    return value
+
+class Config(DotEnvConfig):
+    api_key: SecretStr = Field(validator=check_api_key)
+
+    # Transform example: normalize to lowercase
+    region: str = Field(default="us-east-1", validator=lambda v, ctx: v.lower())
+```
+
+Semantics:
+
+- The hook receives the **coerced** value. A `SecretStr` stays wrapped — use `get_secret_value()` to inspect the plaintext.
+- Runs **after** built-in constraints, on non-`None` values only, and even with `validate=False` (transformation is part of loading, not validation).
+- Built-in constraints are **not** re-run on a transformed value (pydantic "after"-mode semantics).
+- For sensitive fields (`SecretStr`, DSN types), returning a plain `str` re-wraps it in the declared type so the secret stays masked in `repr`.
+- Returning `None` on a non-`Optional` field raises `TypeCoercionError`.
+- A `ValueError` or `TypeError` from the hook is wrapped in `ConstraintViolationError` with `constraint="validator=<fn name>"`.
+- Raise `ConstraintViolationError` directly for a fully custom message on non-sensitive fields (passed through untouched).
+
+!!! warning "Sensitive-field leak prevention"
+    For sensitive fields (`SecretStr`, DSN types), **any** exception from the hook is masked to a generic `ConstraintViolationError` with no exception chaining — the hook's exception text is never embedded in the error or its `__cause__`/`__context__` chain, so a carelessly written hook cannot leak the secret or URL password into logs. For non-sensitive fields, `str(e)` is embedded in the error message and the original exception is chained.
 
 ---
 

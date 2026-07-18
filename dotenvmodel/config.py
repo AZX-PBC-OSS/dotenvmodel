@@ -2,22 +2,220 @@
 
 import builtins
 import logging
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Literal, Self
+from typing import Any, Literal, Self, cast
+
+from typing_extensions import TypeForm
 
 from dotenvmodel._constants import LOGGER_NAME
-from dotenvmodel.coercion import coerce_value
+from dotenvmodel.coercion import apply_strip, coerce_value, is_string_like_type, unwrap_optional
 from dotenvmodel.exceptions import (
+    ConstraintViolationError,
     MissingFieldError,
     MultipleValidationErrors,
+    TypeCoercionError,
     ValidationError,
 )
-from dotenvmodel.fields import FieldInfo
+from dotenvmodel.fields import FieldInfo, ValidatorContext, _validator_name
 from dotenvmodel.loading import get_env_var, get_env_var_name, load_env_files
 from dotenvmodel.metaclass import ConfigMeta
+from dotenvmodel.types import SecretStr, is_sensitive_type, is_sensitive_value
 from dotenvmodel.validation import validate_field
 
 logger = logging.getLogger(LOGGER_NAME)
+
+
+def _masked_report_value(value: Any) -> Any:
+    """Return a value whose ``repr`` masks the secret, for use in errors.
+
+    For a sensitive-typed field the runtime value is normally already a
+    ``SecretStr`` or ``BaseDsn`` (whose ``repr`` redacts it), so it is returned
+    directly. When it is not — e.g. a non-str default left untouched by
+    coercion on a declared-sensitive field — a fresh ``SecretStr`` mask is used
+    so nothing about the real value can reach the error message.
+    """
+    if is_sensitive_value(value):
+        return value
+    return SecretStr("**********")
+
+
+def _run_sensitive_validator(
+    field_name: str,
+    value: Any,
+    unwrapped_type: type[Any],
+    validator: Callable[[Any, ValidatorContext], Any],
+    env_var_name: str,
+    is_optional: bool,
+    name: str,
+    context: ValidatorContext,
+) -> Any:
+    """Run a validator hook for a sensitive-typed field.
+
+    Any hook failure (``ConstraintViolationError`` or any other ``Exception``)
+    is masked: the hook's exception text — which may embed the plaintext secret
+    or a URL password — is never embedded, and the masked error is raised
+    outside the ``except`` block with ``__cause__``/``__context__`` cleared so
+    the hook exception appears nowhere in the chain or traceback frame locals.
+    A plain-``str`` return value is re-wrapped in the declared type so the
+    secret stays masked in ``repr``.
+    """
+    constraint = f"validator={name}"
+    cve_constraint: str | None = None
+    failed = False
+    result: Any = None
+    try:
+        result = validator(value, context)
+        # Re-wrap a bare str so the secret stays masked in repr. A SecretStr
+        # result is not a str subclass (passes through); a BaseDsn result is a
+        # str subclass and an instance of the declared type (passes through).
+        # Only a bare str gets (re-)constructed — a ValueError from DSN
+        # construction is caught below and masked.
+        if isinstance(result, str) and not isinstance(result, unwrapped_type):
+            result = unwrapped_type(result)
+    except ConstraintViolationError as e:
+        cve_constraint = e.constraint
+        failed = True
+        del e
+    except Exception:
+        # Drop the bound exception entirely; raise the masked error outside the
+        # except so __context__ stays None.
+        failed = True
+
+    if failed:
+        report_value = _masked_report_value(value)
+        if cve_constraint is not None:
+            raise ConstraintViolationError(
+                field_name=field_name,
+                value=report_value,
+                constraint=cve_constraint,
+                error_msg=f"validator={name} rejected the value",
+                env_var_name=env_var_name,
+            ) from None
+        raise ConstraintViolationError(
+            field_name=field_name,
+            value=report_value,
+            constraint=constraint,
+            error_msg="Custom validator rejected the value",
+            env_var_name=env_var_name,
+        ) from None
+
+    # A None return is only valid for Optional fields.
+    if result is None and not is_optional:
+        raise TypeCoercionError(
+            field_name=field_name,
+            value=_masked_report_value(value),
+            error_msg=f"validator={name} returned None for non-optional field",
+            field_type=unwrapped_type,
+            env_var_name=env_var_name,
+        )
+    return result
+
+
+def _run_plain_validator(
+    field_name: str,
+    value: Any,
+    validator: Callable[[Any, ValidatorContext], Any],
+    env_var_name: str,
+    is_optional: bool,
+    name: str,
+    context: ValidatorContext,
+    unwrapped_type: Any,
+) -> Any:
+    """Run a validator hook for a non-sensitive field.
+
+    ``ConstraintViolationError`` passes through untouched;
+    ``ValueError``/``TypeError`` are wrapped in ``ConstraintViolationError``
+    (chained to the original) so they aggregate into ``MultipleValidationErrors``;
+    other exceptions bubble up as programming errors. An empty hook message uses
+    a fallback so the error never renders a bare ``"Error:"`` line.
+    """
+    constraint = f"validator={name}"
+    hook_error: ValueError | TypeError | None = None
+    result: Any = None
+    try:
+        result = validator(value, context)
+    except ConstraintViolationError:
+        raise  # Custom messages pass through untouched
+    except (ValueError, TypeError) as e:
+        hook_error = e
+
+    if hook_error is not None:
+        msg = str(hook_error) or "validator failed"
+        raise ConstraintViolationError(
+            field_name=field_name,
+            value=value,
+            constraint=constraint,
+            error_msg=msg,
+            env_var_name=env_var_name,
+        ) from hook_error
+
+    # A None return is only valid for Optional fields.
+    if result is None and not is_optional:
+        raise TypeCoercionError(
+            field_name=field_name,
+            value=value,
+            error_msg=f"validator={name} returned None for non-optional field",
+            field_type=unwrapped_type,
+            env_var_name=env_var_name,
+        )
+    return result
+
+
+def _run_field_validator(
+    field_name: str,
+    value: Any,
+    field_type: TypeForm[Any],
+    validator: Callable[[Any, ValidatorContext], Any],
+    env_var_name: str,
+) -> Any:
+    """Run a field's custom ``validator`` hook and return the final value.
+
+    The hook receives the coerced, built-in-constraint-validated value plus a
+    ``ValidatorContext``; its return value replaces the field value (built-in
+    constraints are not re-run on a transformed value).
+
+    Masking is decided by the declared type (Optional-unwrapped), not by
+    ``isinstance(value)``, so a default-path value that has not been wrapped
+    cannot bypass redaction. For sensitive fields (``SecretStr``/``BaseDsn``)
+    any hook failure is masked generically with the secret appearing nowhere in
+    the error or its chain; for non-sensitive fields ``ValueError``/``TypeError``
+    text is embedded and chained.
+
+    Raises:
+        ConstraintViolationError: If the hook raises, or returns ``None`` for a
+            non-optional field's type-coercion counterpart.
+        TypeCoercionError: If the hook returns ``None`` for a non-optional field.
+    """
+    unwrapped_type = unwrap_optional(field_type)
+    sensitive = is_sensitive_type(field_type)
+    is_optional = unwrapped_type is not field_type
+    name = _validator_name(validator)
+    context = ValidatorContext(field_name=field_name, env_var_name=env_var_name)
+
+    if sensitive:
+        # is_sensitive_type() returned True, so the unwrapped type is a class
+        # (SecretStr or a BaseDsn subclass) — safe to treat as a callable type.
+        return _run_sensitive_validator(
+            field_name,
+            value,
+            cast(type[Any], unwrapped_type),
+            validator,
+            env_var_name,
+            is_optional,
+            name,
+            context,
+        )
+    return _run_plain_validator(
+        field_name,
+        value,
+        validator,
+        env_var_name,
+        is_optional,
+        name,
+        context,
+        unwrapped_type,
+    )
 
 
 class DotEnvConfig(metaclass=ConfigMeta):
@@ -38,9 +236,20 @@ class DotEnvConfig(metaclass=ConfigMeta):
           is specifically for environment variables and `.env` files)
         - If you need non-optional Union types (e.g., `str | int`)
 
+    Class attributes:
+        env_prefix: Prefix prepended to every field's environment variable
+            name (default `""`, no prefix). Fields with an `alias` ignore it.
+        strip_strings: Default strip mode for string-like fields (default
+            `False`). When `True`, raw values of `str`/`SecretStr` (and their
+            Optional forms and `str` subclasses) are whitespace-stripped before
+            coercion. Per-field `Field(strip=...)` overrides this setting.
+
     Example:
         ```python
         class AppConfig(DotEnvConfig):
+            env_prefix: str = "APP_"
+            strip_strings: bool = True
+
             # Required fields
             database_url: str = Field()
             api_key: str = Required
@@ -51,6 +260,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
             # With validation
             pool_size: int = Field(default=10, ge=1, le=100)
+
+            # Opt out of the class-level stripping for this field
+            literal: str = Field(strip=False)
 
         # Load configuration
         config = AppConfig.load(env="dev")
@@ -69,6 +281,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
     _load_override: bool = True  # Store the override flag used during load
     _load_env_dir: Path | None = None  # Store the env_dir used during load
     env_prefix: str = ""  # Class-level prefix for environment variables (default: no prefix)
+    strip_strings: bool = False  # Class-level default for stripping string values
 
     def _process_field(
         self,
@@ -101,7 +314,12 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
         Raises:
             MissingFieldError: If required field is missing
-            ValidationError: If validation fails
+            TypeCoercionError: If the value cannot be coerced to the field type,
+                or if a custom validator returns None for a non-optional field
+            ConstraintViolationError: If the value fails a built-in constraint
+                or the custom validator hook rejects it
+            ValidationError: If validation fails (umbrella; the specific
+                subclasses above are the common cases)
         """
         # Nested DotEnvConfig fields (e.g. `oidc: OIDCSettings`) are not a
         # scalar to coerce — a nested config resolves its own fields from
@@ -140,7 +358,30 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 )
             else:
                 value = field_info.get_default()
+                # Route str defaults for non-str field types through coercion.
+                # Historically the verbatim default bypassed coerce_value, so a
+                # SecretStr str-default leaked as a plaintext str (repr exposed
+                # it, the pickle guard was bypassed, get_secret_value raised),
+                # an int str-default skipped constraints, a bool str-default
+                # stayed truthy, and DSN/UUID/Path/Json/list str-defaults were
+                # type-confused. The unwrap gate (unwrapped type is exactly
+                # ``str``) keeps str defaults for str-ish fields — including
+                # Optional[str] default='' — untouched, preserving the
+                # Optional empty-string -> None semantics. Non-str defaults
+                # (int 8000, default_factory=list) are left alone. Validation
+                # runs afterwards on the typed value, so constraints now fire.
+                if isinstance(value, str) and unwrap_optional(field_type) is not str:
+                    value = coerce_value(field_name, value, field_type, env_var_name, field_info)
         else:
+            # Strip string-like raw values before coercion. This is value
+            # processing, not validation — it runs regardless of the
+            # validate flag, so min_length etc. see the final string.
+            if is_string_like_type(field_type):
+                strip_mode = field_info.strip
+                if strip_mode is None:
+                    strip_mode = type(self).strip_strings
+                raw_value = apply_strip(raw_value, strip_mode)
+
             # Coerce the string value to the target type
             value = coerce_value(field_name, raw_value, field_type, env_var_name, field_info)
 
@@ -155,6 +396,14 @@ class DotEnvConfig(metaclass=ConfigMeta):
         # Validate the value (whether from default or coerced)
         if validate:
             validate_field(field_name, value, field_info, env_var_name)
+
+        # Custom validator hook: runs even when validate=False (it may
+        # transform the value — transformation is part of loading, not
+        # validation), but never on None values.
+        if field_info.validator is not None and value is not None:
+            value = _run_field_validator(
+                field_name, value, field_type, field_info.validator, env_var_name
+            )
 
         return value
 
@@ -176,7 +425,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 and raises them together.
         """
         cls = self.__class__
-        prefix = getattr(cls, "env_prefix", "")
+        prefix = cls.env_prefix
         errors: list[ValidationError] = []
 
         for field_name, (field_type, field_info) in cls._fields.items():

@@ -44,7 +44,8 @@ safety, validation, and automatic `.env` loading — with only one runtime depen
     ---
 
     Numeric constraints (`ge`, `le`, `gt`, `lt`), string constraints (`min_length`,
-    `max_length`, `regex`), choice validation, and collection size constraints.
+    `max_length`, `regex`, `starts_with`, `ends_with`), choice validation, custom
+    `validator` hooks, string `strip` processing, and collection size constraints.
 
 -   :material-file-document-multiple:{ .lg .middle } **Configuration Documentation**
 

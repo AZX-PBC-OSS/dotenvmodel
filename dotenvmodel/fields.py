@@ -2,6 +2,7 @@
 
 import re
 from collections.abc import Callable
+from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any, TypeVar
 
@@ -52,6 +53,47 @@ See Also:
 """
 
 
+@dataclass(frozen=True)
+class ValidatorContext:
+    """Context passed to a field's custom ``validator`` hook.
+
+    When to use:
+        - Received as the second argument of any ``Field(validator=...)``
+          callable; you never construct it yourself
+
+    Attributes:
+        field_name: The Python field name (e.g. ``"api_key"``)
+        env_var_name: The resolved environment variable name, including any
+            ``env_prefix`` or ``alias`` (e.g. ``"APP_API_KEY"``)
+
+    Example:
+        ```python
+        def check_env_key(value: str, ctx: ValidatorContext) -> str:
+            if not value.startswith("sk-"):
+                raise ValueError(f"{ctx.env_var_name} must start with 'sk-'")
+            return value
+
+        class Config(DotEnvConfig):
+            api_key: str = Field(validator=check_env_key)
+        ```
+
+    See Also:
+        - [`Field`][dotenvmodel.fields.Field]: For attaching a validator to a field.
+    """
+
+    field_name: str
+    env_var_name: str
+
+
+def _validator_name(fn: Callable[..., Any]) -> str:
+    """Return a display name for a validator callable.
+
+    Falls back to the type name (e.g. ``"partial"`` for ``functools.partial``)
+    so rendering is consistent across ``FieldInfo.__repr__`` and error paths.
+    """
+    return getattr(fn, "__name__", type(fn).__name__)
+
+
 class FieldInfo:
     """Information about a configuration field.
 
@@ -75,7 +117,11 @@ class FieldInfo:
         min_length: Minimum string length
         max_length: Maximum string length
         regex: Regular expression pattern to match
+        starts_with: Required string prefix
+        ends_with: Required string suffix
+        strip: Strip mode for string values (bool, char-set str, or re.Pattern)
         choices: List of allowed values
+        validator: Custom validation/transformation hook
         min_items: Minimum items in a collection
         max_items: Maximum items in a collection
         uuid_version: Required UUID version (1, 3, 4, or 5)
@@ -100,7 +146,11 @@ class FieldInfo:
     max_length: int | None
     regex: str | None
     _compiled_regex: re.Pattern[str] | None
+    starts_with: str | None
+    ends_with: str | None
+    strip: bool | str | re.Pattern[str] | None
     choices: list[Any] | None
+    validator: Callable[[Any, ValidatorContext], Any] | None
     min_items: int | None
     max_items: int | None
     uuid_version: int | None
@@ -126,8 +176,14 @@ class FieldInfo:
         min_length: int | None = None,
         max_length: int | None = None,
         regex: str | None = None,
+        starts_with: str | None = None,
+        ends_with: str | None = None,
+        # String processing
+        strip: bool | str | re.Pattern[str] | None = None,
         # General validation
         choices: list[Any] | None = None,
+        # Custom validation
+        validator: Callable[[Any, ValidatorContext], Any] | None = None,
         # Collection validation
         min_items: int | None = None,
         max_items: int | None = None,
@@ -172,6 +228,30 @@ class FieldInfo:
         if uuid_version is not None and uuid_version not in (1, 3, 4, 5):
             raise ValueError(f"uuid_version must be 1, 3, 4, or 5, got {uuid_version}")
 
+        # Validate string affix constraint types
+        for param_name, param_value in [("starts_with", starts_with), ("ends_with", ends_with)]:
+            if param_value is not None and not isinstance(param_value, str):
+                raise TypeError(f"{param_name} must be str, got {type(param_value).__name__}")
+
+        # Validate strip mode
+        if strip is not None:
+            if isinstance(strip, str):
+                if not strip:
+                    raise ValueError(f"strip must be a non-empty string, got {strip!r}")
+            elif isinstance(strip, re.Pattern):
+                if isinstance(strip.pattern, bytes):
+                    raise TypeError(
+                        f"strip re.Pattern must use a str pattern, got a bytes pattern: {strip.pattern!r}"
+                    )
+            elif not isinstance(strip, bool):
+                raise TypeError(
+                    f"strip must be bool, str, or re.Pattern, got {type(strip).__name__}"
+                )
+
+        # Validate custom validator is callable
+        if validator is not None and not callable(validator):
+            raise TypeError(f"validator must be callable, got {type(validator).__name__}")
+
         # Validate contradictory constraints
         if ge is not None and le is not None and ge > le:
             raise ValueError(f"ge ({ge}) cannot be greater than le ({le})")
@@ -209,9 +289,17 @@ class FieldInfo:
                 raise ValueError(f"Invalid regex pattern: {regex!r} - {e}") from e
         else:
             self._compiled_regex = None
+        self.starts_with = starts_with
+        self.ends_with = ends_with
+
+        # String processing
+        self.strip = strip
 
         # General constraints
         self.choices = choices
+
+        # Custom validation hook
+        self.validator = validator
 
         # Collection constraints
         self.min_items = min_items
@@ -272,8 +360,16 @@ class FieldInfo:
             parts.append(f"max_length={self.max_length}")
         if self.regex is not None:
             parts.append(f"regex={self.regex!r}")
+        if self.starts_with is not None:
+            parts.append(f"starts_with={self.starts_with!r}")
+        if self.ends_with is not None:
+            parts.append(f"ends_with={self.ends_with!r}")
+        if self.strip is not None:
+            parts.append(f"strip={self.strip!r}")
         if self.choices is not None:
             parts.append(f"choices={self.choices!r}")
+        if self.validator is not None:
+            parts.append(f"validator={_validator_name(self.validator)}")
         if self.min_items is not None:
             parts.append(f"min_items={self.min_items}")
         if self.max_items is not None:
@@ -299,7 +395,11 @@ def Field(
     min_length: int | None = None,
     max_length: int | None = None,
     regex: str | None = None,
+    starts_with: str | None = None,
+    ends_with: str | None = None,
+    strip: bool | str | re.Pattern[str] | None = None,
     choices: list[Any] | None = None,
+    validator: Callable[[Any, ValidatorContext], Any] | None = None,
     min_items: int | None = None,
     max_items: int | None = None,
     uuid_version: int | None = None,
@@ -346,8 +446,33 @@ def Field(
             Example: `max_length=128` ensures string is at most 128 characters
         regex: Regular expression pattern the string must match (using `re.match`).
             For str and SecretStr fields. Example: `regex=r'^[a-z]+$'`
+        starts_with: Required string prefix. For str and str subclasses (including
+            SecretStr and DSN types like HttpUrl, PostgresDsn, RedisDsn).
+            Example: `starts_with="sk-"` ensures the value starts with "sk-"
+        ends_with: Required string suffix. For str and str subclasses (including
+            SecretStr and DSN types like HttpUrl, PostgresDsn, RedisDsn).
+            Example: `ends_with=".sig"` ensures the value ends with ".sig"
+        strip: Strip mode applied to the raw string before coercion. Applies to
+            str, SecretStr, their Optional forms, and str subclasses (e.g. HttpUrl):
+
+            - `None` (default): inherit the class-level `strip_strings` setting
+            - `True`: strip leading/trailing whitespace (`value.strip()`)
+            - `False`: no stripping, even when the class sets `strip_strings=True`
+            - non-empty str: char-set stripping (`value.strip(chars)`)
+            - `re.Pattern`: remove every match (`pattern.sub("", value)`)
+
+            Example: `strip=True` or `strip=",'\""`
         choices: List of allowed values. The env var value must be in this list
             (after type coercion). Example: `choices=["dev", "test", "prod"]`
+        validator: Custom hook called with the coerced, built-in-constraint-validated
+            value and a `ValidatorContext`; its return value becomes the final field
+            value (built-in constraints are NOT re-run on a transformed value).
+            Runs even when `validate=False`, but never on None values. A `ValueError`
+            or `TypeError` from the hook is wrapped in `ConstraintViolationError`
+            (for SecretStr fields, with a generic message so the hook's text cannot
+            leak the secret); raising `ConstraintViolationError` directly passes
+            through with your custom message.
+            Example: `validator=lambda v, ctx: v.lower()`
         min_items: Minimum number of items in a collection (list, set, tuple, dict).
             Example: `min_items=1` ensures at least one item
         max_items: Maximum number of items in a collection (list, set, tuple, dict).
@@ -358,6 +483,10 @@ def Field(
             Default is comma (","). Example: `separator=";"` for semicolon-delimited
         url_unquote: Whether to URL-unquote SecretStr values (default True).
             Useful when secrets come from URL-encoded env vars.
+        resolve_path: Whether to resolve Path values (expanduser + resolve).
+            Default True. Set to False to keep paths raw.
+        require_exists: Whether a Path field must point to an existing path.
+            Default False.
 
     Returns:
         FieldInfo instance containing field metadata. Used by the `DotEnvConfig`
@@ -366,9 +495,12 @@ def Field(
     Raises:
         ValueError: If both `default` and `default_factory` are specified,
             if constraint values are invalid (e.g., `ge > le`),
-            if `min_length > max_length`, or if `uuid_version` is not 1/3/4/5
+            if `min_length > max_length`, if `uuid_version` is not 1/3/4/5,
+            or if `strip` is an empty string
         TypeError: If numeric constraints (`ge`, `le`, `gt`, `lt`) are not
-            int, float, or Decimal
+            int, float, or Decimal, if `starts_with`/`ends_with` are not str,
+            or if `strip` is not a bool, str, or re.Pattern (a re.Pattern with
+            a bytes pattern is also rejected)
 
     Example:
         ```python
@@ -405,6 +537,20 @@ def Field(
 
             # SecretStr with length constraint
             api_key: SecretStr = Field(min_length=32)
+
+            # Strip whitespace from the raw value before coercion
+            name: str = Field(strip=True)
+
+            # Char-set and regex strip modes
+            tag: str = Field(strip=",'\"")          # str.strip(chars) semantics
+            key: str = Field(strip=re.compile(r"^['\"]+|['\"]+$"))  # remove every match
+
+            # Prefix/suffix constraints
+            client_key: str = Field(starts_with="sk-")
+            signed_token: str = Field(ends_with=".sig")
+
+            # Custom validator (may also transform the value)
+            region: str = Field(default="us-east-1", validator=lambda v, ctx: v.lower())
         ```
 
     See Also:
@@ -423,7 +569,11 @@ def Field(
         min_length=min_length,
         max_length=max_length,
         regex=regex,
+        starts_with=starts_with,
+        ends_with=ends_with,
+        strip=strip,
         choices=choices,
+        validator=validator,
         min_items=min_items,
         max_items=max_items,
         uuid_version=uuid_version,
