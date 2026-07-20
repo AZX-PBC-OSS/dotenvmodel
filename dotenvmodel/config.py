@@ -53,15 +53,20 @@ def _run_sensitive_validator(
     """Run a validator hook for a sensitive-typed field.
 
     Any hook failure (``ConstraintViolationError`` or any other ``Exception``)
-    is masked: the hook's exception text — which may embed the plaintext secret
-    or a URL password — is never embedded, and the masked error is raised
-    outside the ``except`` block with ``__cause__``/``__context__`` cleared so
-    the hook exception appears nowhere in the chain or traceback frame locals.
-    A plain-``str`` return value is re-wrapped in the declared type so the
-    secret stays masked in ``repr``.
+    is masked: nothing from the hook exception — message, ``constraint``, or
+    any other text, any of which may embed the plaintext secret or a URL
+    password — is carried into the raised error, which uses a generic
+    ``validator=<name>`` constraint and message. The masked error is raised
+    outside the ``except`` block with ``__cause__``/``__context__`` cleared
+    (an empty chain). A plain-``str`` return value is re-wrapped in the
+    declared type so the secret stays masked in ``repr``.
+
+    Note:
+        Traceback frame locals across the load path still reference the live
+        value (this frame's ``value``, caller frames' ``raw_value`` and
+        ``value``), so locals-capturing error reporting must not be enabled
+        for processes loading secrets — see SECURITY.md.
     """
-    constraint = f"validator={name}"
-    cve_constraint: str | None = None
     failed = False
     result: Any = None
     try:
@@ -73,30 +78,18 @@ def _run_sensitive_validator(
         # construction is caught below and masked.
         if isinstance(result, str) and not isinstance(result, unwrapped_type):
             result = unwrapped_type(result)
-    except ConstraintViolationError as e:
-        cve_constraint = e.constraint
-        failed = True
-        del e
     except Exception:
-        # Drop the bound exception entirely; raise the masked error outside the
-        # except so __context__ stays None.
+        # Carry nothing over from the hook exception — message, constraint, or
+        # any other text may embed the plaintext secret. Raising the masked
+        # error outside the except keeps __context__ None.
         failed = True
 
     if failed:
-        report_value = _masked_report_value(value)
-        if cve_constraint is not None:
-            raise ConstraintViolationError(
-                field_name=field_name,
-                value=report_value,
-                constraint=cve_constraint,
-                error_msg=f"validator={name} rejected the value",
-                env_var_name=env_var_name,
-            ) from None
         raise ConstraintViolationError(
             field_name=field_name,
-            value=report_value,
-            constraint=constraint,
-            error_msg="Custom validator rejected the value",
+            value=_masked_report_value(value),
+            constraint=f"validator={name}",
+            error_msg=f"validator={name} rejected the value",
             env_var_name=env_var_name,
         ) from None
 

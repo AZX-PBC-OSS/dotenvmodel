@@ -545,12 +545,43 @@ class TestValidatorSensitiveHardening:
             Config.load_from_dict({"API_KEY": "super-secret"})
 
         err = exc_info.value
-        # constraint is preserved; value and message are replaced/masked
-        assert err.constraint == "custom-rule"
+        # constraint, value, and message are all replaced/masked
+        assert err.constraint == "validator=custom"
         assert "super-secret" not in str(err)
         assert "bad:" not in str(err)
         assert "**********" in str(err)
         assert "validator=custom" in str(err)
+        assert err.__cause__ is None
+        assert err.__context__ is None
+
+    def test_secretstr_hook_cve_constraint_secret_masked(self) -> None:
+        """A hook CVE with the secret embedded in ``constraint=`` is masked.
+
+        Regression test: the masked reconstruction must not preserve a
+        hook-authored constraint string, since it may embed the plaintext.
+        """
+
+        def custom(value: Any, ctx: ValidatorContext) -> Any:
+            raise ConstraintViolationError(
+                field_name=ctx.field_name,
+                value=value,
+                constraint=f"must_not_equal={value.get_secret_value()}",
+                error_msg="rejected",
+                env_var_name=ctx.env_var_name,
+            )
+
+        class Config(DotEnvConfig):
+            api_key: SecretStr = Field(validator=custom)
+
+        with pytest.raises(ConstraintViolationError) as exc_info:
+            Config.load_from_dict({"API_KEY": "super-secret"})
+
+        err = exc_info.value
+        assert err.constraint == "validator=custom"
+        assert "super-secret" not in str(err)
+        assert "super-secret" not in repr(err)
+        assert "must_not_equal" not in str(err)
+        assert "must_not_equal" not in repr(err)
         assert err.__cause__ is None
         assert err.__context__ is None
 
