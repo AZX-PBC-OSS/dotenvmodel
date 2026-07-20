@@ -48,14 +48,14 @@ packages = ["dotenvmodel"]
 [dependency-groups]
 dev = [
     "mkdocs>=1.6.1",
-    "mkdocs-material>=9.7.6",
+    "mkdocs-material>=9.7.7",
     "mkdocstrings[python]>=1.0.6",
     "pip-audit>=2.10.1",
     "pyright>=1.1.411",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
-    "ruff>=0.15.21",
-    "ty>=0.0.59",
+    "ruff>=0.15.22",
+    "ty>=0.0.61",
 ]
 
 [tool.ruff]

@@ -199,6 +199,67 @@ class TestFormatConstraints:
         result = format_constraints(field_info, truncate=True)
         assert "..." in result
 
+    def test_starts_with_ends_with_constraints(self) -> None:
+        """Test affix constraint formatting."""
+        field_info = FieldInfo(starts_with="sk-", ends_with=".sig")
+        result = format_constraints(field_info)
+        assert "starts_with='sk-'" in result
+        assert "ends_with='.sig'" in result
+
+    def test_strip_true_constraint(self) -> None:
+        """Test strip=True renders as 'strip'."""
+        field_info = FieldInfo(strip=True)
+        result = format_constraints(field_info)
+        assert "strip" in result
+        assert "strip(" not in result
+
+    def test_strip_char_set_constraint(self) -> None:
+        """Test strip=<chars> renders as 'strip(<repr>)'."""
+        field_info = FieldInfo(strip=",;'")
+        result = format_constraints(field_info)
+        assert "strip(" in result
+        assert repr(",;'") in result
+
+    def test_strip_pattern_constraint(self) -> None:
+        """Test strip=<Pattern> renders as 'strip(<repr of pattern>)'."""
+        import re
+
+        pattern = re.compile(r"\s+")
+        field_info = FieldInfo(strip=pattern)
+        result = format_constraints(field_info)
+        assert "strip(" in result
+        assert repr(pattern.pattern) in result
+        # Must NOT use the old /pattern/ delimiters
+        assert "strip(/" not in result
+
+    def test_strip_false_and_none_not_rendered(self) -> None:
+        """strip=False and strip=None are not constraints worth showing."""
+        assert format_constraints(FieldInfo(strip=False)) == "-"
+        assert format_constraints(FieldInfo(strip=None)) == "-"
+
+    def test_validator_constraint(self) -> None:
+        """Test validator renders as 'validator=<fn name>'."""
+
+        def my_check(value: object, ctx: object) -> object:
+            return value
+
+        field_info = FieldInfo(validator=my_check)  # type: ignore[arg-type]
+        result = format_constraints(field_info)
+        assert "validator=my_check" in result
+
+    def test_new_constraints_combined_with_existing(self) -> None:
+        """New options compose with existing constraint rendering."""
+
+        def my_check(value: object, ctx: object) -> object:
+            return value
+
+        field_info = FieldInfo(min_length=3, starts_with="sk-", strip=True, validator=my_check)  # type: ignore[arg-type]
+        result = format_constraints(field_info)
+        assert "min_length=3" in result
+        assert "starts_with='sk-'" in result
+        assert "strip" in result
+        assert "validator=my_check" in result
+
 
 class TestFormatDefault:
     """Test default value formatting."""
@@ -384,6 +445,59 @@ class TestDescribeClassmethod:
         output = Config.describe()
         assert "ge=1" in output
         assert "le=65535" in output
+
+    def test_with_affix_strip_validator_constraints(self) -> None:
+        """Test describe output includes the new field options."""
+
+        def my_check(value: object, ctx: object) -> object:
+            return value
+
+        class Config(DotEnvConfig):
+            api_key: str = Field(  # type: ignore[arg-type]
+                starts_with="sk-", ends_with=".sig", strip=True, validator=my_check
+            )
+
+        # Untruncated constraints via describe_class
+        _, _, fields = describe_class(Config, truncate=False)
+        constraints = fields[0].constraints
+        assert "starts_with='sk-'" in constraints
+        assert "ends_with='.sig'" in constraints
+        assert "strip" in constraints
+        assert "validator=my_check" in constraints
+
+        # Table output shows at least the leading constraints
+        output = Config.describe()
+        assert "starts_with='sk-'" in output
+
+    def test_partial_validator_name_matches_repr(self) -> None:
+        """describe() and FieldInfo.__repr__ render the same validator name.
+
+        ``format_constraints`` must use the shared ``_validator_name`` helper so
+        describe output and error messages can't diverge. A ``functools.partial``
+        has no ``__name__`` and falls back to its type name (``partial``); both
+        the describe output and the FieldInfo repr must show ``validator=partial``.
+        """
+        from functools import partial
+
+        def base_check(value: object, ctx: object) -> object:
+            return value
+
+        partial_check = partial(base_check)
+
+        class Config(DotEnvConfig):
+            value: str = Field(validator=partial_check)  # type: ignore[arg-type]
+
+        # FieldInfo repr uses _validator_name
+        info = FieldInfo(validator=partial_check)  # type: ignore[arg-type]
+        assert "validator=partial" in repr(info)
+
+        # describe() -> format_constraints must render the same name
+        _, _, fields = describe_class(Config, truncate=False)
+        assert "validator=partial" in fields[0].constraints
+
+        # Full describe() output also carries the consistent name
+        output = Config.describe()
+        assert "validator=partial" in output
 
 
 class TestDescribeFormats:
@@ -2010,3 +2124,158 @@ class TestEnumConstraints:
         assert "development" in output
         assert "staging" in output
         # "production" may be truncated with "..."
+
+
+class TestDescribeStringConstraintGating:
+    """Test that string-only constraints are gated on string-like field types (D1)."""
+
+    def test_int_field_starts_with_not_in_table(self) -> None:
+        """starts_with on an int field is absent from table format."""
+
+        class Config(DotEnvConfig):
+            port: int = Field(default=8000, starts_with="8")  # type: ignore[arg-type]
+
+        output = Config.describe(output_format="table")
+        assert "starts_with" not in output
+
+    def test_int_field_ends_with_not_in_dotenv(self) -> None:
+        """ends_with on an int field is absent from dotenv format."""
+
+        class Config(DotEnvConfig):
+            port: int = Field(default=8000, ends_with="0")  # type: ignore[arg-type]
+
+        output = Config.describe(output_format="dotenv")
+        assert "ends_with" not in output
+
+    def test_int_field_strip_not_in_json(self) -> None:
+        """strip on an int field is absent from json format."""
+
+        class Config(DotEnvConfig):
+            port: int = Field(default=8000, strip=True)  # type: ignore[arg-type]
+
+        output = Config.describe(output_format="json")
+        data = json.loads(output)
+        assert "strip" not in data["fields"][0]["constraints"]
+
+    def test_int_field_all_string_constraints_absent_all_formats(self) -> None:
+        """All string-only constraints on an int field are absent from every format."""
+
+        class Config(DotEnvConfig):
+            port: int = Field(  # type: ignore[arg-type]
+                default=8000, starts_with="8", ends_with="0", strip=True
+            )
+
+        for fmt in ["table", "markdown", "json", "html", "dotenv"]:
+            output = Config.describe(output_format=fmt)  # type: ignore[arg-type]
+            assert "starts_with" not in output, f"starts_with leaked into {fmt}"
+            assert "ends_with" not in output, f"ends_with leaked into {fmt}"
+            assert "strip" not in output, f"strip leaked into {fmt}"
+
+    def test_str_field_starts_with_still_shown(self) -> None:
+        """Regression: starts_with on a str field is still shown."""
+
+        class Config(DotEnvConfig):
+            key: str = Field(starts_with="sk-")
+
+        _, _, fields = describe_class(Config, truncate=False)
+        assert "starts_with='sk-'" in fields[0].constraints
+
+
+class TestDescribeStripReprRendering:
+    """Test that strip char-set/pattern is rendered with !r (D2)."""
+
+    def test_strip_newline_does_not_corrupt_dotenv(self) -> None:
+        """Field(strip='\\n') does not insert a literal newline into dotenv output."""
+
+        class Config(DotEnvConfig):
+            tag: str = Field(strip="\n")
+
+        output = Config.describe(output_format="dotenv")
+        for line in output.split("\n"):
+            assert line.startswith("#") or line == "" or "=" in line, (
+                f"Corrupted dotenv line: {line!r}"
+            )
+
+    def test_strip_charset_rendered_with_repr(self) -> None:
+        """strip=<chars> is rendered with repr quoting."""
+
+        class Config(DotEnvConfig):
+            tag: str = Field(strip=",;")
+
+        _, _, fields = describe_class(Config, truncate=False)
+        constraints = fields[0].constraints
+        # repr(",;") -> ",;" (double-quoted because no single quote)
+        assert "strip(" in constraints
+        assert repr(",;") in constraints
+
+    def test_strip_pattern_rendered_with_repr(self) -> None:
+        """strip=<re.Pattern> is rendered with repr quoting of the pattern."""
+
+        import re
+
+        class Config(DotEnvConfig):
+            tag: str = Field(strip=re.compile(r"\s+"))
+
+        _, _, fields = describe_class(Config, truncate=False)
+        constraints = fields[0].constraints
+        assert "strip(" in constraints
+        assert repr(r"\s+") in constraints
+        # Must NOT use the old /pattern/ delimiters
+        assert "strip(/" not in constraints
+
+    def test_strip_true_still_bare(self) -> None:
+        """strip=True still renders as bare 'strip' (no parens)."""
+
+        class Config(DotEnvConfig):
+            tag: str = Field(strip=True)
+
+        _, _, fields = describe_class(Config, truncate=False)
+        assert "strip" in fields[0].constraints
+        assert "strip(" not in fields[0].constraints
+
+
+class TestDescribeInheritedStrip:
+    """Test that the effective (class-inherited) strip mode is rendered (D3)."""
+
+    def test_class_level_strip_shown_for_field_without_strip(self) -> None:
+        """strip_strings=True with field strip=None shows 'strip' in describe."""
+
+        class Config(DotEnvConfig):
+            strip_strings: bool = True
+            name: str = Field(default="hello")
+
+        _, _, fields = describe_class(Config, truncate=False)
+        assert "strip" in fields[0].constraints
+
+    def test_field_strip_false_with_class_true_not_shown(self) -> None:
+        """Field(strip=False) with strip_strings=True does NOT show strip."""
+
+        class Config(DotEnvConfig):
+            strip_strings: bool = True
+            name: str = Field(default="hello", strip=False)
+
+        _, _, fields = describe_class(Config, truncate=False)
+        assert "strip" not in fields[0].constraints
+
+    def test_class_level_strip_false_field_none_not_shown(self) -> None:
+        """strip_strings=False (default) with field strip=None does not show strip."""
+
+        class Config(DotEnvConfig):
+            name: str = Field(default="hello")
+
+        _, _, fields = describe_class(Config, truncate=False)
+        assert "strip" not in fields[0].constraints
+
+    def test_field_strip_overrides_class_level(self) -> None:
+        """Field(strip=',') with strip_strings=True shows the field-level mode."""
+
+        class Config(DotEnvConfig):
+            strip_strings: bool = True
+            tag: str = Field(default="hello", strip=",")
+
+        _, _, fields = describe_class(Config, truncate=False)
+        constraints = fields[0].constraints
+        assert "strip(" in constraints
+        assert repr(",") in constraints
+        # Should NOT show bare "strip" (which would mean True/whitespace mode)
+        assert constraints.count("strip") == 1

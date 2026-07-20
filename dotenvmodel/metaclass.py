@@ -72,12 +72,26 @@ class ConfigMeta(type):
             if hasattr(base, "_fields"):
                 fields.update(base._fields)  # type: ignore[arg-type]
 
+        # Eagerly validate a class-level strip_strings setting: a non-bool
+        # value is rejected at class-definition time so it can never silently
+        # produce char-set stripping (e.g. "true" -> strips t/r/u/e chars) or
+        # be treated as truthy (e.g. 1). Only a value present in THIS class's
+        # namespace is checked; inherited values were validated at their own
+        # definition time.
+        if "strip_strings" in namespace and not isinstance(namespace["strip_strings"], bool):
+            raise TypeError(
+                f"strip_strings must be a bool, got "
+                f"{type(namespace['strip_strings']).__name__}: "
+                f"{namespace['strip_strings']!r}"
+            )
+
         hints = _get_annotations_from_namespace(namespace)
 
         for field_name, field_type in hints.items():
             if field_name.startswith("_"):
                 continue
-            if field_name == "env_prefix":
+            # Class-level settings, not fields
+            if field_name in ("env_prefix", "strip_strings"):
                 continue
 
             field_value = namespace.get(field_name, _MISSING)

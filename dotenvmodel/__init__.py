@@ -20,6 +20,7 @@ Public API:
     - `DotEnvConfig`: Base class for type-safe configuration
     - `Field`: Define fields with defaults, validation, and aliases
     - `Required`: Sentinel for required fields (alternative to `Field()`)
+    - `ValidatorContext`: Context passed to `Field(validator=...)` hooks
     - `SecretStr`: String type that hides values in logs
     - `HttpUrl`, `PostgresDsn`, `RedisDsn`: URL/DSN types with validation
     - `Json`: Type for parsing JSON strings
@@ -48,7 +49,7 @@ from dotenvmodel.exceptions import (
     TypeCoercionError,
     ValidationError,
 )
-from dotenvmodel.fields import Field, Required
+from dotenvmodel.fields import Field, Required, ValidatorContext
 from dotenvmodel.logging_config import configure_logging, disable_logging
 from dotenvmodel.types import (
     HttpUrl,
@@ -74,6 +75,7 @@ __all__ = [
     "SecretStr",
     "TypeCoercionError",
     "ValidationError",
+    "ValidatorContext",
     "__version__",
     "configure_logging",
     "describe_configs",

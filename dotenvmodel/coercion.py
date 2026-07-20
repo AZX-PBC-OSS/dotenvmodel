@@ -2,6 +2,7 @@
 
 import inspect
 import logging
+import re
 import types
 from datetime import datetime, timedelta
 from decimal import Decimal
@@ -14,11 +15,79 @@ from typing_extensions import TypeForm
 
 from dotenvmodel._constants import LOGGER_NAME
 from dotenvmodel.exceptions import TypeCoercionError
+from dotenvmodel.types import SecretStr
 
 if TYPE_CHECKING:
     from dotenvmodel.fields import FieldInfo
 
 logger = logging.getLogger(LOGGER_NAME)
+
+
+def unwrap_optional(field_type: TypeForm[Any]) -> TypeForm[Any]:
+    """Return the non-None member of an ``Optional[T]`` / ``T | None`` type.
+
+    ``Optional[T]`` and ``T | None`` resolve to ``T``. Any other type —
+    including non-Optional Unions with multiple non-None members, which this
+    library rejects elsewhere — is returned unchanged.
+
+    Args:
+        field_type: The field's type annotation
+
+    Returns:
+        The Optional-unwrapped type, or ``field_type`` itself when it is not
+        a single-member Optional.
+    """
+    origin = get_origin(field_type)
+    if origin is types.UnionType or origin is Union:
+        non_none = [arg for arg in get_args(field_type) if arg is not type(None)]
+        if len(non_none) == 1:
+            return non_none[0]
+    return field_type
+
+
+def is_string_like_type(field_type: TypeForm[Any]) -> bool:
+    """Check whether a field type is string-like (eligible for ``strip``).
+
+    Unwraps ``Optional[T]`` and checks for ``str``, ``SecretStr``, a
+    ``str`` subclass (e.g. ``HttpUrl``, ``PostgresDsn``, ``RedisDsn``), or a
+    ``Literal[...]`` whose every argument is ``str`` (e.g.
+    ``Literal["dev", "prod"]``), so that strip is applied before coercion.
+
+    Args:
+        field_type: The field's type annotation
+
+    Returns:
+        True if the field holds a string-like value
+    """
+    unwrapped = unwrap_optional(field_type)
+    if inspect.isclass(unwrapped):
+        return issubclass(unwrapped, (str, SecretStr))
+    origin = get_origin(unwrapped)
+    if origin is Literal:
+        return all(isinstance(arg, str) for arg in get_args(unwrapped))
+    return False
+
+
+def apply_strip(value: str, mode: bool | str | re.Pattern[str]) -> str:
+    """Apply a strip mode to a raw string value.
+
+    Args:
+        value: The raw string from the environment
+        mode: Strip mode — ``True`` for whitespace stripping, ``False`` for no
+            stripping, a non-empty ``str`` for char-set stripping
+            (``value.strip(chars)``), or a compiled ``re.Pattern`` to remove
+            every match (``pattern.sub("", value)``)
+
+    Returns:
+        The stripped string
+    """
+    if mode is False:
+        return value
+    if mode is True:
+        return value.strip()
+    if isinstance(mode, str):
+        return value.strip(mode)
+    return mode.sub("", value)
 
 
 def coerce_value(

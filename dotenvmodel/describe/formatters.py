@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import collections.abc
 import inspect
+import re
 import types
 from dataclasses import dataclass
 from datetime import timedelta
@@ -14,7 +15,8 @@ from typing import Any, Union, get_args, get_origin
 from typing_extensions import TypeForm
 
 from dotenvmodel._redaction import redact_url_password
-from dotenvmodel.fields import _MISSING, FieldInfo
+from dotenvmodel.coercion import is_string_like_type
+from dotenvmodel.fields import _MISSING, FieldInfo, _validator_name
 from dotenvmodel.types import BaseDsn, SecretStr
 
 # Maximum column widths to prevent unbounded table growth
@@ -266,7 +268,10 @@ def generate_constraint_examples(field_type: type, field_info: FieldInfo) -> dic
 
 
 def format_constraints(
-    field_info: FieldInfo, truncate: bool = True, field_type: type | None = None
+    field_info: FieldInfo,
+    truncate: bool = True,
+    field_type: type | None = None,
+    class_strip_strings: bool = False,
 ) -> str:
     """Format field constraints as a readable string."""
     constraints: list[str] = []
@@ -298,6 +303,17 @@ def format_constraints(
             pattern = pattern[: TRUNCATE_THRESHOLD_SHORT - 3] + "..."
         constraints.append(f"regex={pattern}")
 
+    # String-only constraints: only render for string-like types (or when
+    # field_type is unknown, i.e. direct calls without field_type — preserves
+    # backward compatibility for unit tests that call format_constraints directly).
+    is_string_like = field_type is None or is_string_like_type(field_type)
+
+    if is_string_like:
+        if field_info.starts_with is not None:
+            constraints.append(f"starts_with={field_info.starts_with!r}")
+        if field_info.ends_with is not None:
+            constraints.append(f"ends_with={field_info.ends_with!r}")
+
     if field_info.choices is not None:
         choices_str = ", ".join(str(c) for c in field_info.choices)
         if truncate and len(choices_str) > TRUNCATE_THRESHOLD_MEDIUM:
@@ -314,6 +330,21 @@ def format_constraints(
 
     if field_info.separator != ",":
         constraints.append(f"separator={field_info.separator!r}")
+
+    # Effective strip mode: field-level overrides class-level inheritance.
+    # strip=None inherits class_strip_strings; strip=False explicitly disables.
+    effective_strip = field_info.strip if field_info.strip is not None else class_strip_strings
+
+    if is_string_like:
+        if effective_strip is True:
+            constraints.append("strip")
+        elif isinstance(effective_strip, str):
+            constraints.append(f"strip({effective_strip!r})")
+        elif isinstance(effective_strip, re.Pattern):
+            constraints.append(f"strip({effective_strip.pattern!r})")
+
+    if field_info.validator is not None:
+        constraints.append(f"validator={_validator_name(field_info.validator)}")
 
     return ", ".join(constraints) if constraints else "-"
 
@@ -403,13 +434,19 @@ def describe_class(
 
     class_name = config_cls.__name__
     prefix = getattr(config_cls, "env_prefix", "")
+    class_strip_strings = getattr(config_cls, "strip_strings", False)
     fields: list[FieldDescription] = []
 
     for field_name, (field_type, field_info) in config_cls.get_fields().items():
         env_var = get_env_var_name(field_name, field_info.alias, prefix)
         type_name = format_type_name(field_type)
         default_str = format_default(field_info, field_type, truncate=truncate)
-        constraints_str = format_constraints(field_info, truncate=truncate, field_type=field_type)
+        constraints_str = format_constraints(
+            field_info,
+            truncate=truncate,
+            field_type=field_type,
+            class_strip_strings=class_strip_strings,
+        )
         description = field_info.description or "-"
 
         if truncate and len(description) > TRUNCATE_THRESHOLD_LONG:

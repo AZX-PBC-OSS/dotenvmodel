@@ -16,7 +16,8 @@
 - **.env.example Generation**: Automatically generate `.env.example` files with type hints, constraints, and examples
 - **File Export**: Save documentation directly to files for integration with build tools and wikis
 - **Environment Prefixes**: Class-level `env_prefix` to namespace environment variables
-- **Validation**: Numeric constraints (ge, le, gt, lt), string constraints (min_length, max_length, regex), choice validation, and collection size constraints (min_items, max_items)
+- **Validation**: Numeric constraints (ge, le, gt, lt), string constraints (min_length, max_length, regex, starts_with, ends_with), choice validation, custom validator hooks, and collection size constraints (min_items, max_items)
+- **String Stripping**: Per-field and class-level whitespace/char-set/regex stripping of raw values before coercion
 - **Clear Error Messages**: Helpful validation errors that guide you to fixes
 - **Optional Logging**: Built-in logging support to debug configuration loading
 - **Zero Runtime Overhead**: All validation happens at startup/load time
@@ -334,6 +335,8 @@ class Config(DotEnvConfig):
     tags: dict[str, str] = Field(default_factory=dict)
 ```
 
+A `str` default for a non-`str` field type is **coerced to the declared type and validated at load** — e.g. a `bool` default of `'false'` becomes `False`, a `SecretStr` default becomes a masked `SecretStr`, and a `PostgresDsn` default is validated (a bad scheme raises at load) with its password redacted in `repr`. Non-`str` defaults (e.g. `int 8000`, `default_factory=list`) and `str` defaults for `str`-typed fields are left untouched. Constraints fire on the coerced default just as they do on env-provided values.
+
 ### Field Aliases
 
 Use a different environment variable name than the field name:
@@ -361,7 +364,43 @@ class Config(DotEnvConfig):
     )
 ```
 
+### String Stripping
+
+Raw environment values often come with stray whitespace or wrapping quotes. Use `strip` to clean string-like values (`str`, `SecretStr`, their `Optional` forms, `str` subclasses like `HttpUrl`, and `Literal["a", "b"]` fields whose every member is `str`) **before** coercion and validation:
+
+```python
+import re
+
+class Config(DotEnvConfig):
+    # Whitespace strip: "  hello  " -> "hello"
+    name: str = Field(strip=True)
+
+    # Char-set strip (str.strip(chars) semantics): ",'hello'," -> "hello"
+    tag: str = Field(strip=",'\"")
+
+    # Regex strip: removes every match, anywhere in the string
+    key: SecretStr = Field(strip=re.compile(r"^['\"]+|['\"]+$"))
+```
+
+Set `strip_strings = True` on the class to strip every string-like field by default, and opt out per field with `strip=False`:
+
+```python
+class Config(DotEnvConfig):
+    strip_strings: bool = True
+
+    name: str = Field()                # stripped (inherits class setting)
+    literal: str = Field(strip=False)  # per-field override wins
+```
+
+Stripping is value processing, not validation: it runs even with `validate=False`, and constraints see the stripped value (e.g. `min_length` checks the final length, and a whitespace-only value for an `Optional[str]` field strips to `""`, which maps to `None`).
+
+For `SecretStr` fields, `strip` runs **before** `url_unquote`, so percent-encoded whitespace (e.g. `%20`) survives stripping — it is removed while still percent-encoded, then unquoted. Use a `re.Pattern` strip if you need to strip decoded whitespace.
+
+> **Warning — use linear-time regex patterns.** Both the `regex` constraint and `strip` with an `re.Pattern` run developer-supplied patterns against env values, which can be operator-controlled. Avoid patterns with nested quantifiers (e.g. `(a+)+`, `(a*)*`) that can cause catastrophic backtracking (ReDoS). Prefer anchored, linear-time patterns.
+
 ## Validation
+
+> **Note — empty vs missing:** `Optional[T]` fields map missing **and** empty values to `None` and skip constraints, while plain `str` preserves empty strings as real values. So "validate only if present" is spelled `str | None = Field(default=None, min_length=...)`.
 
 ### Numeric Validation
 
@@ -397,6 +436,10 @@ class Config(DotEnvConfig):
     # Regex pattern
     email: str = Field(regex=r'^[\w\.-]+@[\w\.-]+\.\w+$')
 
+    # Required prefix / suffix
+    client_key: str = Field(starts_with="sk-")
+    signed_token: str = Field(ends_with=".sig")
+
     # Combined constraints
     password: str = Field(
         min_length=8,
@@ -420,6 +463,39 @@ class Config(DotEnvConfig):
         choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     )
 ```
+
+### Custom Validators
+
+For logic that built-in constraints can't express, attach a `validator` hook. It receives the **coerced, constraint-validated** value plus a `ValidatorContext` (field name and env var name), and its return value becomes the final field value — so it can also transform:
+
+```python
+from dotenvmodel import DotEnvConfig, Field, SecretStr, ValidatorContext
+
+def check_api_key(value: SecretStr, ctx: ValidatorContext) -> SecretStr:
+    # The hook receives the coerced value: a SecretStr stays wrapped,
+    # so call get_secret_value() to inspect the plaintext.
+    if not value.get_secret_value().startswith("sk-"):
+        # ValueError/TypeError are wrapped in ConstraintViolationError
+        # and aggregate into MultipleValidationErrors like any other failure
+        raise ValueError(f"{ctx.env_var_name} must start with 'sk-'")
+    return value
+
+class Config(DotEnvConfig):
+    api_key: SecretStr = Field(validator=check_api_key)
+
+    # Transform example: normalize to lowercase
+    region: str = Field(default="us-east-1", validator=lambda v, ctx: v.lower())
+```
+
+Semantics to know:
+
+- The hook receives the **coerced** value. A `SecretStr` stays wrapped — use `get_secret_value()` to inspect the plaintext.
+- Runs **after** built-in constraints, on non-`None` values only, and even with `validate=False` (transformation is part of loading).
+- Built-in constraints are **not** re-run on a transformed value.
+- For sensitive fields (`SecretStr`, DSN types), returning a plain `str` re-wraps it in the declared type so the secret stays masked in `repr`.
+- Returning `None` on a non-`Optional` field raises `TypeCoercionError`.
+- For sensitive fields, **any** exception from the hook is masked to a generic `ConstraintViolationError` with no exception chaining — the hook's message is never embedded, so a carelessly written hook can't leak the secret. For non-sensitive fields, `str(e)` is embedded in the error message and the original exception is chained.
+- Raise `ConstraintViolationError` directly for a fully custom message on non-sensitive fields (it passes through untouched).
 
 ## Loading Configuration
 
