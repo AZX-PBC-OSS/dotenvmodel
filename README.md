@@ -560,7 +560,7 @@ Semantics to know:
 - The hook does **not** run on bare `Cls()` construction — no load path is involved.
 - If the hook both mutates and returns errors, the load still fails — on `load()`/`load_from_dict()` the half-built instance is discarded and the mutations vanish with it, but on `reload()` the caller already holds the instance, so hook mutations persist even though the reload raised (see the partial-reload caveat above).
 
-> **Warning — keep secrets out of `error_msg`.** The library redacts the `value` attribute for `SecretStr`/DSN fields when formatting raised errors, but it cannot mask prose you write. Never embed secret values in `error_msg`.
+> **Warning — keep secrets out of `error_msg` and raised exceptions.** The library redacts the `value` attribute for `SecretStr`/DSN fields when formatting raised errors, but it cannot mask prose you write. Never embed secret values in `error_msg` — and don't interpolate them into exceptions raised from the hook either, since those propagate unmasked.
 
 The pattern follows pydantic's `model_validator(mode="after")` (run after all fields validate; mutate and return `self`) and the zod/t3-env final-schema `.transform()` pattern (one post-hook that can both transform values and accumulate multiple issues).
 

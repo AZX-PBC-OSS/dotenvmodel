@@ -335,7 +335,7 @@ Semantics:
 - **Hook-author contract:** tag each returned error with the *primary* field name (`lock_lease` above) and reference the other participating fields in `error_msg`. `env_var_name` defaults to the uppercased field name if not passed.
 
 !!! warning "Keep secrets out of error messages"
-    The library redacts the `value` attribute for `SecretStr`/DSN fields when formatting raised errors, but it cannot mask prose you write. Never embed secret values in `error_msg`.
+    The library redacts the `value` attribute for `SecretStr`/DSN fields when formatting raised errors, but it cannot mask prose you write. Never embed secret values in `error_msg` — and don't interpolate them into exceptions raised from the hook either, since those propagate unmasked.
 
 !!! note "When the hook does not run"
     `post_load()` does not run on bare `Cls()` construction (no load path is involved), and it does not run if any field fails to load. On `reload()` the hook re-runs against the freshly reloaded state; if it (or field validation) fails mid-reload, the instance may be **partially reloaded** — the same caveat as field errors during reload.

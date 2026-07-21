@@ -21,6 +21,8 @@ Public API:
     - `Field`: Define fields with defaults, validation, and aliases
     - `Required`: Sentinel for required fields (alternative to `Field()`)
     - `ValidatorContext`: Context passed to `Field(validator=...)` hooks
+    - `DotEnvConfig.post_load`: Model-level hook for cross-field validation
+      and normalization after loading
     - `SecretStr`: String type that hides values in logs
     - `HttpUrl`, `PostgresDsn`, `RedisDsn`: URL/DSN types with validation
     - `Json`: Type for parsing JSON strings

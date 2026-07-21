@@ -703,7 +703,10 @@ class DotEnvConfig(metaclass=ConfigMeta):
         Tag each returned error with the primary field name and reference
         other participating fields in `error_msg`. Do not embed secret
         values in `error_msg` — the library redacts the `value` attribute
-        but cannot mask prose. The hook runs only when every field loaded
+        but cannot mask prose. The same applies to exceptions raised from
+        the hook: they propagate unmasked, so never interpolate secrets
+        into a raised exception's message. The hook runs only when every
+        field loaded
         cleanly, and does not run on bare `Cls()` construction.
 
         Returns:
