@@ -697,7 +697,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
         - Cross-validate: return a list of `ValidationError`. One error is
           raised directly; several are raised as `MultipleValidationErrors`.
         - Continue: log or swallow issues internally, return `None`.
-        - Fatal: raise; the exception propagates unchanged.
+        - Fatal: raise; an exception that is neither `ValidationError`
+          nor `MultipleValidationErrors` propagates unchanged.
 
         Tag each returned error with the primary field name and reference
         other participating fields in `error_msg`. Do not embed secret

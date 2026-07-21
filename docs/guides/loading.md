@@ -185,6 +185,10 @@ config.reload(env="prod")
 config.reload(override=False)
 ```
 
+!!! warning "A failed reload can leave the instance partially reloaded"
+
+    Fields are reloaded onto the same instance one at a time, so if validation (or the `post_load` hook) fails mid-reload, fields already reloaded keep their new values while the rest keep the old. If you catch reload errors, treat the instance as suspect — or build a fresh one with `load()` instead.
+
 !!! info "reload() returns the same instance"
 
     `reload()` returns `self`, making it useful for method chaining:
