@@ -385,8 +385,10 @@ class TestPostLoadNested:
 
     def test_nested_raised_non_validation_error_propagates_raw(self) -> None:
         # A non-ValidationError raised by a nested hook is not caught by the
-        # parent's field loop: it propagates unchanged, even when other
-        # parent-level field failures would exist alongside it.
+        # parent's field loop: it propagates unchanged, even though a
+        # parent-level field failure was genuinely collected first (host is
+        # declared before inner, so its error is already in the collection
+        # when the nested hook raises).
         class Inner(DotEnvConfig):
             env_prefix = "INNER_"
             port: int = Field(default=1)
@@ -396,9 +398,83 @@ class TestPostLoadNested:
 
         class Outer(DotEnvConfig):
             env_prefix = "OUTER_"
-            inner: Inner = Field(default_factory=Inner)
             host: str = Field(min_length=3)
+            inner: Inner = Field(default_factory=Inner)
 
         with pytest.raises(ValueError, match="fatal: inconsistent config") as exc_info:
             Outer.load_from_dict({"OUTER_HOST": "ab"})
         assert not isinstance(exc_info.value, MultipleValidationErrors)
+
+    def test_nested_raised_multiple_validation_errors_flattens(self) -> None:
+        # A MultipleValidationErrors raised (not returned) by a nested hook is
+        # caught by the parent's dedicated handler and flattened: its members
+        # join the parent's collection alongside ordinary field failures, with
+        # no MVE nested inside the aggregate.
+        raised: list[ValidationError] = []
+
+        class Inner(DotEnvConfig):
+            env_prefix = "INNER_"
+            port: int = Field(default=1)
+
+            def post_load(self) -> list[ValidationError] | None:
+                raised.extend(
+                    [
+                        ValidationError(field_name="port", value=self.port, error_msg="e1"),
+                        ConstraintViolationError(
+                            field_name="port",
+                            value=self.port,
+                            constraint="post_load",
+                            error_msg="e2",
+                        ),
+                    ]
+                )
+                raise MultipleValidationErrors(raised)
+
+        class Outer(DotEnvConfig):
+            env_prefix = "OUTER_"
+            inner: Inner = Field(default_factory=Inner)
+            host: str = Field(min_length=3)
+
+        with pytest.raises(MultipleValidationErrors) as exc_info:
+            Outer.load_from_dict({"OUTER_HOST": "ab"})
+        assert [e.error_msg for e in exc_info.value.errors] == [
+            "e1",
+            "e2",
+            "String must be at least 3 characters long",
+        ]
+        # Flattening preserves the hook's own error objects, not copies.
+        assert exc_info.value.errors[0] is raised[0]
+        assert exc_info.value.errors[1] is raised[1]
+        assert exc_info.value.errors[2].field_name == "host"
+        assert not any(isinstance(e, MultipleValidationErrors) for e in exc_info.value.errors)
+
+    def test_nested_raised_solo_multiple_validation_errors_unwraps(self) -> None:
+        # A nested-raised MultipleValidationErrors holding a single error goes
+        # through the same flattening: the parent's collection ends up with
+        # one member, which is re-raised as-is — the caller sees the bare
+        # ValidationError, not the MVE wrapper.
+        class Inner(DotEnvConfig):
+            env_prefix = "INNER_"
+            port: int = Field(default=1)
+
+            def post_load(self) -> list[ValidationError] | None:
+                raise MultipleValidationErrors(
+                    [
+                        ConstraintViolationError(
+                            field_name="port",
+                            value=self.port,
+                            constraint="post_load",
+                            error_msg="inner bad",
+                        )
+                    ]
+                )
+
+        class Outer(DotEnvConfig):
+            env_prefix = "OUTER_"
+            inner: Inner = Field(default_factory=Inner)
+
+        with pytest.raises(ConstraintViolationError) as exc_info:
+            Outer.load_from_dict({})
+        assert not isinstance(exc_info.value, MultipleValidationErrors)
+        assert exc_info.value.field_name == "port"
+        assert exc_info.value.error_msg == "inner bad"
