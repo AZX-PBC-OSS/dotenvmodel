@@ -350,3 +350,55 @@ class TestPostLoadNested:
         with pytest.raises(ConstraintViolationError):
             Outer.load_from_dict({"INNER_PORT": "999"})
         assert calls == []
+
+    def test_nested_raised_validation_error_aggregates_with_parent_errors(self) -> None:
+        # A ValidationError subclass raised (not returned) by a nested hook
+        # exits nested._load_fields() inside the parent's _process_field, where
+        # the parent's field loop catches it exactly like a nested field
+        # failure: with other parent-level errors present it aggregates into
+        # MultipleValidationErrors instead of propagating unchanged.
+        class Inner(DotEnvConfig):
+            env_prefix = "INNER_"
+            port: int = Field(default=1)
+
+            def post_load(self) -> list[ValidationError] | None:
+                raise ConstraintViolationError(
+                    field_name="port",
+                    value=self.port,
+                    constraint="post_load",
+                    error_msg="inner exploded",
+                )
+
+        class Outer(DotEnvConfig):
+            env_prefix = "OUTER_"
+            inner: Inner = Field(default_factory=Inner)
+            host: str = Field(min_length=3)
+
+        with pytest.raises(MultipleValidationErrors) as exc_info:
+            Outer.load_from_dict({"OUTER_HOST": "ab"})
+        assert len(exc_info.value.errors) == 2
+        nested_error = exc_info.value.errors[0]
+        assert isinstance(nested_error, ConstraintViolationError)
+        assert nested_error.field_name == "port"
+        assert nested_error.error_msg == "inner exploded"
+        assert exc_info.value.errors[1].field_name == "host"
+
+    def test_nested_raised_non_validation_error_propagates_raw(self) -> None:
+        # A non-ValidationError raised by a nested hook is not caught by the
+        # parent's field loop: it propagates unchanged, even when other
+        # parent-level field failures would exist alongside it.
+        class Inner(DotEnvConfig):
+            env_prefix = "INNER_"
+            port: int = Field(default=1)
+
+            def post_load(self) -> list[ValidationError] | None:
+                raise ValueError("fatal: inconsistent config")
+
+        class Outer(DotEnvConfig):
+            env_prefix = "OUTER_"
+            inner: Inner = Field(default_factory=Inner)
+            host: str = Field(min_length=3)
+
+        with pytest.raises(ValueError, match="fatal: inconsistent config") as exc_info:
+            Outer.load_from_dict({"OUTER_HOST": "ab"})
+        assert not isinstance(exc_info.value, MultipleValidationErrors)
