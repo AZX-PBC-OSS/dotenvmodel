@@ -40,17 +40,16 @@ class TestPathResolution:
         config = Config.load_from_dict({"PATH": "/nonexistent/path/that/does/not/exist"})
         assert isinstance(config.path, Path)
 
-    def test_reload_resolves_path(self) -> None:
-        import os
-
+    def test_reload_resolves_path(self, monkeypatch) -> None:
         class Config(DotEnvConfig):
             log_dir: Path = Field(default=Path("/tmp"))
 
+        monkeypatch.delenv("LOG_DIR", raising=False)
         config = Config.load()
-        os.environ["LOG_DIR"] = "~/logs"
+
+        monkeypatch.setenv("LOG_DIR", "~/logs")
         config.reload()
         assert config.log_dir == Path.home() / "logs"
-        del os.environ["LOG_DIR"]
 
 
 class TestRequireExists:

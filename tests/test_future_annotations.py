@@ -127,18 +127,14 @@ class TestFutureAnnotations:
         assert "DEBUG" in table
         assert "bool" in table
 
-    def test_reload_with_future_annotations(self) -> None:
-        import os
-
+    def test_reload_with_future_annotations(self, monkeypatch) -> None:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        os.environ["PORT"] = "9000"
+        monkeypatch.setenv("PORT", "9000")
         config = Config.load()
         assert config.port == 9000
 
-        os.environ["PORT"] = "7000"
+        monkeypatch.setenv("PORT", "7000")
         config.reload()
         assert config.port == 7000
-
-        del os.environ["PORT"]

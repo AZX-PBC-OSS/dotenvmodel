@@ -205,6 +205,7 @@ class TestPostLoadReload:
                     ]
                 return None
 
+        monkeypatch.delenv("FAIL", raising=False)
         config = Config.load(env_dir=tmp_path)
         monkeypatch.setenv("FAIL", "true")
         with pytest.raises(ValidationError, match="bad combination"):
@@ -234,6 +235,8 @@ class TestPostLoadReload:
                     ]
                 return None
 
+        monkeypatch.delenv("WORKER_NAME", raising=False)
+        monkeypatch.delenv("FAIL", raising=False)
         config = Config.load(env_dir=tmp_path)
         assert config.derived == "derived:x"
 
