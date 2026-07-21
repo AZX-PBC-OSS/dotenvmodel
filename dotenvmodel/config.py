@@ -456,6 +456,12 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 raise errors[0]
             raise MultipleValidationErrors(errors)
 
+        post_errors = self.post_load()
+        if post_errors:
+            if len(post_errors) == 1:
+                raise post_errors[0]
+            raise MultipleValidationErrors(post_errors)
+
     @classmethod
     def load(
         cls,
@@ -659,6 +665,36 @@ class DotEnvConfig(metaclass=ConfigMeta):
         instance._load_fields(data, validate=validate)
         instance._loaded = True
         return instance
+
+    def post_load(self) -> list[ValidationError] | None:
+        """Normalize derived values and run cross-field validation after loading.
+
+        Runs once after all fields are loaded and validated, on every load
+        path: `load()`, `load_from_dict()`, `reload()`, and nested config
+        loading. Always runs, including with `validate=False` (consistent
+        with the per-field `validator` hook: transformation is part of
+        loading). The default implementation is a no-op.
+
+        Usage modes (combinable in one body):
+
+        - Fix / transform: mutate `self` (e.g. apply fallback values),
+          return `None`.
+        - Cross-validate: return a list of `ValidationError`. One error is
+          raised directly; several are raised as `MultipleValidationErrors`.
+        - Continue: log or swallow issues internally, return `None`.
+        - Fatal: raise; the exception propagates unchanged.
+
+        Tag each returned error with the primary field name and reference
+        other participating fields in `error_msg`. Do not embed secret
+        values in `error_msg` — the library redacts the `value` attribute
+        but cannot mask prose. The hook runs only when every field loaded
+        cleanly, and does not run on bare `Cls()` construction.
+
+        Returns:
+            `None` or an empty list on success; a list of `ValidationError`
+            describing cross-field violations otherwise.
+        """
+        return None
 
     def dict(self) -> dict[str, Any]:
         """Return configuration as a dictionary with actual values.
