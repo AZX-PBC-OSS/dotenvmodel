@@ -331,7 +331,7 @@ Semantics:
 
 - Return `None` or `[]` → success. One returned error → raised directly, its exact type preserved (e.g. `ConstraintViolationError`). Several → raised as `MultipleValidationErrors`.
 - Returned errors are the same `ValidationError` objects field validation produces, so introspection is uniform: iterating `MultipleValidationErrors.errors` yields `field_name`, `env_var_name`, `value`, and `error_msg` per error, whether the failure came from a constraint, a per-field `validator`, or `post_load`. See [Error Handling](error-handling.md).
-- The hook runs **only when every field loaded cleanly** — cross-field checks always see coerced, constraint-validated values. A nested config's hook fires when the nested instance finishes loading, before the parent's hook; its returned errors flatten into the parent's collection.
+- The hook runs **only when every field loaded cleanly** — cross-field checks always see **coerced** values; constraint validation has also been applied unless you loaded with `validate=False` (which skips constraints but still runs the hook). A nested config's hook fires when the nested instance finishes loading, before the parent's hook; its returned errors flatten into the parent's collection.
 - **Hook-author contract:** tag each returned error with the *primary* field name (`lock_lease` above) and reference the other participating fields in `error_msg`. `env_var_name` defaults to the uppercased field name if not passed.
 
 !!! warning "Keep secrets out of error messages"
