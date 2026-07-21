@@ -706,8 +706,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         but cannot mask prose. The same applies to exceptions raised from
         the hook: they propagate unmasked, so never interpolate secrets
         into a raised exception's message. The hook runs only when every
-        field loaded
-        cleanly, and does not run on bare `Cls()` construction.
+        field loaded cleanly, and does not run on bare `Cls()` construction.
 
         Returns:
             `None` or an empty list on success; a list of `ValidationError`
