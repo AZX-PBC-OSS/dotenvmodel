@@ -5,6 +5,10 @@ repo_url: https://github.com/AZX-PBC-OSS/dotenvmodel
 repo_name: AZX-PBC-OSS/dotenvmodel
 edit_uri: edit/main/docs/
 
+# Keep the gitignored, local-only planning tree out of builds.
+exclude_docs: |
+  /superpowers/
+
 theme:
   name: material
   features:
