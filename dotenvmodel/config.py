@@ -211,6 +211,29 @@ def _run_field_validator(
     )
 
 
+def _raise_collected(errors: list[ValidationError] | None) -> None:
+    """Raise collected validation errors, preserving single-error types.
+
+    Shared by the field-error loop and the `post_load` hook in
+    `DotEnvConfig._load_fields`. A single error is raised unchanged so its
+    specific type (e.g. `MissingFieldError`, `ConstraintViolationError`)
+    reaches the caller; several are aggregated into
+    `MultipleValidationErrors`. `None` and an empty list both mean success.
+
+    Args:
+        errors: Collected errors, or `None` when the source reports success.
+
+    Raises:
+        ValidationError: The single collected error, raised unchanged.
+        MultipleValidationErrors: If two or more errors were collected.
+    """
+    if not errors:
+        return
+    if len(errors) == 1:
+        raise errors[0]
+    raise MultipleValidationErrors(errors)
+
+
 class DotEnvConfig(metaclass=ConfigMeta):
     """Base class for type-safe environment configuration.
 
@@ -451,16 +474,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 # it escape uncaught past the aggregation loop.
                 errors.extend(e.errors)
 
-        if errors:
-            if len(errors) == 1:
-                raise errors[0]
-            raise MultipleValidationErrors(errors)
-
-        post_errors = self.post_load()
-        if post_errors:
-            if len(post_errors) == 1:
-                raise post_errors[0]
-            raise MultipleValidationErrors(post_errors)
+        _raise_collected(errors)
+        _raise_collected(self.post_load())
 
     @classmethod
     def load(
@@ -693,6 +708,39 @@ class DotEnvConfig(metaclass=ConfigMeta):
         Returns:
             `None` or an empty list on success; a list of `ValidationError`
             describing cross-field violations otherwise.
+
+        Example:
+            ```python
+            class DatabaseConfig(DotEnvConfig):
+                primary_dsn: str = Field()
+                replica_dsn: str | None = Field(default=None)
+                pool_min: int = Field(default=1)
+                pool_max: int = Field(default=10)
+
+                def post_load(self) -> list[ValidationError] | None:
+                    # Fix / transform: fall back to the primary DSN.
+                    if self.replica_dsn is None:
+                        self.replica_dsn = self.primary_dsn
+
+                    # Cross-validate: pool bounds must stay coherent.
+                    if self.pool_min > self.pool_max:
+                        return [
+                            ValidationError(
+                                field_name="pool_min",
+                                value=self.pool_min,
+                                error_msg="pool_min must be <= pool_max",
+                            )
+                        ]
+                    return None
+            ```
+
+        See Also:
+            - [`load`][dotenvmodel.config.DotEnvConfig.load]: Triggers this hook.
+            - [`reload`][dotenvmodel.config.DotEnvConfig.reload]: Re-runs this hook.
+            - [`Field`][dotenvmodel.fields.Field]: Per-field `validator` hook for
+              single-field validation and transformation.
+            - [`MultipleValidationErrors`][dotenvmodel.exceptions.MultipleValidationErrors]:
+              Raised when this hook returns several errors.
         """
         return None
 
