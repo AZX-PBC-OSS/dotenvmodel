@@ -210,6 +210,41 @@ class TestPostLoadReload:
         with pytest.raises(ValidationError, match="bad combination"):
             config.reload()
 
+    def test_failed_reload_leaves_partial_state(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        # A failed reload is not atomic: fields already reloaded keep their
+        # new values, and hook mutations made before the error persist on the
+        # caller-held instance. (WORKER_NAME rather than NAME — some
+        # environments export NAME, which would collide with the field.)
+        class Config(DotEnvConfig):
+            worker_name: str = Field(default="x")
+            derived: str | None = Field(default=None)
+            fail: bool = Field(default=False)
+
+            def post_load(self) -> list[ValidationError] | None:
+                self.derived = f"derived:{self.worker_name}"
+                if self.fail:
+                    return [
+                        ValidationError(
+                            field_name="fail",
+                            value=self.fail,
+                            error_msg="bad combination",
+                        )
+                    ]
+                return None
+
+        config = Config.load(env_dir=tmp_path)
+        assert config.derived == "derived:x"
+
+        monkeypatch.setenv("WORKER_NAME", "y")
+        monkeypatch.setenv("FAIL", "true")
+        with pytest.raises(ValidationError, match="bad combination"):
+            config.reload()
+        # Both the reloaded field value and the hook mutation persist.
+        assert config.worker_name == "y"
+        assert config.derived == "derived:y"
+
 
 class TestPostLoadNested:
     """Nested configs fire their own post_load; errors flatten into the parent."""
@@ -478,3 +513,26 @@ class TestPostLoadNested:
         assert not isinstance(exc_info.value, MultipleValidationErrors)
         assert exc_info.value.field_name == "port"
         assert exc_info.value.error_msg == "inner bad"
+
+    def test_nested_returned_error_aggregates_with_parent_errors(self) -> None:
+        # Return-style composition: the nested hook's returned error flattens
+        # into the parent's collection alongside an ordinary parent field
+        # failure, one MultipleValidationErrors in field-processing order.
+        class Inner(DotEnvConfig):
+            env_prefix = "INNER_"
+            port: int = Field(default=1)
+
+            def post_load(self) -> list[ValidationError] | None:
+                return [ValidationError(field_name="port", value=self.port, error_msg="inner bad")]
+
+        class Outer(DotEnvConfig):
+            env_prefix = "OUTER_"
+            inner: Inner = Field(default_factory=Inner)
+            host: str = Field(min_length=3)
+
+        with pytest.raises(MultipleValidationErrors) as exc_info:
+            Outer.load_from_dict({"OUTER_HOST": "ab"})
+        assert len(exc_info.value.errors) == 2
+        assert exc_info.value.errors[0].field_name == "port"
+        assert exc_info.value.errors[0].error_msg == "inner bad"
+        assert exc_info.value.errors[1].field_name == "host"
