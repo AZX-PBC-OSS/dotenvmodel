@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import sys
-from typing import Any, get_args, get_origin, get_type_hints
+from typing import Any, cast, get_args, get_origin, get_type_hints
 
 from dotenvmodel.fields import _MISSING, FieldInfo, _RequiredSentinel
 
@@ -41,13 +41,13 @@ def _get_annotations_from_namespace(namespace: dict[str, Any]) -> dict[str, Any]
     return {}
 
 
-def _resolve_type_hints(cls: type) -> dict[str, Any]:
+def _resolve_type_hints(cls: ConfigMeta) -> dict[str, Any]:
     """Resolve string annotations to actual types.
 
     Uses get_type_hints which handles both PEP 563 (future import)
     and Python 3.14+ lazy annotations (PEP 649/749).
     """
-    field_names = set(cls._fields.keys())  # type: ignore[attr-defined]
+    field_names = set(cls._fields.keys())
     if not field_names:
         return {}
 
@@ -66,11 +66,16 @@ class ConfigMeta(type):
     resolves string annotations when PEP 563 is active.
     """
 
+    # Installed per-class in __new__ (namespace["_fields"]); declared here so
+    # classes using this metaclass expose it to type checkers.
+    _fields: dict[str, tuple[type, FieldInfo]]
+
     def __new__(mcs, name: str, bases: tuple[type, ...], namespace: dict[str, Any]) -> type:
         fields: dict[str, tuple[type, FieldInfo]] = {}
         for base in bases:
             if hasattr(base, "_fields"):
-                fields.update(base._fields)  # type: ignore[arg-type]
+                base_fields = cast("dict[str, tuple[type, FieldInfo]]", base._fields)
+                fields.update(base_fields)
 
         # Eagerly validate a class-level strip_strings setting: a non-bool
         # value is rejected at class-definition time so it can never silently
@@ -128,11 +133,11 @@ class ConfigMeta(type):
         cls = super().__new__(mcs, name, bases, namespace)
 
         # Resolve string annotations (PEP 563 future import or Python 3.14+ lazy annotations)
-        if any(isinstance(ft, str) for ft, _ in cls._fields.values()):  # type: ignore[attr-defined]
+        if any(isinstance(ft, str) for ft, _ in cls._fields.values()):
             resolved = _resolve_type_hints(cls)
             if resolved:
                 new_fields: dict[str, tuple[type, FieldInfo]] = {}
-                for fname, (ftype, finfo) in cls._fields.items():  # type: ignore[attr-defined]
+                for fname, (ftype, finfo) in cls._fields.items():
                     rtype = resolved.get(fname, ftype)
                     if (
                         finfo.default is _MISSING
@@ -142,6 +147,6 @@ class ConfigMeta(type):
                         finfo.default = None
                         finfo.required = False
                     new_fields[fname] = (rtype, finfo)
-                cls._fields = new_fields  # type: ignore[method-assign]
+                cls._fields = new_fields
 
         return cls

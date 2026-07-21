@@ -103,7 +103,9 @@ class TestValidatorContext:
         """ValidatorContext is immutable."""
         ctx = ValidatorContext(field_name="a", env_var_name="A")
         with pytest.raises(AttributeError):
-            ctx.field_name = "b"  # type: ignore[misc]
+            # Frozen dataclass: static assignment is rejected by the checkers;
+            # the runtime immutability probe is intentionally dynamic.
+            setattr(ctx, "field_name", "b")  # noqa: B010
 
 
 class TestValidatorErrorWrapping:
@@ -170,7 +172,9 @@ class TestValidatorErrorWrapping:
         assert len(exc_info.value.errors) == 2
         assert all(isinstance(e, ConstraintViolationError) for e in exc_info.value.errors)
         assert {e.field_name for e in exc_info.value.errors} == {"first", "second"}
-        assert all(e.constraint == "validator=no_a" for e in exc_info.value.errors)  # type: ignore[attr-defined]
+        for e in exc_info.value.errors:
+            assert isinstance(e, ConstraintViolationError)
+            assert e.constraint == "validator=no_a"
 
     def test_constraint_violation_error_passes_through(self) -> None:
         """A hook raising ConstraintViolationError directly is not re-wrapped."""
@@ -415,7 +419,7 @@ class TestValidatorFieldInfo:
     def test_non_callable_validator_rejected(self) -> None:
         """Field(validator=...) must be callable or raise TypeError at construction."""
         with pytest.raises(TypeError) as exc_info:
-            Field(validator="not-a-callable")  # type: ignore[arg-type]
+            Field(validator="not-a-callable")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
         assert "validator" in str(exc_info.value)
         assert "callable" in str(exc_info.value).lower()
@@ -753,7 +757,7 @@ class TestValidatorCheapPins:
             return value
 
         class Config(DotEnvConfig):
-            value: str = Field(validator=one_arg)  # type: ignore[arg-type]
+            value: str = Field(validator=one_arg)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
         with pytest.raises(ConstraintViolationError) as exc_info:
             Config.load_from_dict({"VALUE": "x"})

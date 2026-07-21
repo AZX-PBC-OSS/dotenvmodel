@@ -20,8 +20,7 @@ class TestSecretStrSecurity:
         config = Config.load_from_dict({"API_KEY": "super-secret"})
 
         # Old attribute name should not exist
-        with pytest.raises(AttributeError):
-            _ = config.api_key._value  # type: ignore[attr-defined]
+        assert not hasattr(config.api_key, "_value")
 
     def test_prevent_direct_attribute_access_new_name(self) -> None:
         """Test that direct _secret attribute access is blocked (name mangling)."""
@@ -32,8 +31,7 @@ class TestSecretStrSecurity:
         config = Config.load_from_dict({"API_KEY": "super-secret"})
 
         # Direct _secret access should be blocked due to name mangling
-        with pytest.raises(AttributeError):
-            _ = config.api_key._secret  # type: ignore[attr-defined]
+        assert not hasattr(config.api_key, "_secret")
 
     def test_get_secret_value_works(self) -> None:
         """Test that get_secret_value() is the correct way to access the secret."""
@@ -80,7 +78,7 @@ class TestSecretStrSecurity:
         secret = SecretStr("test")
 
         with pytest.raises(AttributeError) as exc_info:
-            del secret._SecretStr__secret
+            delattr(secret, "_SecretStr__secret")
 
         assert "immutable" in str(exc_info.value).lower()
 
@@ -91,7 +89,9 @@ class TestSecretStrSecurity:
         # The mangled name should be accessible (for testing purposes)
         # but this is intentionally obscure
         assert hasattr(secret, "_SecretStr__secret")
-        assert secret._SecretStr__secret == "test-value"  # type: ignore[attr-defined]
+        # Read via getattr: the name-mangled attribute is intentionally probed
+        # dynamically (ty cannot resolve the mangled name statically).
+        assert getattr(secret, "_SecretStr__secret") == "test-value"  # noqa: B009
 
         # But the unmangled name should not exist
         assert not hasattr(secret, "__secret")

@@ -1,5 +1,7 @@
 """Edge case tests for real-world adoption scenarios."""
 
+from typing import Any
+
 import pytest
 
 from dotenvmodel import DotEnvConfig, Field
@@ -146,7 +148,7 @@ class TestRealWorldScenarios:
         assert d["created"] == datetime(2025, 1, 15, 10, 30, 0)  # noqa: DTZ001
 
     def test_large_config(self) -> None:
-        namespace = {"DotEnvConfig": DotEnvConfig, "Field": Field}
+        namespace: dict[str, Any] = {"DotEnvConfig": DotEnvConfig, "Field": Field}
         fields_str = "\n".join(f"    field_{i}: int = Field(default={i})" for i in range(50))
         code = f"class BigConfig(DotEnvConfig):\n{fields_str}\n"
         exec(code, namespace)

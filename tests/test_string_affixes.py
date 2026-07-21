@@ -165,7 +165,7 @@ class TestAffixOnBothUnionSpellings:
 
     def test_starts_with_applies_when_present(self, field_type: object) -> None:
         class Config(DotEnvConfig):
-            api_key: field_type = Field(default=None, starts_with="sk-")  # type: ignore[valid-type]
+            api_key: field_type = Field(default=None, starts_with="sk-")  # type: ignore[valid-type]  # ty: ignore[invalid-type-form]
 
         config = Config.load_from_dict({"API_KEY": "sk-abc"})
         assert config.api_key == "sk-abc"
@@ -176,7 +176,7 @@ class TestAffixOnBothUnionSpellings:
 
     def test_ends_with_applies_when_present(self, field_type: object) -> None:
         class Config(DotEnvConfig):
-            token: field_type = Field(default=None, ends_with=".sig")  # type: ignore[valid-type]
+            token: field_type = Field(default=None, ends_with=".sig")  # type: ignore[valid-type]  # ty: ignore[invalid-type-form]
 
         config = Config.load_from_dict({"TOKEN": "abc.sig"})
         assert config.token == "abc.sig"
@@ -187,7 +187,7 @@ class TestAffixOnBothUnionSpellings:
 
     def test_skipped_when_none(self, field_type: object) -> None:
         class Config(DotEnvConfig):
-            api_key: field_type = Field(default=None, starts_with="sk-")  # type: ignore[valid-type]
+            api_key: field_type = Field(default=None, starts_with="sk-")  # type: ignore[valid-type]  # ty: ignore[invalid-type-form]
 
         config = Config.load_from_dict({})
         assert config.api_key is None
@@ -202,7 +202,7 @@ class TestAffixOnBothUnionSpellings:
         """
 
         class Config(DotEnvConfig):
-            api_key: field_type = Field(default=None, starts_with="sk-")  # type: ignore[valid-type]
+            api_key: field_type = Field(default=None, starts_with="sk-")  # type: ignore[valid-type]  # ty: ignore[invalid-type-form]
 
         output = Config.describe()
         assert "starts_with='sk-'" in output
@@ -288,7 +288,7 @@ class TestAffixFieldInfoValidation:
     def test_starts_with_non_string_raises(self) -> None:
         """starts_with must be a str."""
         with pytest.raises(TypeError) as exc_info:
-            Field(starts_with=123)  # type: ignore[arg-type]
+            Field(starts_with=123)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
         assert "starts_with" in str(exc_info.value)
         assert "str" in str(exc_info.value)
@@ -296,7 +296,7 @@ class TestAffixFieldInfoValidation:
     def test_ends_with_non_string_raises(self) -> None:
         """ends_with must be a str."""
         with pytest.raises(TypeError) as exc_info:
-            Field(ends_with=b".sig")  # type: ignore[arg-type]
+            Field(ends_with=b".sig")  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
         assert "ends_with" in str(exc_info.value)
         assert "str" in str(exc_info.value)

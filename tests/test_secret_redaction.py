@@ -28,11 +28,12 @@ SECRET = "s3cr3t-pw"
 DSN = f"postgresql://dbuser:{SECRET}@db.example.com:5432/appdb"
 
 
-def _config() -> DotEnvConfig:
-    class Config(DotEnvConfig):
-        database_url: PostgresDsn = Field()
+class _DsnConfig(DotEnvConfig):
+    database_url: PostgresDsn = Field()
 
-    return Config.load_from_dict({"DATABASE_URL": DSN})
+
+def _config() -> _DsnConfig:
+    return _DsnConfig.load_from_dict({"DATABASE_URL": DSN})
 
 
 class TestDsnDisplayRedaction:
@@ -113,15 +114,15 @@ class TestDsnDefaultRedactionInDocs:
     def _cls(self, annotation: str = "plain") -> type[DotEnvConfig]:
         if annotation == "optional":
 
-            class Config(DotEnvConfig):
+            class OptionalDsnConfig(DotEnvConfig):
                 database_url: PostgresDsn | None = Field(default=DSN)
 
-        else:
+            return OptionalDsnConfig
 
-            class Config(DotEnvConfig):
-                database_url: PostgresDsn = Field(default=DSN)
+        class PlainDsnConfig(DotEnvConfig):
+            database_url: PostgresDsn = Field(default=DSN)
 
-        return Config
+        return PlainDsnConfig
 
     def test_describe_table_masks_default(self) -> None:
         assert SECRET not in self._cls().describe(output_format="table")

@@ -284,14 +284,14 @@ class TestStripOnBothUnionSpellings:
 
     def test_strip_applies(self, field_type: object) -> None:
         class Config(DotEnvConfig):
-            name: field_type = Field(default=None, strip=True)  # type: ignore[valid-type]
+            name: field_type = Field(default=None, strip=True)  # type: ignore[valid-type]  # ty: ignore[invalid-type-form]
 
         config = Config.load_from_dict({"NAME": "  hello  "})
         assert config.name == "hello"
 
     def test_whitespace_only_becomes_none(self, field_type: object) -> None:
         class Config(DotEnvConfig):
-            name: field_type = Field(default=None, strip=True)  # type: ignore[valid-type]
+            name: field_type = Field(default=None, strip=True)  # type: ignore[valid-type]  # ty: ignore[invalid-type-form]
 
         config = Config.load_from_dict({"NAME": "   "})
         assert config.name is None
@@ -409,14 +409,14 @@ class TestStripFieldInfoValidation:
     def test_strip_invalid_type_raises(self) -> None:
         """strip must be bool, str, re.Pattern, or None."""
         with pytest.raises(TypeError) as exc_info:
-            Field(strip=123)  # type: ignore[arg-type]
+            Field(strip=123)  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
         assert "strip" in str(exc_info.value)
 
     def test_strip_list_form_raises(self) -> None:
         """The list form is deliberately unsupported."""
         with pytest.raises(TypeError) as exc_info:
-            Field(strip=[","])  # type: ignore[arg-type]
+            Field(strip=[","])  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
         assert "strip" in str(exc_info.value)
 
@@ -444,7 +444,7 @@ class TestStripFieldInfoValidation:
         pattern on a string-like object"; reject it early at Field construction.
         """
         with pytest.raises(TypeError) as exc_info:
-            Field(strip=re.compile(rb"\s+"))  # type: ignore[arg-type]
+            Field(strip=re.compile(rb"\s+"))  # type: ignore[arg-type]  # ty: ignore[invalid-argument-type]
 
         assert "strip" in str(exc_info.value)
         assert "bytes" in str(exc_info.value).lower()

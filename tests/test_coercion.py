@@ -3,10 +3,11 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal, cast
 from uuid import UUID
 
 import pytest
+from typing_extensions import TypeForm
 
 from dotenvmodel import DotEnvConfig, Field, TypeCoercionError
 from dotenvmodel.coercion import (
@@ -212,7 +213,15 @@ class TestCoerceValue:
 
     def test_coerce_json_type(self) -> None:
         """Test coercing to Json type."""
-        result = coerce_value("test_field", '{"key": "value"}', Json[dict], "TEST_FIELD")
+        # At runtime Json[dict] is a class (metaclass __getitem__), i.e. a valid
+        # type form. pyright mistypes the alias expression as GenericAlias, which
+        # its provisional TypeForm support rejects — assert the real type.
+        result = coerce_value(
+            "test_field",
+            '{"key": "value"}',
+            cast("TypeForm[Any]", Json[dict]),
+            "TEST_FIELD",
+        )
         assert result == {"key": "value"}
 
 

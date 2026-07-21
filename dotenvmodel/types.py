@@ -5,7 +5,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any, TypeVar
+from typing import TYPE_CHECKING, Any
 from urllib.parse import ParseResult, unquote, urlparse
 from uuid import UUID
 
@@ -13,8 +13,6 @@ from typing_extensions import TypeForm
 
 from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.exceptions import TypeCoercionError
-
-_T = TypeVar("_T")
 
 
 class SecretStr:
@@ -56,12 +54,16 @@ class SecretStr:
 
     __slots__ = ("__secret",)
 
+    # Declared for type checkers; name-mangles to _SecretStr__secret, matching
+    # the slot set in __init__ (object.__setattr__ bypasses the immutable guard).
+    __secret: str
+
     def __init__(self, value: str) -> None:
         object.__setattr__(self, "_SecretStr__secret", value)
 
     def get_secret_value(self) -> str:
         """Get the actual secret value."""
-        return self.__secret  # type: ignore[attr-defined]
+        return self.__secret
 
     def __str__(self) -> str:
         return "**********"
@@ -86,11 +88,11 @@ class SecretStr:
 
     def __eq__(self, other: object) -> bool:
         if isinstance(other, SecretStr):
-            return self.__secret == other.__secret  # type: ignore[attr-defined]
+            return self.__secret == other.__secret
         return False
 
     def __hash__(self) -> int:
-        return hash(self.__secret)  # type: ignore[attr-defined]
+        return hash(self.__secret)
 
 
 class BaseDsn(str):
@@ -368,7 +370,7 @@ def is_sensitive_value(value: Any) -> bool:
 
 if TYPE_CHECKING:
     # For type checkers: Json[T] is an alias for T, so config.field has type T
-    Json = _T
+    type Json[T] = T
 else:
     # At runtime: Json is a class that supports __class_getitem__ for coercion
 

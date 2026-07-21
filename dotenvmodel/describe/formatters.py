@@ -10,7 +10,7 @@ from dataclasses import dataclass
 from datetime import timedelta
 from enum import Enum
 from pathlib import Path
-from typing import Any, Union, get_args, get_origin
+from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from typing_extensions import TypeForm
 
@@ -18,6 +18,9 @@ from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.coercion import is_string_like_type
 from dotenvmodel.fields import _MISSING, FieldInfo, _validator_name
 from dotenvmodel.types import BaseDsn, SecretStr
+
+if TYPE_CHECKING:
+    from dotenvmodel.config import DotEnvConfig
 
 # Maximum column widths to prevent unbounded table growth
 MAX_WIDTHS = {
@@ -349,7 +352,7 @@ def format_constraints(
     return ", ".join(constraints) if constraints else "-"
 
 
-def _union_members(field_type: TypeForm[Any]) -> list[Any]:
+def _union_members(field_type: TypeForm[Any] | types.UnionType) -> list[Any]:
     """Return the non-None members of an Optional/Union, else ``[field_type]``.
 
     Handles multi-member unions (``PostgresDsn | RedisDsn | None``) so a DSN or
@@ -361,7 +364,7 @@ def _union_members(field_type: TypeForm[Any]) -> list[Any]:
     return [field_type]
 
 
-def _is_type_in_union(field_type: TypeForm[Any], target: type) -> bool:
+def _is_type_in_union(field_type: TypeForm[Any] | types.UnionType, target: type) -> bool:
     """True if any member of ``field_type`` is a subclass of ``target``."""
     return any(isinstance(m, type) and issubclass(m, target) for m in _union_members(field_type))
 
@@ -422,7 +425,7 @@ def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: b
 
 
 def describe_class(
-    config_cls: type,  # type: ignore[type-arg]
+    config_cls: type[DotEnvConfig],
     truncate: bool = True,
 ) -> tuple[str, str, list[FieldDescription]]:
     """Extract field descriptions from a config class.
