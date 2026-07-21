@@ -264,6 +264,87 @@ Semantics:
 
 ---
 
+## Cross-Field Validation with `post_load`
+
+Constraints and per-field `validator` hooks see one value at a time. For invariants that span several fields (`lock_lease >= 4 * heartbeat_interval`) or derived values built from multiple inputs (a replica DSN falling back to the primary), override the model-level `post_load()` hook. It runs **once after all fields load cleanly**, on every load path — `load()`, `load_from_dict()`, `reload()`, and nested config loading — and always runs, even with `validate=False` (transformation is part of loading, same as the per-field `validator` hook). The default implementation is a no-op.
+
+```python
+from dotenvmodel import DotEnvConfig, Field, ValidationError
+
+class WorkerConfig(DotEnvConfig):
+    primary_dsn: str = Field(default="postgresql://localhost/primary")
+    replica_dsn: str | None = Field(default=None)
+    heartbeat_interval: int = Field(default=5, ge=1)  # seconds
+    lock_lease: int = Field(default=30, ge=1)         # seconds
+
+    def post_load(self) -> list[ValidationError] | None:
+        # Fix / transform: derived value — fall back to the primary DSN.
+        if self.replica_dsn is None:
+            self.replica_dsn = self.primary_dsn
+
+        # Cross-validate: invariant spanning two fields.
+        if self.lock_lease < 4 * self.heartbeat_interval:
+            return [
+                ValidationError(
+                    field_name="lock_lease",  # tag the primary field
+                    value=self.lock_lease,
+                    error_msg="lock_lease must be >= 4 * heartbeat_interval",
+                )
+            ]
+        return None
+```
+
+!!! example "Valid vs Invalid"
+    === "Valid"
+
+        ```python
+        config = WorkerConfig.load_from_dict({})
+        # Fallback applied even though no env vars were set:
+        assert config.replica_dsn == "postgresql://localhost/primary"
+        ```
+
+    === "Invalid"
+
+        ```bash
+        # .env — 10 < 4 * 5
+        LOCK_LEASE=10
+        ```
+
+        ```python
+        # Raises ValidationError:
+        # Field 'lock_lease' validation failed:
+        #   Value: 10
+        #   Error: lock_lease must be >= 4 * heartbeat_interval
+        #   Environment variable: LOCK_LEASE
+        ```
+
+Usage modes (combinable in one body):
+
+| Mode | How | Use for |
+|------|-----|---------|
+| Fix / transform | Mutate `self`, return `None` | Derived values, fallbacks, normalization |
+| Cross-validate | Return `list[ValidationError]` | Invariants spanning multiple fields |
+| Continue | Log or swallow issues internally, return `None` | Non-fatal drift you only want to observe |
+| Fatal | `raise` | Unexpected/programming errors — propagates unchanged, never wrapped or aggregated |
+
+Semantics:
+
+- Return `None` or `[]` → success. One returned error → raised directly, its exact type preserved (e.g. `ConstraintViolationError`). Several → raised as `MultipleValidationErrors`.
+- Returned errors are the same `ValidationError` objects field validation produces, so introspection is uniform: iterating `MultipleValidationErrors.errors` yields `field_name`, `env_var_name`, `value`, and `error_msg` per error, whether the failure came from a constraint, a per-field `validator`, or `post_load`. See [Error Handling](error-handling.md).
+- The hook runs **only when every field loaded cleanly** — cross-field checks always see coerced, constraint-validated values. A nested config's hook fires when the nested instance finishes loading, before the parent's hook; its returned errors flatten into the parent's collection.
+- **Hook-author contract:** tag each returned error with the *primary* field name (`lock_lease` above) and reference the other participating fields in `error_msg`. `env_var_name` defaults to the uppercased field name if not passed.
+
+!!! warning "Keep secrets out of error messages"
+    The library redacts the `value` attribute for `SecretStr`/DSN fields when formatting raised errors, but it cannot mask prose you write. Never embed secret values in `error_msg`.
+
+!!! note "When the hook does not run"
+    `post_load()` does not run on bare `Cls()` construction (no load path is involved), and it does not run if any field fails to load. On `reload()` the hook re-runs against the freshly reloaded state; if it (or field validation) fails mid-reload, the instance may be **partially reloaded** — the same caveat as field errors during reload.
+
+!!! tip "Pattern lineage"
+    The hook follows pydantic's `model_validator(mode="after")` (run after all fields validate; mutate and return `self`) and the zod/t3-env final-schema `.transform()` pattern (one post-hook that can both transform values and accumulate multiple issues).
+
+---
+
 ## Collection Size Constraints
 
 The `min_items` and `max_items` parameters constrain the number of items in `list`, `set`, `tuple`, and `dict` fields.

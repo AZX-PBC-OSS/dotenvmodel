@@ -16,7 +16,7 @@
 - **.env.example Generation**: Automatically generate `.env.example` files with type hints, constraints, and examples
 - **File Export**: Save documentation directly to files for integration with build tools and wikis
 - **Environment Prefixes**: Class-level `env_prefix` to namespace environment variables
-- **Validation**: Numeric constraints (ge, le, gt, lt), string constraints (min_length, max_length, regex, starts_with, ends_with), choice validation, custom validator hooks, and collection size constraints (min_items, max_items)
+- **Validation**: Numeric constraints (ge, le, gt, lt), string constraints (min_length, max_length, regex, starts_with, ends_with), choice validation, custom validator hooks, a model-level `post_load` hook for cross-field validation, and collection size constraints (min_items, max_items)
 - **String Stripping**: Per-field and class-level whitespace/char-set/regex stripping of raw values before coercion
 - **Clear Error Messages**: Helpful validation errors that guide you to fixes
 - **Optional Logging**: Built-in logging support to debug configuration loading
@@ -496,6 +496,73 @@ Semantics to know:
 - Returning `None` on a non-`Optional` field raises `TypeCoercionError`.
 - For sensitive fields, **any** exception from the hook is masked to a generic `ConstraintViolationError` with no exception chaining — the hook's message is never embedded, so a carelessly written hook can't leak the secret. For non-sensitive fields, `str(e)` is embedded in the error message and the original exception is chained.
 - Raise `ConstraintViolationError` directly for a fully custom message on non-sensitive fields (it passes through untouched).
+
+### Cross-Field Validation with `post_load`
+
+Per-field constraints and `validator` hooks see one value at a time. For invariants that span several fields (`lock_lease >= 4 * heartbeat_interval`) or derived values built from multiple inputs (a replica DSN falling back to the primary), override the model-level `post_load()` hook. It runs **once after all fields load cleanly**, on every load path — `load()`, `load_from_dict()`, `reload()`, and nested config loading — and always runs, even with `validate=False` (transformation is part of loading, same as the per-field `validator` hook). The default implementation is a no-op.
+
+```python
+from dotenvmodel import DotEnvConfig, Field, ValidationError
+
+class WorkerConfig(DotEnvConfig):
+    primary_dsn: str = Field(default="postgresql://localhost/primary")
+    replica_dsn: str | None = Field(default=None)
+    heartbeat_interval: int = Field(default=5, ge=1)  # seconds
+    lock_lease: int = Field(default=30, ge=1)         # seconds
+
+    def post_load(self) -> list[ValidationError] | None:
+        # Fix/transform: derived value — fall back to the primary DSN.
+        if self.replica_dsn is None:
+            self.replica_dsn = self.primary_dsn
+
+        # Cross-validate: invariant spanning two fields.
+        if self.lock_lease < 4 * self.heartbeat_interval:
+            return [
+                ValidationError(
+                    field_name="lock_lease",  # tag the primary field
+                    value=self.lock_lease,
+                    error_msg="lock_lease must be >= 4 * heartbeat_interval",
+                )
+            ]
+        return None
+
+config = WorkerConfig.load_from_dict({})
+print(config.replica_dsn)  # postgresql://localhost/primary (fallback applied)
+
+try:
+    WorkerConfig.load_from_dict({"LOCK_LEASE": "10"})  # 10 < 4 * 5
+except ValidationError as e:
+    print(f"{e.field_name}: {e.error_msg}")
+    # lock_lease: lock_lease must be >= 4 * heartbeat_interval
+```
+
+Usage modes (combinable in one body):
+
+- **Fix / transform** — mutate `self`, return `None` (the DSN fallback above).
+- **Cross-validate** — collect violations into a `list[ValidationError]` and return them (the DSN-invariant style above); the library raises them as described below.
+- **Continue** — log or swallow issues internally, return `None`.
+- **Fatal** — `raise`; the exception propagates unchanged, never wrapped or aggregated. Use `raise` for unexpected/programming errors and `return` for expected violations.
+
+Semantics to know:
+
+- Return `None` or `[]` → success. Return **one** `ValidationError` → raised directly, its exact type preserved (e.g. `ConstraintViolationError`). Return **several** → raised as `MultipleValidationErrors`.
+- Returned errors are the same `ValidationError` objects field validation produces, so introspection is uniform whether the failure came from a constraint, a per-field `validator`, or `post_load`:
+
+  ```python
+  except MultipleValidationErrors as e:
+      for err in e.errors:
+          print(f"{err.field_name} ({err.env_var_name}): {err.error_msg}")
+  ```
+
+- **Hook-author contract:** tag each returned error with the *primary* field name (`lock_lease` above) and reference the other participating fields in `error_msg`. `env_var_name` defaults to the uppercased field name if not passed.
+- The hook runs **only when every field loaded cleanly** — cross-field checks always see coerced, constraint-validated values. A nested config's hook fires when the nested instance finishes loading, before the parent's hook; its returned errors flatten into the parent's collection.
+- `reload()` re-runs the hook against the freshly reloaded state. If the hook (or field validation) fails during `reload()`, the instance may be **partially reloaded** — the same caveat as field errors during reload.
+- The hook does **not** run on bare `Cls()` construction — no load path is involved.
+- If the hook both mutates and returns errors, the load fails and the caller never receives the instance, so the mutations are moot.
+
+> **Warning — keep secrets out of `error_msg`.** The library redacts the `value` attribute for `SecretStr`/DSN fields when formatting raised errors, but it cannot mask prose you write. Never embed secret values in `error_msg`.
+
+The pattern follows pydantic's `model_validator(mode="after")` (run after all fields validate; mutate and return `self`) and the zod/t3-env final-schema `.transform()` pattern (one post-hook that can both transform values and accumulate multiple issues).
 
 ## Loading Configuration
 
