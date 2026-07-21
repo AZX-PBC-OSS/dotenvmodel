@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.4.0...v0.5.0) (2026-07-21)
+
+
+### Features
+
+* add post_load hook for cross-field validation and normalization ([78bcef1](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/78bcef18b90354ea29050f30c8548a193e78c0e3))
+* add post_load hook for cross-field validation and normalization ([#39](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/39)) ([39241ed](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/39241ed09ca416c38869076cfe6e22a7c94b2d95))
+
+
+### Bug Fixes
+
+* mask hook-authored constraint in sensitive validator errors ([6f99371](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/6f99371c5038d60020c68524c05f766d1bfc0ddd))
+
+
+### Documentation
+
+* correct post_load raise-propagation boundary, document partial reload ([9ec9a00](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/9ec9a00fdfb0e2d455830690489d4c7b5215a92c))
+* document post_load cross-field validation hook ([536c981](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/536c981b201d169a219c49af16e45cdd92202443))
+* post_load discoverability and secrets-warning scope ([895566e](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/895566e365c1d32952b06d59e4063cf7cf2ace8c))
+* qualify post_load claims for validate=False and reload paths ([0786c8d](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/0786c8da115e2d033cad278a97557425ffad4c63))
+* qualify post_load raise propagation for nested ValidationError ([40416b6](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/40416b69c15e33b3234fd8ee6531a743589f4e27))
+
 ## [0.4.0](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.3.2...v0.4.0) (2026-07-20)
 
 
