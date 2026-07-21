@@ -307,6 +307,7 @@ class TestEnumIntegration:
         class Config(DotEnvConfig):
             log_level: LogLevel = Field(default=LogLevel.INFO)
 
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("LOG_LEVEL", "debug")
         config = Config.load()
         assert config.log_level == LogLevel.DEBUG

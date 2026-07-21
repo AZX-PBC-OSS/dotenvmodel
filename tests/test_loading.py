@@ -126,6 +126,8 @@ class TestEnvFileLoading:
         """Test loading from current working directory."""
         # Change to temp directory
         monkeypatch.chdir(tmp_path)
+        # cwd is the .env base dir only when DOTENV_DIR is not set
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
 
         # Create .env in cwd
         (tmp_path / ".env").write_text("VALUE=from_cwd\n")
@@ -210,6 +212,7 @@ class TestEnvVarName:
 
     def test_field_name_to_upper(self, monkeypatch) -> None:
         """Test field name converts to UPPER_CASE for env var."""
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/db")
 
         class Config(DotEnvConfig):
@@ -220,6 +223,7 @@ class TestEnvVarName:
 
     def test_alias_used_instead_of_field_name(self, monkeypatch) -> None:
         """Test alias is used for env var name."""
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("DB_CONNECTION", "postgresql://localhost/db")
 
         class Config(DotEnvConfig):

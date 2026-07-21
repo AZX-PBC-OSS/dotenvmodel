@@ -45,6 +45,7 @@ class TestNestedConfigDefaults:
         monkeypatch.delenv("APP_NESTED_PORT", raising=False)
         monkeypatch.delenv("APP_NESTED_NAME", raising=False)
         monkeypatch.delenv("APP_NESTED_ENABLED", raising=False)
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
 
         config = Outer.load()
 
@@ -175,6 +176,7 @@ class TestRequiredNestedConfigField:
 
 class TestNestedConfigReload:
     def test_reload_picks_up_nested_env_changes(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("APP_NESTED_PORT", "20")
         config = Outer.load()
         assert config.nested.port == 20

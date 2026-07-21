@@ -21,6 +21,7 @@ class TestStripThroughLoad:
         class Config(DotEnvConfig):
             name: str = Field(strip=True)
 
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("NAME", "  hello  ")
         config = Config.load()
         assert config.name == "hello"
@@ -33,6 +34,7 @@ class TestStripThroughLoad:
 
             name: str = Field(strip=False)
 
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("NAME", "  hello  ")
         config = Config.load()
         assert config.name == "  hello  "
@@ -47,6 +49,7 @@ class TestStripThroughReload:
         class Config(DotEnvConfig):
             name: str = Field(strip=True)
 
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("NAME", "  first  ")
         config = Config.load()
         assert config.name == "first"
@@ -68,6 +71,7 @@ class TestValidatorThroughLoad:
         class Config(DotEnvConfig):
             region: str = Field(validator=upper)
 
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("REGION", "eu-west-1")
         config = Config.load()
         assert config.region == "EU-WEST-1"
@@ -85,6 +89,7 @@ class TestValidatorThroughReload:
         class Config(DotEnvConfig):
             region: str = Field(validator=upper)
 
+        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("REGION", "eu-west-1")
         config = Config.load()
         assert config.region == "EU-WEST-1"
