@@ -44,7 +44,6 @@ class TestPathResolution:
         class Config(DotEnvConfig):
             log_dir: Path = Field(default=Path("/tmp"))
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.delenv("LOG_DIR", raising=False)
         config = Config.load()
 

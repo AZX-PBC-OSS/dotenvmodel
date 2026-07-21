@@ -131,7 +131,6 @@ class TestFutureAnnotations:
         class Config(DotEnvConfig):
             port: int = Field(default=8000)
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("PORT", "9000")
         config = Config.load()
         assert config.port == 9000

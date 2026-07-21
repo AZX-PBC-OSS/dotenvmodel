@@ -16,7 +16,6 @@ class TestReload:
             port: int = Field(default=8000)
 
         # Initial load
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("HOST", "localhost")
         monkeypatch.setenv("PORT", "3000")
 
@@ -39,7 +38,6 @@ class TestReload:
         class Config(DotEnvConfig):
             value: str = Field()
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("VALUE", "initial")
         config = Config.load()
 
@@ -57,7 +55,6 @@ class TestReload:
             host: str = Field()
             port: int = Field()
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("APP_HOST", "localhost")
         monkeypatch.setenv("APP_PORT", "8000")
 
@@ -83,7 +80,6 @@ class TestReload:
         # Clean up any existing PORT and DEBUG env vars from other tests
         monkeypatch.delenv("PORT", raising=False)
         monkeypatch.delenv("DEBUG", raising=False)
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
 
         monkeypatch.setenv("HOST", "localhost")
         config = Config.load()
@@ -107,7 +103,6 @@ class TestReload:
             host: str = Field()
             port: int = Field(default=8000)
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("HOST", "localhost")
         monkeypatch.setenv("PORT", "3000")
 
@@ -127,7 +122,6 @@ class TestReload:
             host: str = Field()
             port: int = Field()
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("HOST", "localhost")
         monkeypatch.setenv("PORT", "8000")
 
@@ -150,7 +144,6 @@ class TestReload:
         class Config(DotEnvConfig):
             port: int = Field(ge=1, le=65535)
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("PORT", "8000")
         config = Config.load()
         assert config.port == 8000
@@ -173,7 +166,6 @@ class TestReload:
             debug: bool = Field()
             hosts: list[str] = Field()
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("PORT", "8000")
         monkeypatch.setenv("DEBUG", "false")
         monkeypatch.setenv("HOSTS", "localhost,example.com")
@@ -198,7 +190,6 @@ class TestReload:
         class Config(DotEnvConfig):
             value: str = Field()
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("VALUE", "original")
         config = Config.load()
         original_id = id(config)
@@ -216,7 +207,6 @@ class TestReload:
         class Config(DotEnvConfig):
             db_url: str = Field(alias="DATABASE_URL")
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/db1")
         config = Config.load()
         assert config.db_url == "postgresql://localhost/db1"
@@ -231,7 +221,6 @@ class TestReload:
         class Config(DotEnvConfig):
             counter: int = Field()
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("COUNTER", "1")
         config = Config.load()
         assert config.counter == 1
@@ -255,7 +244,6 @@ class TestReload:
         class Config(DotEnvConfig):
             tenant_id: UUID = Field()
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("TENANT_ID", "550e8400-e29b-41d4-a716-446655440000")
         config = Config.load()
         assert str(config.tenant_id) == "550e8400-e29b-41d4-a716-446655440000"
@@ -318,7 +306,6 @@ class TestReload:
             value: str = Field()
 
         # Set env var before load
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("VALUE", "env_value")
 
         # Load with override=False (env vars take precedence)
@@ -338,7 +325,6 @@ class TestReload:
         class Config(DotEnvConfig):
             value: str = Field()
 
-        monkeypatch.delenv("DOTENV_DIR", raising=False)
         monkeypatch.setenv("VALUE", "test")
         config = Config.load(env="prod", override=False)
 
