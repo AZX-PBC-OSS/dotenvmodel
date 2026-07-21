@@ -295,7 +295,8 @@ class MultipleValidationErrors(DotEnvModelError):
             if error.value is not None:
                 msg += f"   Value: {_value_repr(error.value)}\n"
             msg += f"   Environment variable: {error.env_var_name}\n"
-            if hasattr(error, "constraint") and error.constraint is not None:  # type: ignore[attr-defined]
-                msg += f"   Constraint: {error.constraint}\n"  # type: ignore[attr-defined]
+            constraint = getattr(error, "constraint", None)
+            if constraint is not None:
+                msg += f"   Constraint: {constraint}\n"
             msg += "\n"
         return msg.rstrip()
