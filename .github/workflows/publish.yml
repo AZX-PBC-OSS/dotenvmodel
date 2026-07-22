@@ -4,22 +4,86 @@ on:
   push:
     tags:
       - "v*"
+  workflow_call:
+    inputs:
+      tag_name:
+        required: true
+        type: string
   workflow_dispatch:
     inputs:
       tag_name:
-        description: Existing tag to build and publish (e.g. v0.5.2)
+        description: Existing tag to build and publish (e.g. v0.5.3)
         required: true
         type: string
 
 permissions:
   contents: read
-  id-token: write
 
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.tag_name || github.ref }}
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v8.3.2
+        with:
+          enable-cache: true
+
+      - name: Set up Python
+        run: uv python install 3.12
+
+      - name: Verify tag matches project version
+        env:
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+          DIST_NAME: dotenvmodel
+        run: |
+          set -euo pipefail
+          tag="${TAG_NAME#v}"
+          version="$(uv run python -c 'import importlib.metadata, os; print(importlib.metadata.version(os.environ["DIST_NAME"]))')"
+          echo "Tag: ${tag}"
+          echo "project version: ${version}"
+          if [ "${tag}" != "${version}" ]; then
+            echo "::error::Git tag ${tag} does not match project version ${version}"
+            exit 1
+          fi
+
+      - name: Build sdist and wheel
+        run: uv build
+
+      - name: Smoke-test install from wheel
+        env:
+          DIST_NAME: dotenvmodel
+        run: |
+          uv venv test-env
+          uv pip install --python test-env/bin/python dist/*.whl
+          cd /tmp && $GITHUB_WORKSPACE/test-env/bin/python -c "import importlib.metadata, os; print(importlib.metadata.version(os.environ['DIST_NAME']))"
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v7.0.1
+        with:
+          name: release-dist
+          path: dist/
+          retention-days: 7
+
   publish:
-    uses: AZX-PBC-OSS/gha-workflows/.github/workflows/publish-python.yml@e35a12e79176f05980e6f93eb2b935132df10672
-    with:
-      dist-name: dotenvmodel
-      python-version: "3.12"
-      tag-name: ${{ inputs.tag_name || github.ref_name }}
-    secrets: inherit
+    needs: [build]
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/dotenvmodel/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download build artifacts
+        uses: actions/download-artifact@v8.0.1
+        with:
+          name: release-dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          attestations: false
