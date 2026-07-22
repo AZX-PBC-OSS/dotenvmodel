@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "dotenvmodel"
-version = "0.5.0"
+version = "0.5.1"
 description = "Type-safe environment configuration with automatic .env file loading"
 readme = "README.md"
 requires-python = ">=3.12"
