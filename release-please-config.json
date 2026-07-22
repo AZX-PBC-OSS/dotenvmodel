@@ -1,6 +1,7 @@
 {
   "release-type": "python",
   "package-name": "dotenvmodel",
+  "include-component-in-tag": false,
   "packages": {
     ".": {
       "component": "dotenvmodel",
@@ -9,8 +10,7 @@
       "extra-files": [
         {
           "type": "generic",
-          "path": "dotenvmodel/__init__.py",
-          "jsonpath": "$.__version__"
+          "path": "dotenvmodel/__init__.py"
         }
       ]
     }
