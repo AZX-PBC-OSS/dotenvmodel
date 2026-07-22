@@ -4,122 +4,22 @@ on:
   push:
     tags:
       - "v*"
-  workflow_call:
-    inputs:
-      release_created:
-        required: true
-        type: boolean
-      tag_name:
-        required: true
-        type: string
   workflow_dispatch:
     inputs:
       tag_name:
-        description: Existing tag to build and publish (e.g. v0.2.0)
+        description: Existing tag to build and publish (e.g. v0.5.2)
         required: true
         type: string
 
 permissions:
   contents: read
+  id-token: write
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    if: ${{ github.event_name != 'workflow_call' || inputs.release_created }}
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          ref: ${{ inputs.tag_name || github.ref }}
-
-      - name: Install uv
-        uses: astral-sh/setup-uv@v8.3.2
-        with:
-          enable-cache: true
-
-      - name: Set up Python
-        run: uv python install 3.12
-
-      - name: Verify tag matches pyproject.toml version
-        env:
-          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
-        run: |
-          set -euo pipefail
-          tag="${TAG_NAME#v}"
-          version="$(uv run python -c 'import importlib.metadata; print(importlib.metadata.version("dotenvmodel"))')"
-          echo "Tag: ${tag}"
-          echo "pyproject.toml version: ${version}"
-          if [ "${tag}" != "${version}" ]; then
-            echo "::error::Git tag ${tag} does not match pyproject.toml version ${version}"
-            exit 1
-          fi
-
-      - name: Build sdist and wheel
-        run: uv build
-
-      - name: Assert wheel ships required non-code artifacts
-        run: |
-          set -euo pipefail
-          listing="$(uv run python -m zipfile -l dist/*.whl)"
-          echo "$listing" | grep -q "dotenvmodel/py.typed"
-
-      - name: Test installation from wheel
-        run: |
-          uv venv test-env
-          uv pip install --python test-env/bin/python dist/*.whl
-          cd /tmp && $GITHUB_WORKSPACE/test-env/bin/python -c "import dotenvmodel; print(dotenvmodel.__version__)"
-
-      - name: Upload build artifacts
-        uses: actions/upload-artifact@v7.0.1
-        with:
-          name: release-dist
-          path: dist/
-          retention-days: 7
-
   publish:
-    needs: [build]
-    runs-on: ubuntu-latest
-    environment:
-      name: pypi
-      url: https://pypi.org/project/dotenvmodel/
-    permissions:
-      id-token: write
-    steps:
-      - name: Download build artifacts
-        uses: actions/download-artifact@v8.0.1
-        with:
-          name: release-dist
-          path: dist/
-
-      - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          # Attestations are only valid when publish.yml is the top-level
-          # workflow: the Sigstore certificate's Build Config URI records the
-          # top-level workflow, and PyPI verifies it against the trusted
-          # publisher (publish.yml). Via workflow_call from release-please.yml
-          # the certificate says release-please.yml instead, which PyPI
-          # rejects with a 400 (attestations under reusable workflows are
-          # unsupported). The OIDC token validates on both paths because PyPI
-          # matches it against job_workflow_ref (publish.yml).
-          attestations: ${{ github.event_name != 'workflow_call' }}
-
-# Trusted Publishing (OIDC): no API token is stored in this repo.
-# The PyPI trusted publisher is configured for:
-#   Repository: AZX-PBC-OSS/dotenvmodel
-#   Workflow: publish.yml
-#   Environment: (Any)
-# This workflow is invoked three ways:
-#   1. Direct push of a v* tag (manual fallback path).
-#   2. workflow_call from release-please.yml after release-please creates a
-#      release (tags made with GITHUB_TOKEN don't trigger push workflows, so
-#      release-please.yml calls this workflow explicitly).
-#   3. workflow_dispatch with an existing tag name (manual republish, e.g.
-#      recovering a failed automated publish).
-# The PyPI publisher stays valid for all paths because it targets
-# publish.yml — the file containing the publish job. For reusable-workflow
-# calls, PyPI matches the OIDC token against the called workflow's filename
-# (job_workflow_ref), which is still this one. Sigstore attestations are the
-# exception: their certificate records the TOP-LEVEL workflow, so they are
-# only enabled when publish.yml runs top-level (paths 1 and 3); see the
-# attestations input on the publish step.
-# See https://docs.pypi.org/trusted-publishers/ for setup details.
+    uses: AZX-PBC-OSS/gha-workflows/.github/workflows/publish-python.yml@e35a12e79176f05980e6f93eb2b935132df10672
+    with:
+      dist-name: dotenvmodel
+      python-version: "3.12"
+      tag-name: ${{ inputs.tag_name || github.ref_name }}
+    secrets: inherit

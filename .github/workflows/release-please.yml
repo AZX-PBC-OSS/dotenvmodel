@@ -28,8 +28,9 @@ jobs:
   publish:
     needs: release-please
     if: needs.release-please.outputs.release_created
-    uses: ./.github/workflows/publish.yml
+    uses: AZX-PBC-OSS/gha-workflows/.github/workflows/publish-python.yml@e35a12e79176f05980e6f93eb2b935132df10672
     with:
-      release_created: true
-      tag_name: ${{ needs.release-please.outputs.tag_name }}
+      dist-name: dotenvmodel
+      python-version: "3.12"
+      tag-name: ${{ needs.release-please.outputs.tag_name }}
     secrets: inherit
