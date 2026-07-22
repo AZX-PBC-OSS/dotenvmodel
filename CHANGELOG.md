@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.4](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.5.3...v0.5.4) (2026-07-22)
+
+
+### Continuous Integration
+
+* local self-contained publish workflow with attestations off ([#46](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/46)) ([1f72487](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/1f724876329ef4244c78289d7524254405b4cc10))
+
 ## [0.5.3](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.5.2...v0.5.3) (2026-07-22)
 
 
