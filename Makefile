@@ -6,7 +6,7 @@ help:
 	@echo "  make test         - Run tests with coverage"
 	@echo "  make lint         - Run ruff linter and formatting check (matches CI)"
 	@echo "  make format       - Format code with ruff"
-	@echo "  make type-check   - Run pyright type checker"
+	@echo "  make type-check   - Run pyright type checker (dotenvmodel + tests)"
 	@echo "  make clean        - Clean build artifacts"
 	@echo "  make build        - Build package"
 	@echo "  make publish      - Publish to PyPI"
@@ -26,7 +26,7 @@ format:
 	uv run ruff check --fix .
 
 type-check:
-	uv run pyright dotenvmodel
+	uv run pyright dotenvmodel tests
 
 clean:
 	rm -rf build/
