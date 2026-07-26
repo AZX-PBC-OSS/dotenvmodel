@@ -201,9 +201,78 @@ config.reload(override=False)
 
     `DotEnvConfig` instances are **not thread-safe** during `reload()`. In multi-threaded environments, use a lock or create a new instance via `load()` instead of calling `reload()` on a shared instance.
 
+## Caching a Singleton Instance
+
+Application code often needs a single shared config instance that is loaded once and reused everywhere. `cached()` provides this as a built-in: it loads on first call and returns the same instance on every subsequent call, with no re-reading of the environment.
+
+```python
+class AppConfig(DotEnvConfig):
+    database_url: str = Field()
+    port: int = Field(default=8000)
+
+# First call loads from the environment.
+config = AppConfig.cached()
+
+# Subsequent calls return the same instance — no re-read.
+same_config = AppConfig.cached()
+assert config is same_config
+```
+
+### Lazy and Thread-Safe
+
+`cached()` is lazy — the environment is only read on the very first call. It is also thread-safe: if multiple threads call `cached()` simultaneously before the first load completes, they race on a lock and only one thread calls `load()`; the rest block and receive the same instance. Once the cache is warm, all calls return immediately without acquiring the lock.
+
+Arguments (`env`, `override`, `env_dir`) are only used on the first call. Once the instance is cached, subsequent calls ignore any arguments and return the existing instance.
+
+### Resetting the Cache for Tests
+
+`reset_cached()` clears this class's cached instance so the next `cached()` call will call `load()` again. This is the supported way to exercise more than one configuration in the same process — for example, in a pytest fixture:
+
+```python
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def reset_config_cache():
+    yield
+    AppConfig.reset_cached()
+
+
+def test_dev_config(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/dev")
+    config = AppConfig.cached()
+    assert "dev" in config.database_url
+
+
+def test_prod_config(monkeypatch):
+    monkeypatch.setenv("DATABASE_URL", "postgresql://localhost/prod")
+    config = AppConfig.cached()
+    assert "prod" in config.database_url
+```
+
+`reset_cached()` only affects the exact class it is called on — other `DotEnvConfig` subclasses keep their own cached instances.
+
+!!! note "Per-class isolation"
+
+    The cache is keyed by the exact class object. `SubA.cached()` and `SubB.cached()` cache independently, and a subclass of a subclass does not inherit its parent's cached instance.
+
+### Scoped Overrides for Tests
+
+`cached_override()` is a context manager that temporarily replaces the cached instance for the duration of a `with` block and automatically restores the previous state on exit — even if the block raises an exception. This is inspired by Django's `override_settings` and is the preferred idiom when a single test needs a different config without an `autouse` fixture:
+
+```python
+def test_with_custom_config():
+    test_config = AppConfig.load_from_dict({"DATABASE_URL": "postgresql://localhost/test"})
+    with AppConfig.cached_override(test_config):
+        assert AppConfig.cached() is test_config
+    # Previous cached() state (or absence of one) is restored here.
+```
+
+Because restoration is automatic and unconditional, `cached_override()` cannot forget to clean up — unlike a bare `reset_cached()` call that a test author might omit, silently leaking state into the next test.
+
 ## See Also
 
 - [Loading API Reference](../api-reference/loading.md) — `load_env_files()`, `get_env_var()`, `get_env_var_name()`
-- [DotEnvConfig API Reference](../api-reference/config.md) — `load()`, `reload()`, `load_from_dict()`
+- [DotEnvConfig API Reference](../api-reference/config.md) — `load()`, `reload()`, `load_from_dict()`, `cached()`, `reset_cached()`, `cached_override()`
 - [Field Definitions](fields.md) — Defining config fields with `Field()`
 - [Validation](validation.md) — Constraint validation

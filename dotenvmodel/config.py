@@ -2,7 +2,9 @@
 
 import builtins
 import logging
-from collections.abc import Callable
+import threading
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, Literal, Self, cast
 
@@ -232,6 +234,10 @@ def _raise_collected(errors: list[ValidationError] | None) -> None:
     if len(errors) == 1:
         raise errors[0]
     raise MultipleValidationErrors(errors)
+
+
+_cached_instances: dict[type["DotEnvConfig"], "DotEnvConfig"] = {}
+_cached_lock = threading.Lock()
 
 
 class DotEnvConfig(metaclass=ConfigMeta):
@@ -680,6 +686,172 @@ class DotEnvConfig(metaclass=ConfigMeta):
         instance._load_fields(data, validate=validate)
         instance._loaded = True
         return instance
+
+    @classmethod
+    def cached(
+        cls,
+        env: str | None = None,
+        *,
+        override: bool = True,
+        env_dir: Path | None = None,
+    ) -> Self:
+        """Return the process-wide cached instance for this exact config class, loading it on first call.
+
+        Lazy and thread-safe: concurrent first callers race on a lock; only one
+        calls `load()`, the rest block and receive the same instance. Subsequent
+        calls (from any thread) return the cached instance immediately without
+        re-reading the environment, ignoring any arguments passed after the first
+        call.
+
+        This is the supported way to get a single shared instance in application
+        code. Call `reset_cached()` to force the next `cached()` call to reload —
+        this is the supported way to exercise more than one configuration in the
+        same process (e.g. between tests).
+
+        When to use:
+            - In application code to obtain a single shared config instance
+            - When you want lazy initialization that reads the environment only
+              on first access
+            - When you need thread-safe singleton initialization without
+              hand-rolling your own lock
+
+        When NOT to use:
+            - In tests that need different configurations per test: use
+              `load()` or `load_from_dict()` instead, or call `reset_cached()`
+              in a fixture between tests
+            - When you need multiple instances with different parameters
+
+        Args:
+            env: Environment name (e.g., "dev", "prod", "test"). If None, reads
+                from the `ENV` environment variable, defaults to "dev". Only
+                used on the first call; ignored once the cache is warm.
+            override: If True, .env file values override existing environment
+                variables. If False, existing env vars take precedence over
+                .env files. Only used on the first call; ignored once the cache
+                is warm.
+            env_dir: Custom base directory for .env files. If None, uses the
+                `DOTENV_DIR` environment variable or current working directory.
+                Only used on the first call; ignored once the cache is warm.
+
+        Returns:
+            The cached instance of this config class. On the first call, loads
+            and caches a new instance; on subsequent calls, returns the
+            existing cached instance.
+
+        Raises:
+            MissingFieldError: If a required field is not set in any source
+                (only on first call)
+            TypeCoercionError: If a value cannot be coerced to the field type
+                (only on first call)
+            ConstraintViolationError: If a value fails validation constraints
+                (only on first call)
+            MultipleValidationErrors: If multiple fields fail validation
+                simultaneously (only on first call)
+
+        Example:
+            ```python
+            # Application code — first call loads, rest reuse
+            config = AppConfig.cached()
+            config.port  # 8000
+
+            # In tests, reset between configurations
+            AppConfig.reset_cached()
+            os.environ["PORT"] = "9000"
+            config = AppConfig.cached()
+            config.port  # 9000
+            ```
+
+        See Also:
+            - [`load`][dotenvmodel.config.DotEnvConfig.load]: One-shot loading.
+            - [`reset_cached`][dotenvmodel.config.DotEnvConfig.reset_cached]:
+              Clear the cache for this class.
+        """
+        try:
+            return cast(Self, _cached_instances[cls])
+        except KeyError:
+            pass
+
+        with _cached_lock:
+            try:
+                return cast(Self, _cached_instances[cls])
+            except KeyError:
+                pass
+
+            instance = cls.load(env=env, override=override, env_dir=env_dir)
+            _cached_instances[cls] = instance
+            return instance
+
+    @classmethod
+    def reset_cached(cls) -> None:
+        """Clear this class's cached `cached()` instance, if any.
+
+        The next call to `cached()` will call `load()` again. Use this in test
+        teardown/fixtures when a test changes environment variables and needs
+        `cached()` to observe the new values. Only affects this exact class —
+        other `DotEnvConfig` subclasses' caches are unaffected.
+
+        When to use:
+            - In test fixtures to ensure each test gets a fresh config
+            - After changing environment variables to force `cached()` to
+              re-read the environment
+
+        Example:
+            ```python
+            @pytest.fixture(autouse=True)
+            def reset_config_cache():
+                yield
+                AppConfig.reset_cached()
+            ```
+
+        See Also:
+            - [`cached`][dotenvmodel.config.DotEnvConfig.cached]: Get the
+              cached instance.
+        """
+        with _cached_lock:
+            _cached_instances.pop(cls, None)
+
+    @classmethod
+    @contextmanager
+    def cached_override(cls, instance: Self) -> Iterator[Self]:
+        """Temporarily replace the cached() instance for this class inside a `with` block.
+
+        On exit, restores whatever was cached before the `with` block started —
+        the previous instance if one existed, or nothing (uncached) if `cached()`
+        had never been called. Restoration happens even if the `with` block
+        raises. This is a scoped, self-cleaning alternative to `reset_cached()`
+        for tests: a forgotten `reset_cached()` call leaks state into the next
+        test, whereas `cached_override()` cannot forget to clean up.
+
+        Args:
+            instance: The instance `cached()` should return for the duration of
+                the `with` block.
+
+        Yields:
+            `instance`, unchanged, for convenience in a `with ... as` binding.
+
+        Example:
+            ```python
+            test_config = AppConfig.load_from_dict({"PORT": "9000"})
+            with AppConfig.cached_override(test_config):
+                assert AppConfig.cached() is test_config
+            # Previous cached() state (or absence of one) is restored here.
+            ```
+
+        See Also:
+            - [`reset_cached`][dotenvmodel.config.DotEnvConfig.reset_cached]:
+              Unconditional clear, not scoped/auto-restoring.
+        """
+        with _cached_lock:
+            previous = _cached_instances.get(cls)
+            _cached_instances[cls] = instance
+        try:
+            yield instance
+        finally:
+            with _cached_lock:
+                if previous is not None:
+                    _cached_instances[cls] = previous
+                else:
+                    _cached_instances.pop(cls, None)
 
     def post_load(self) -> list[ValidationError] | None:
         """Normalize derived values and run cross-field validation after loading.
