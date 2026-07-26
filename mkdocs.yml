@@ -112,6 +112,7 @@ nav:
       - Describe Formatters: api-reference/describe-formatters.md
       - Describe Renderers: api-reference/describe-renderers.md
       - Loading: api-reference/loading.md
+      - Caching: api-reference/caching.md
       - Coercion: api-reference/coercion.md
       - Validation: api-reference/validation.md
       - Logging Config: api-reference/logging-config.md

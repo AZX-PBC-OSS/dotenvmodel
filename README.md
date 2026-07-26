@@ -1329,7 +1329,17 @@ def test_with_fixture(test_config):
     assert test_config.database_url == "sqlite:///:memory:"
 ```
 
-The `load_from_dict()` examples above test a config's field-parsing logic directly. If your application code calls `AppConfig.cached()` — the process-wide singleton — one test's cached instance will leak into the next. Use `reset_cached()` in an `autouse` fixture, or `cached_override()` for a scoped per-test override:
+The `load_from_dict()` examples above test a config's field-parsing logic directly. If your application code calls `AppConfig.cached()` — the process-wide singleton — one test's cached instance will leak into the next. Use `cached_override()` for a scoped, self-restoring per-test override (the recommended approach, structurally similar to Django's `override_settings`):
+
+```python
+def test_with_custom_config():
+    test_config = AppConfig.load_from_dict({"DATABASE_URL": "postgresql://localhost/test"})
+    with AppConfig.cached_override(test_config):
+        assert AppConfig.cached() is test_config
+    # Previous cached() state is automatically restored here — even if the test raised.
+```
+
+For a blanket teardown between test modules, use `reset_cached()` in an `autouse` fixture:
 
 ```python
 @pytest.fixture(autouse=True)
@@ -1338,7 +1348,7 @@ def reset_config_cache():
     AppConfig.reset_cached()
 ```
 
-See the [Caching guide](docs/guides/loading.md#caching-a-singleton-instance) for the full lazy/thread-safe singleton pattern and its test idioms.
+See the [Caching guide](docs/guides/loading.md#caching-a-singleton-instance) for the full lazy/thread-safe singleton pattern, test idioms, and guidance on when `cached()` is appropriate vs. dependency injection.
 
 ## Best Practices
 
@@ -1387,7 +1397,7 @@ See the [Caching guide](docs/guides/loading.md#caching-a-singleton-instance) for
 - Call `load()` once at startup and share the immutable instance, or use `cached()` for a built-in lazy, thread-safe singleton that does this automatically
 - If you need to reload, use a lock or create a new instance via `load()` instead of calling `reload()` on a shared instance
 - Avoid calling `reload()` while request handlers are reading config values
-- In tests that need different configurations per test, call `reset_cached()` in a fixture to clear the `cached()` singleton between tests
+- In tests that need different configurations per test, use `cached_override()` for a scoped, self-restoring override, or `reset_cached()` in a fixture for a blanket teardown between test modules
 
 ### Union Types (Non-Optional)
 

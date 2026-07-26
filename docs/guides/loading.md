@@ -222,11 +222,35 @@ assert config is same_config
 
 `cached()` is lazy — the environment is only read on the very first call. It is also thread-safe: if multiple threads call `cached()` simultaneously before the first load completes, they race on a lock and only one thread calls `load()`; the rest block and receive the same instance. Once the cache is warm, all calls return immediately without acquiring the lock.
 
-Arguments (`env`, `override`, `env_dir`) are only used on the first call. Once the instance is cached, subsequent calls ignore any arguments and return the existing instance.
+Arguments (`env`, `override`, `env_dir`) are only used on the first call. Once the instance is cached, subsequent calls ignore any arguments and return the existing instance. A warning is logged if non-default arguments are passed against an already-warm cache.
+
+Calling `.reload()` on the cached instance mutates it in place; since `cached()` always returns the same object, subsequent `cached()` calls see the reloaded values.
+
+!!! warning "Reentrant `cached()` calls raise `RuntimeError`"
+
+    Calling `cached()` reentrantly for the same class from within that class's own `load()` / `post_load()` / field `validator` hooks raises `RuntimeError` instead of deadlocking. This prevents a self-deadlock that would otherwise occur because the internal lock is not reentrant. If a hook needs the config instance mid-load, call `cls.load()` directly or use `self`.
+
+### Scoped Overrides for Tests
+
+`cached_override()` is a context manager that temporarily replaces the cached instance for the duration of a `with` block and automatically restores the previous state on exit — even if the block raises an exception. This is the **primary recommended tool** for test isolation when a single test needs a different config: it is structurally the same shape as Django's `override_settings` — scoped, self-restoring, and failure-safe.
+
+```python
+def test_with_custom_config():
+    test_config = AppConfig.load_from_dict({"DATABASE_URL": "postgresql://localhost/test"})
+    with AppConfig.cached_override(test_config):
+        assert AppConfig.cached() is test_config
+    # Previous cached() state (or absence of one) is restored here.
+```
+
+Because restoration is automatic and unconditional, `cached_override()` cannot forget to clean up — unlike a bare `reset_cached()` call that a test author might omit, silently leaking state into the next test. Reach for `cached_override()` first when a single test needs a different config; use `reset_cached()` (below) for the coarser case of a blanket fixture teardown between test modules.
+
+!!! warning "Not for concurrent use"
+
+    `cached_override()` is not designed for use while other threads may concurrently call `cached()` on the same class. The override window is not synchronized against concurrent readers beyond the lock-protected set/restore operations, so overlapping a `cached_override()` block with genuinely concurrent cross-thread `cached()` calls is racy in terms of which threads observe the override vs. the restored value. No data corruption occurs, but the observed value is unspecified during the transition.
 
 ### Resetting the Cache for Tests
 
-`reset_cached()` clears this class's cached instance so the next `cached()` call will call `load()` again. This is the supported way to exercise more than one configuration in the same process — for example, in a pytest fixture:
+`reset_cached()` is the coarser fallback: it unconditionally clears this class's cached instance so the next `cached()` call will call `load()` again. It is useful as a blanket fixture teardown — for example, clearing everything between test modules — but `cached_override()` (above) should be reached for first when a single test needs a different config, because `reset_cached()` cannot auto-restore and a forgotten call leaks state.
 
 ```python
 import pytest
@@ -256,19 +280,14 @@ def test_prod_config(monkeypatch):
 
     The cache is keyed by the exact class object. `SubA.cached()` and `SubB.cached()` cache independently, and a subclass of a subclass does not inherit its parent's cached instance.
 
-### Scoped Overrides for Tests
+### Not a Substitute for Dependency Injection
 
-`cached_override()` is a context manager that temporarily replaces the cached instance for the duration of a `with` block and automatically restores the previous state on exit — even if the block raises an exception. This is inspired by Django's `override_settings` and is the preferred idiom when a single test needs a different config without an `autouse` fixture:
+`cached()` is a single-config-per-process convenience for the common case where there is no DI framework already in place — scripts, simple services, cases where threading a config parameter through every call is impractical. It is **not** a substitute for dependency injection in applications that already have one.
 
-```python
-def test_with_custom_config():
-    test_config = AppConfig.load_from_dict({"DATABASE_URL": "postgresql://localhost/test"})
-    with AppConfig.cached_override(test_config):
-        assert AppConfig.cached() is test_config
-    # Previous cached() state (or absence of one) is restored here.
-```
+- **pydantic-settings** deliberately does not ship a singleton/caching accessor itself; the maintainers' position (see [pydantic/pydantic-settings#410](https://github.com/pydantic/pydantic-settings/issues/410)) is that singleton lifecycle is an application concern, not the settings library's.
+- **FastAPI**'s own documented settings pattern uses `functools.lru_cache` to avoid re-loading, but the load-bearing mechanism for *testability* is `app.dependency_overrides` — FastAPI's docs steer people toward DI-based overriding for tests, with the cache being an optimization, not the override mechanism.
 
-Because restoration is automatic and unconditional, `cached_override()` cannot forget to clean up — unlike a bare `reset_cached()` call that a test author might omit, silently leaking state into the next test.
+**Conclusion:** if your application already has an app/request object and a DI mechanism (FastAPI, Flask with a DI extension, `svcs`-style service locators, etc.), prefer injecting the loaded config instance through that mechanism rather than calling `cached()` from deep in the call stack. `cached()` and `cached_override()` exist for the case where there is no DI framework to thread the config through — not to encourage a global-singleton-everywhere style in apps that already have DI.
 
 ## See Also
 

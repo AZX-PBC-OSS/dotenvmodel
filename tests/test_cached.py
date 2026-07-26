@@ -1,18 +1,21 @@
 """Tests for the cached() / reset_cached() singleton accessor on DotEnvConfig."""
 
+import contextlib
 import threading
 from typing import assert_type
 
 import pytest
 
-from dotenvmodel import DotEnvConfig, Field
+from dotenvmodel import DotEnvConfig, Field, ValidationError
 
-
-@pytest.fixture(autouse=True)
-def _reset_cached_after_test():
-    """Ensure no cached instances leak between tests."""
-    yield
-    DotEnvConfig.reset_cached()
+# A project-wide autouse fixture in tests/conftest.py snapshots and restores
+# _cached_instance on every alive DotEnvConfig subclass after each test.
+# For THIS file, the fixture is belt-and-suspenders: every test defines its
+# own locally-scoped subclass, so when the test function returns, the class
+# object becomes unreachable and both the class and its cached instance are
+# collectible — isolation is a structural property, not something a fixture
+# provides. The conftest fixture protects other test files that use
+# module-scoped or imported config classes and call cached().
 
 
 class TestCached:
@@ -284,3 +287,146 @@ class TestCached:
 
         assert ConfigA.cached() is a
         assert ConfigB.cached() is b
+
+
+class TestCachedLifecycle:
+    """Tests for cache storage lifecycle and reentrancy safety."""
+
+    def test_dynamic_class_and_cache_are_garbage_collected(self, monkeypatch) -> None:
+        """A dynamically-created config class and its cached instance are reclaimed once unreachable."""
+        import gc
+        import weakref
+
+        def make_and_cache() -> weakref.ReferenceType[type[DotEnvConfig]]:
+            class Ephemeral(DotEnvConfig):
+                value: str = Field(default="x")
+
+            Ephemeral.cached()
+            return weakref.ref(Ephemeral)
+
+        class_ref = make_and_cache()
+        gc.collect()
+        assert class_ref() is None
+
+    def test_reentrant_cached_call_raises_instead_of_hanging(self, monkeypatch) -> None:
+        """Calling cached() reentrantly from post_load() raises RuntimeError instead of deadlocking."""
+        monkeypatch.setenv("VALUE", "x")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+            def post_load(self) -> list[ValidationError] | None:
+                Config.cached()
+                return None
+
+        with pytest.raises(RuntimeError, match="Reentrant cached"):
+            Config.cached()
+
+    def test_cached_reflects_reload_on_instance(self, monkeypatch) -> None:
+        """reload() on the cached instance is visible to subsequent cached() calls (shared reference)."""
+        monkeypatch.setenv("VALUE", "first")
+
+        class Config(DotEnvConfig):
+            value: str = Field()
+
+        config = Config.cached()
+        assert config.value == "first"
+
+        monkeypatch.setenv("VALUE", "second")
+        config.reload()
+        assert config.value == "second"
+
+        again = Config.cached()
+        assert again is config
+        assert again.value == "second"
+
+
+class TestCachedStateFixture:
+    """Tests proving the conftest.py autouse fixture correctly restores cached state.
+
+    We drive the fixture's generator function manually (call it, advance past
+    ``yield`` with ``next()``, mutate state, then trigger teardown with
+    ``next()`` again) instead of using ``pytester``. This directly tests the
+    actual fixture function from ``tests/conftest.py`` (not a duplicate in a
+    nested conftest), is simpler with no plugin configuration, and faithfully
+    simulates pytest's own behavior of calling ``next(gen)`` in a finally
+    block to run teardown even when the test body raises.
+    """
+
+    def test_cached_instance_excluded_from_get_fields(self) -> None:
+        """``_cached_instance`` is not swept into ``get_fields()`` by the metaclass."""
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        fields = Config.get_fields()
+        assert "_cached_instance" not in fields
+        assert "_loaded" not in fields
+        assert "_load_env" not in fields
+
+    def test_fixture_removes_new_cached_entry(self) -> None:
+        """The fixture removes cached entries that did not exist before the test."""
+        from tests.conftest import _snapshot_and_restore_cached_state
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        gen = _snapshot_and_restore_cached_state()
+        next(gen)  # setup — snapshot taken (Config has no cached entry)
+
+        Config.cached()
+        assert "_cached_instance" in Config.__dict__
+
+        with pytest.raises(StopIteration):
+            next(gen)  # teardown
+
+        assert "_cached_instance" not in Config.__dict__
+
+    def test_fixture_restores_previous_cached_value(self) -> None:
+        """The fixture restores a pre-existing cached value after the test."""
+        from tests.conftest import _snapshot_and_restore_cached_state
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        original = Config.cached()
+
+        gen = _snapshot_and_restore_cached_state()
+        next(gen)  # setup — snapshot records Config._cached_instance = original
+
+        override = Config.load_from_dict({"VALUE": "override"})
+        Config._cached_instance = override
+        assert Config.__dict__["_cached_instance"] is override
+
+        with pytest.raises(StopIteration):
+            next(gen)  # teardown
+
+        assert Config.__dict__["_cached_instance"] is original
+
+    def test_fixture_restores_even_when_test_raises(self) -> None:
+        """The fixture's teardown runs and restores state even when the test body raises.
+
+        We simulate pytest's behavior of calling ``next(gen)`` in a finally
+        block: the teardown code after ``yield`` executes regardless of
+        whether the test body raised an exception.
+        """
+        from tests.conftest import _snapshot_and_restore_cached_state
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        gen = _snapshot_and_restore_cached_state()
+        next(gen)  # setup
+
+        Config.cached()
+        assert "_cached_instance" in Config.__dict__
+
+        try:
+            try:
+                raise RuntimeError("simulated test failure")
+            finally:
+                with contextlib.suppress(StopIteration):
+                    next(gen)  # teardown runs despite the exception
+        except RuntimeError:
+            pass  # expected — the simulated test failure
+
+        assert "_cached_instance" not in Config.__dict__

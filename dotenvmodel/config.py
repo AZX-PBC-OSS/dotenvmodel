@@ -2,15 +2,20 @@
 
 import builtins
 import logging
-import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Literal, Self, cast
+from typing import Any, ClassVar, Literal, Self, cast
 
 from typing_extensions import TypeForm
 
 from dotenvmodel._constants import LOGGER_NAME
+from dotenvmodel.caching import (
+    acquire_cached,
+    begin_override,
+    clear_cached,
+    end_override,
+)
 from dotenvmodel.coercion import apply_strip, coerce_value, is_string_like_type, unwrap_optional
 from dotenvmodel.exceptions import (
     ConstraintViolationError,
@@ -236,10 +241,6 @@ def _raise_collected(errors: list[ValidationError] | None) -> None:
     raise MultipleValidationErrors(errors)
 
 
-_cached_instances: dict[type["DotEnvConfig"], "DotEnvConfig"] = {}
-_cached_lock = threading.Lock()
-
-
 class DotEnvConfig(metaclass=ConfigMeta):
     """Base class for type-safe environment configuration.
 
@@ -302,6 +303,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
     _load_env: str | None = None  # Store the env used during load
     _load_override: bool = True  # Store the override flag used during load
     _load_env_dir: Path | None = None  # Store the env_dir used during load
+    _cached_instance: ClassVar["DotEnvConfig | None"] = None
     env_prefix: str = ""  # Class-level prefix for environment variables (default: no prefix)
     strip_strings: bool = False  # Class-level default for stripping string values
 
@@ -701,7 +703,17 @@ class DotEnvConfig(metaclass=ConfigMeta):
         calls `load()`, the rest block and receive the same instance. Subsequent
         calls (from any thread) return the cached instance immediately without
         re-reading the environment, ignoring any arguments passed after the first
-        call.
+        call (a warning is logged if non-default arguments are passed against an
+        already-warm cache).
+
+        The cached instance is stored as a private class attribute on the config
+        class itself (not in a module-level registry), so its lifetime is tied
+        to the class object — when nothing else references the class, both the
+        class and its cached instance become collectible together.
+
+        Calling `.reload()` on the returned instance mutates it in place; since
+        `cached()` always returns the same object, subsequent `cached()` calls
+        see the reloaded values.
 
         This is the supported way to get a single shared instance in application
         code. Call `reset_cached()` to force the next `cached()` call to reload —
@@ -720,6 +732,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
               `load()` or `load_from_dict()` instead, or call `reset_cached()`
               in a fixture between tests
             - When you need multiple instances with different parameters
+            - From within a `post_load()` hook or field `validator` on the same
+              class: a reentrant `cached()` call for the same class while its
+              first load is still in flight raises `RuntimeError` (see below)
 
         Args:
             env: Environment name (e.g., "dev", "prod", "test"). If None, reads
@@ -747,6 +762,11 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 (only on first call)
             MultipleValidationErrors: If multiple fields fail validation
                 simultaneously (only on first call)
+            RuntimeError: If `cached()` is called reentrantly for the same
+                class from within that class's own `load()` / `post_load()` /
+                field `validator` hooks. This would otherwise deadlock on the
+                non-reentrant internal lock. Hooks that need the instance
+                mid-load should call `cls.load()` directly or use `self`.
 
         Example:
             ```python
@@ -759,27 +779,20 @@ class DotEnvConfig(metaclass=ConfigMeta):
             os.environ["PORT"] = "9000"
             config = AppConfig.cached()
             config.port  # 9000
+
+            # reload() on the cached instance is visible to all holders
+            config.reload(env="prod")
+            AppConfig.cached().port  # prod value
             ```
 
         See Also:
             - [`load`][dotenvmodel.config.DotEnvConfig.load]: One-shot loading.
             - [`reset_cached`][dotenvmodel.config.DotEnvConfig.reset_cached]:
               Clear the cache for this class.
+            - [`cached_override`][dotenvmodel.config.DotEnvConfig.cached_override]:
+              Scoped, self-restoring override for tests.
         """
-        try:
-            return cast(Self, _cached_instances[cls])
-        except KeyError:
-            pass
-
-        with _cached_lock:
-            try:
-                return cast(Self, _cached_instances[cls])
-            except KeyError:
-                pass
-
-            instance = cls.load(env=env, override=override, env_dir=env_dir)
-            _cached_instances[cls] = instance
-            return instance
+        return cast(Self, acquire_cached(cls, env, override, env_dir))
 
     @classmethod
     def reset_cached(cls) -> None:
@@ -807,8 +820,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
             - [`cached`][dotenvmodel.config.DotEnvConfig.cached]: Get the
               cached instance.
         """
-        with _cached_lock:
-            _cached_instances.pop(cls, None)
+        clear_cached(cls)
 
     @classmethod
     @contextmanager
@@ -821,6 +833,17 @@ class DotEnvConfig(metaclass=ConfigMeta):
         raises. This is a scoped, self-cleaning alternative to `reset_cached()`
         for tests: a forgotten `reset_cached()` call leaks state into the next
         test, whereas `cached_override()` cannot forget to clean up.
+
+        Warning:
+            ``cached_override()`` is not designed for use while other threads
+            may concurrently call ``cached()`` on the same class. The override
+            window (between the initial set and the final restore) is not
+            synchronized against concurrent readers beyond the lock-protected
+            set/restore operations themselves. Overlapping a
+            ``cached_override()`` block with genuinely concurrent cross-thread
+            ``cached()`` calls on the same class is unsupported and racy in
+            terms of *which* threads observe the override vs. the restored
+            value during the transition, even though no data corruption occurs.
 
         Args:
             instance: The instance `cached()` should return for the duration of
@@ -841,17 +864,11 @@ class DotEnvConfig(metaclass=ConfigMeta):
             - [`reset_cached`][dotenvmodel.config.DotEnvConfig.reset_cached]:
               Unconditional clear, not scoped/auto-restoring.
         """
-        with _cached_lock:
-            previous = _cached_instances.get(cls)
-            _cached_instances[cls] = instance
+        had_cached, previous = begin_override(cls, instance)
         try:
             yield instance
         finally:
-            with _cached_lock:
-                if previous is not None:
-                    _cached_instances[cls] = previous
-                else:
-                    _cached_instances.pop(cls, None)
+            end_override(cls, had_cached, previous)
 
     def post_load(self) -> list[ValidationError] | None:
         """Normalize derived values and run cross-field validation after loading.
