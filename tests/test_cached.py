@@ -355,6 +355,7 @@ class TestCachedStateFixture:
 
     def test_cached_instance_excluded_from_get_fields(self) -> None:
         """``_cached_instance`` is not swept into ``get_fields()`` by the metaclass."""
+
         class Config(DotEnvConfig):
             value: str = Field(default="x")
 

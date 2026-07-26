@@ -4,7 +4,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make install      - Install package and dev dependencies"
 	@echo "  make test         - Run tests with coverage"
-	@echo "  make lint         - Run ruff linter"
+	@echo "  make lint         - Run ruff linter and formatting check (matches CI)"
 	@echo "  make format       - Format code with ruff"
 	@echo "  make type-check   - Run pyright type checker"
 	@echo "  make clean        - Clean build artifacts"
@@ -19,6 +19,7 @@ test:
 
 lint:
 	uv run ruff check .
+	uv run ruff format --check .
 
 format:
 	uv run ruff format .
