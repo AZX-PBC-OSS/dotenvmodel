@@ -2,6 +2,7 @@
 
 import contextlib
 import threading
+from pathlib import Path
 from typing import assert_type
 
 import pytest
@@ -155,6 +156,20 @@ class TestCached:
         config = MyConfig.cached()
         assert_type(config, MyConfig)
         assert config.value == "typed"
+
+    def test_warning_logged_when_non_default_args_on_warm_cache(self, monkeypatch, caplog) -> None:
+        """cached() logs a warning when non-default args are passed against a warm cache."""
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        Config.cached()
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            result = Config.cached(env="prod", override=False, env_dir=Path("/tmp"))
+
+        assert result is Config.cached()
+        assert any("arguments were ignored" in r.message for r in caplog.records)
 
     def test_thread_safety_concurrent_first_access(self, monkeypatch) -> None:
         """Concurrent first callers all receive the same single instance."""

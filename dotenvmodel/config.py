@@ -729,8 +729,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
         When NOT to use:
             - In tests that need different configurations per test: use
-              `load()` or `load_from_dict()` instead, or call `reset_cached()`
-              in a fixture between tests
+              `cached_override()` for a scoped, self-restoring override, or call
+              `reset_cached()` in a fixture between tests; otherwise use
+              `load()` or `load_from_dict()` instead of `cached()`
             - When you need multiple instances with different parameters
             - From within a `post_load()` hook or field `validator` on the same
               class: a reentrant `cached()` call for the same class while its
@@ -800,8 +801,10 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
         The next call to `cached()` will call `load()` again. Use this in test
         teardown/fixtures when a test changes environment variables and needs
-        `cached()` to observe the new values. Only affects this exact class —
-        other `DotEnvConfig` subclasses' caches are unaffected.
+        `cached()` to observe the new values. For a single test that needs a
+        different config, prefer `cached_override()` (scoped and self-restoring).
+        Only affects this exact class — other `DotEnvConfig` subclasses' caches
+        are unaffected.
 
         When to use:
             - In test fixtures to ensure each test gets a fresh config

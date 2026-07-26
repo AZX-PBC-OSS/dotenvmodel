@@ -5,8 +5,7 @@ from collections.abc import Iterator
 import pytest
 
 from dotenvmodel import DotEnvConfig
-
-_CACHED_ATTR = "_cached_instance"
+from dotenvmodel.caching import _CACHED_ATTR
 
 
 def _all_dotenv_subclasses() -> Iterator[type[DotEnvConfig]]:
