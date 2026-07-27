@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.1](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.6.0...v0.6.1) (2026-07-27)
+
+
+### Bug Fixes
+
+* eliminate cross-class reentrancy deadlock in cached() locking ([#52](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/52)) ([592297a](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/592297a1823b2c26b00f974882834e5ace8bc968))
+
 ## [0.6.0](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.5.4...v0.6.0) (2026-07-27)
 
 
