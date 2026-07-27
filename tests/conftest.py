@@ -9,15 +9,20 @@ from dotenvmodel.caching import _CACHED_ATTR
 
 
 def _all_dotenv_subclasses() -> Iterator[type[DotEnvConfig]]:
-    """Yield every currently-alive DotEnvConfig subclass, recursively.
+    """Yield DotEnvConfig itself and every currently-alive subclass, recursively.
+
+    The stack is seeded with the base class so its own cached state (if any)
+    is snapshotted/restored too — the caching module stores instances as
+    per-class ``__dict__`` entries, and the base class is itself a valid
+    ``cached()`` target.
 
     ``type.__subclasses__()`` returns only direct subclasses and uses weak
     references internally — it does not prevent garbage collection of classes
     with no other referents (verified empirically). We walk the tree
     depth-first, deduplicating by identity to handle diamond hierarchies.
     """
-    seen: set[type] = set()
-    stack: list[type] = list(DotEnvConfig.__subclasses__())
+    seen: set[type[DotEnvConfig]] = set()
+    stack: list[type[DotEnvConfig]] = [DotEnvConfig]
     while stack:
         cls = stack.pop()
         if cls in seen:
@@ -29,19 +34,19 @@ def _all_dotenv_subclasses() -> Iterator[type[DotEnvConfig]]:
 
 @pytest.fixture(autouse=True)
 def _restore_cached_state() -> Iterator[None]:
-    """Snapshot and restore ``_cached_instance`` on every DotEnvConfig subclass.
+    """Snapshot and restore ``_cached_instance`` on DotEnvConfig and every subclass.
 
     Function-scoped (autouse) because cached state must be restored after
     every single test — a session-scoped fixture would allow one test's
     cached instance to leak into the next.
 
-    At setup, walks every alive ``DotEnvConfig`` subclass and records which
-    ones have their *own* ``_cached_instance`` entry in ``cls.__dict__``
-    (not inherited) and what the value is. At teardown, restores the exact
-    pre-test state: classes that had an entry get it restored; classes
-    discovered after the test that have an entry but did not have one before
-    get it removed. Classes that had no entry before and still have none
-    are untouched.
+    At setup, walks ``DotEnvConfig`` itself and every alive subclass and
+    records which ones have their *own* ``_cached_instance`` entry in
+    ``cls.__dict__`` (not inherited) and what the value is. At teardown,
+    restores the exact pre-test state: classes that had an entry get it
+    restored; classes discovered after the test that have an entry but did
+    not have one before get it removed. Classes that had no entry before
+    and still have none are untouched.
 
     This is a belt-and-suspenders safety net. For test files where every
     test defines its own locally-scoped subclass, isolation is already
@@ -54,7 +59,7 @@ def _restore_cached_state() -> Iterator[None]:
 
 
 def _snapshot_and_restore_cached_state() -> Iterator[None]:
-    """Generator that snapshots and restores ``_cached_instance`` on all subclasses.
+    """Generator that snapshots/restores ``_cached_instance`` on the base class and all subclasses.
 
     This is the underlying logic for :func:`_restore_cached_state`, extracted
     as a plain (non-fixture) generator so it can also be driven manually in

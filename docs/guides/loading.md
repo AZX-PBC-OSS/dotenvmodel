@@ -228,7 +228,11 @@ Calling `.reload()` on the cached instance mutates it in place; since `cached()`
 
 !!! warning "Reentrant `cached()` calls raise `RuntimeError`"
 
-    Calling `cached()` reentrantly for the same class from within that class's own `load()` / `post_load()` / field `validator` hooks raises `RuntimeError` instead of deadlocking. This prevents a self-deadlock that would otherwise occur because the internal lock is not reentrant. If a hook needs the config instance mid-load, call `cls.load()` directly or use `self`.
+    Calling `cached()` reentrantly for the same class from within that class's own `load()` / `post_load()` / field `validator` hooks raises `RuntimeError`. The internal lock is reentrant, so the nested call would not deadlock — it would see a cold cache and recurse into `load()` without bound, which is why it is rejected. If a hook needs the config instance mid-load, use `self`, or call `cls.load()` directly with re-entry guarding (an unconditional `cls.load()` inside `post_load()` re-runs the hooks and recurses until `RecursionError`).
+
+    Calling `cached()`, `reset_cached()`, or `cached_override()` for **other** classes from those hooks is supported — for example, one class's `post_load()` may call `cached()` on another config class. However, calling `reset_cached()` or entering `cached_override()` for the **same** class whose first load is still in flight raises `RuntimeError` (the load installs its instance when it completes, which would silently undo the reset or discard the override). A circular cross-class hook chain (A's hook loads B, B's hook loads A) collapses back onto the first class and likewise raises `RuntimeError`.
+
+    Hooks must not block on another thread (e.g. `thread.join()`) that touches the cache: the internal lock is held for the duration of a load, so the joining thread would hold the lock while the joined thread waits for it — a deadlock the reentrant lock cannot prevent.
 
 ### Scoped Overrides for Tests
 
