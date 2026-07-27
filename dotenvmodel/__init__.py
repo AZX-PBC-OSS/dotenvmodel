@@ -37,7 +37,7 @@ Public API:
       Exception hierarchy
 """
 
-__version__ = "0.5.4"  # x-release-please-version
+__version__ = "0.6.0"  # x-release-please-version
 __author__ = "AZX, PBC."
 __email__ = "oss@azx.io"
 __license__ = "MIT"
