@@ -14,11 +14,34 @@ when nothing else references the class, both the class and its cached instance
 become collectible together.
 
 Thread safety:
-    A module-level ``threading.Lock`` guards the double-checked-locking
+    A module-level ``threading.RLock`` guards the double-checked-locking
     initialization path and the save/restore operations in
-    ``begin_override`` / ``end_override``.  A ``threading.local`` set tracks
-    same-thread reentrant ``cached()`` calls to detect and raise on
-    self-deadlock scenarios.
+    ``begin_override`` / ``end_override``. A reentrant lock (not a plain
+    ``Lock``) is required because the lock is held across ``cls.load()``:
+    ``post_load()`` and field ``validator`` hooks may legitimately touch
+    the cache for *other* classes, and a non-reentrant lock would
+    self-deadlock that thread. With a single module-level lock no
+    cross-thread circular wait is possible — only one thread holds the
+    lock and the holder always proceeds — so same-thread nesting is the
+    only reentrancy case, and the RLock permits it.
+
+    Same-class operations from within that class's own in-flight load
+    remain invalid: ``cached()`` cannot return an instance that does not
+    exist yet (the nested call would see a cold cache and recurse into
+    ``load()`` without bound), and ``reset_cached()`` /
+    ``cached_override()`` would be silently overwritten when the
+    in-flight load installs its instance. A ``threading.local`` set
+    tracks classes currently loading on each thread; all three entry
+    points raise ``RuntimeError`` in that case. A circular cross-class
+    chain (A's hook loads B, B's hook loads A) collapses back onto the
+    first class and is likewise reported as a same-class
+    ``RuntimeError``.
+
+    One residual hazard sits outside this design: the lock is held for
+    the duration of a load, so a hook must not block on another thread
+    (e.g. ``thread.join()``) that touches the cache — the joining thread
+    holds the lock while the joined thread waits for it, deadlocking
+    both.
 """
 
 from __future__ import annotations
@@ -36,16 +59,19 @@ if TYPE_CHECKING:
 logger = logging.getLogger(LOGGER_NAME)
 
 _CACHED_ATTR = "_cached_instance"
-_cache_lock = threading.Lock()
+_cache_lock = threading.RLock()
 _loading_local = threading.local()
 
 
 def _get_loading_set() -> set[type[DotEnvConfig]]:
     """Get or create this thread's set of classes currently loading via ``cached()``.
 
-    Used for reentrant-``cached()`` deadlock detection. Each thread gets its
-    own independent set, so only same-thread reentrancy is detected (the actual
-    deadlock scenario). Cross-thread contention is handled by ``_cache_lock``.
+    Used to reject same-class cache operations issued from within that
+    class's own in-flight load (see the module docstring's "Thread safety"
+    section). Each thread gets its own independent set, so only same-thread
+    reentrancy is detected (the only possible nesting case with a single
+    module-level reentrant lock). Cross-thread contention is handled by
+    ``_cache_lock``.
     """
     loading = cast("set[type[DotEnvConfig]] | None", getattr(_loading_local, "loading", None))
     if loading is None:
@@ -83,7 +109,23 @@ def clear_cached(cls: type[DotEnvConfig]) -> None:
 
     Safe to call when no entry is present (no-op). Acquires ``_cache_lock``
     internally.
+
+    Raises:
+        RuntimeError: If called for *cls* from within that class's own
+            in-flight load (``load()`` / ``post_load()`` / field
+            ``validator`` on this thread): the load installs its instance
+            when it completes, which would silently undo this reset.
+            Cross-class calls (e.g. one class's hook resetting another
+            class) are permitted.
     """
+    if cls in _get_loading_set():
+        raise RuntimeError(
+            f"reset_cached() called for {cls.__name__} from within that "
+            f"class's own in-flight load (load() / post_load() / "
+            f"validator): the load installs its instance when it "
+            f"completes, which would silently undo this reset. Call "
+            f"reset_cached() after the load finishes instead."
+        )
     with _cache_lock:
         if has_cached(cls):
             delattr(cls, _CACHED_ATTR)
@@ -105,8 +147,10 @@ def acquire_cached(
 
     Reentrant calls for the same class from within that class's own
     ``load()`` / ``post_load()`` / field ``validator`` hooks are detected
-    via a thread-local loading set and raise ``RuntimeError`` instead of
-    deadlocking on the non-reentrant lock.
+    via a thread-local loading set and raise ``RuntimeError``: the internal
+    lock is reentrant, so the nested call would not deadlock — it would see
+    a cold cache and recurse into ``load()`` without bound. Nested calls
+    for *other* classes from those hooks proceed normally.
 
     Args:
         cls: The config class to cache for.
@@ -119,7 +163,8 @@ def acquire_cached(
 
     Raises:
         RuntimeError: If ``cached()`` is called reentrantly for *cls* from
-            within that class's own load path.
+            within that class's own load path (including via a circular
+            cross-class hook chain that collapses back onto *cls*).
     """
     cached = get_cached(cls)
     if cached is not None:
@@ -141,13 +186,18 @@ def acquire_cached(
             f"Reentrant cached() call detected for {cls.__name__}: "
             f"cached() was called for this class while its first "
             f"cached() call is still loading (inside load() / "
-            f"post_load() / validator). This would deadlock. "
-            f"If a hook needs the instance mid-load, call cls.load() "
-            f"directly or use 'self' instead."
+            f"post_load() / validator). The instance cannot exist until "
+            f"that first load completes, and the internal lock is "
+            f"reentrant, so the nested call would recurse into load() "
+            f"without bound. If a hook needs the instance mid-load, call "
+            f"cls.load() directly or use 'self' instead."
         )
 
-    loading.add(cls)
     try:
+        # add() lives inside the try so a (vanishingly unlikely) async
+        # exception between add and try-entry cannot strand cls in this
+        # thread's loading set; discard() on a never-added class is a no-op.
+        loading.add(cls)
         with _cache_lock:
             cached = get_cached(cls)
             if cached is not None:
@@ -169,7 +219,23 @@ def begin_override(
     Returns ``(had_cached, previous)`` so the caller can restore the exact
     pre-override state via :func:`end_override`. Acquires ``_cache_lock``
     internally.
+
+    Raises:
+        RuntimeError: If called for *cls* from within that class's own
+            in-flight load (``load()`` / ``post_load()`` / field
+            ``validator`` on this thread): the load installs its instance
+            when it completes, which would silently discard the override.
+            Cross-class calls (e.g. one class's hook overriding another
+            class) are permitted.
     """
+    if cls in _get_loading_set():
+        raise RuntimeError(
+            f"cached_override() entered for {cls.__name__} from within "
+            f"that class's own in-flight load (load() / post_load() / "
+            f"validator): the load installs its instance when it "
+            f"completes, which would silently discard the override. "
+            f"Enter the override after the load finishes instead."
+        )
     with _cache_lock:
         had_cached = has_cached(cls)
         previous = get_cached(cls)
@@ -187,6 +253,10 @@ def end_override(
     If *had_cached* is ``True``, *previous* is restored. If *had_cached* is
     ``False`` and *cls* now has its own entry (e.g. a concurrent ``cached()``
     call set one), the entry is removed. Acquires ``_cache_lock`` internally.
+
+    No same-class loading guard here by design: via ``cached_override()`` this
+    only runs after a successful :func:`begin_override`, which already
+    rejected entry while *cls* was loading on this thread.
     """
     with _cache_lock:
         if had_cached:

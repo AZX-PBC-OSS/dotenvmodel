@@ -303,7 +303,13 @@ class DotEnvConfig(metaclass=ConfigMeta):
     _load_env: str | None = None  # Store the env used during load
     _load_override: bool = True  # Store the override flag used during load
     _load_env_dir: Path | None = None  # Store the env_dir used during load
-    _cached_instance: ClassVar["DotEnvConfig | None"] = None
+    # Bare annotation only — no assignment. An actual `= None` here would
+    # place a real entry in DotEnvConfig.__dict__, making has_cached() treat
+    # the base class as already-cached and letting reset_cached() delete the
+    # class-body default (an irreversible process-wide mutation). The
+    # annotation alone gives type checkers the declaration without a runtime
+    # entry; per-subclass entries are set by the caching module.
+    _cached_instance: ClassVar["DotEnvConfig | None"]
     env_prefix: str = ""  # Class-level prefix for environment variables (default: no prefix)
     strip_strings: bool = False  # Class-level default for stripping string values
 
@@ -735,7 +741,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
             - When you need multiple instances with different parameters
             - From within a `post_load()` hook or field `validator` on the same
               class: a reentrant `cached()` call for the same class while its
-              first load is still in flight raises `RuntimeError` (see below)
+              first load is still in flight raises `RuntimeError` (see below).
+              Calling `cached()` for *other* classes from those hooks is
+              supported.
 
         Args:
             env: Environment name (e.g., "dev", "prod", "test"). If None, reads
@@ -765,9 +773,17 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 simultaneously (only on first call)
             RuntimeError: If `cached()` is called reentrantly for the same
                 class from within that class's own `load()` / `post_load()` /
-                field `validator` hooks. This would otherwise deadlock on the
-                non-reentrant internal lock. Hooks that need the instance
-                mid-load should call `cls.load()` directly or use `self`.
+                field `validator` hooks. The internal lock is reentrant, so
+                the nested call would not deadlock — it would see a cold
+                cache and recurse into `load()` without bound; it is rejected
+                instead. A circular cross-class hook chain (A's hook loads B,
+                B's hook loads A) collapses back onto the first class and
+                raises the same `RuntimeError`. Calling `cached()` for other
+                classes from hooks is supported. Hooks that need the instance
+                mid-load should use `self`, or call `cls.load()` directly with
+                re-entry guarding (an unconditional `cls.load()` inside
+                `post_load()` re-runs the hooks and recurses until
+                `RecursionError`).
 
         Example:
             ```python
@@ -810,6 +826,13 @@ class DotEnvConfig(metaclass=ConfigMeta):
             - In test fixtures to ensure each test gets a fresh config
             - After changing environment variables to force `cached()` to
               re-read the environment
+
+        Raises:
+            RuntimeError: If called for this class from within that same
+                class's own in-flight `load()` / `post_load()` / field
+                `validator` hook: the load installs its instance when it
+                completes, which would silently undo the reset. Calling
+                `reset_cached()` for *other* classes from hooks is fine.
 
         Example:
             ```python
@@ -854,6 +877,13 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
         Yields:
             `instance`, unchanged, for convenience in a `with ... as` binding.
+
+        Raises:
+            RuntimeError: If entered for this class from within that same
+                class's own in-flight `load()` / `post_load()` / field
+                `validator` hook: the load installs its instance when it
+                completes, which would silently discard the override. Calling
+                `cached_override()` for *other* classes from hooks is fine.
 
         Example:
             ```python
