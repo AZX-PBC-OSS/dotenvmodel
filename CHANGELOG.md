@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.5.4...v0.6.0) (2026-07-27)
+
+
+### Features
+
+* add cached() / reset_cached() / cached_override() singleton accessor ([#51](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/51)) ([638f8cc](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/638f8cc8515398ad983bc321dd906effe4df17f8))
+
+
+### Continuous Integration
+
+* bump setup-uv to v9.0.0 ([#48](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/48)) ([21bcc4f](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/21bcc4f96d16a1e075d3c59ba3291cb1f9af32d6))
+
 ## [0.5.4](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.5.3...v0.5.4) (2026-07-22)
 
 
