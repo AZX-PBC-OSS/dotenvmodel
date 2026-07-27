@@ -53,7 +53,7 @@ jobs:
         run: uv sync --group dev
 
       - name: Type check with pyright
-        run: uv run pyright dotenvmodel
+        run: uv run pyright dotenvmodel tests
 
   test:
     runs-on: ubuntu-latest

@@ -2,13 +2,20 @@
 
 import builtins
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
+from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, Literal, Self, cast
+from typing import Any, ClassVar, Literal, Self, cast
 
 from typing_extensions import TypeForm
 
 from dotenvmodel._constants import LOGGER_NAME
+from dotenvmodel.caching import (
+    acquire_cached,
+    begin_override,
+    clear_cached,
+    end_override,
+)
 from dotenvmodel.coercion import apply_strip, coerce_value, is_string_like_type, unwrap_optional
 from dotenvmodel.exceptions import (
     ConstraintViolationError,
@@ -296,6 +303,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
     _load_env: str | None = None  # Store the env used during load
     _load_override: bool = True  # Store the override flag used during load
     _load_env_dir: Path | None = None  # Store the env_dir used during load
+    _cached_instance: ClassVar["DotEnvConfig | None"] = None
     env_prefix: str = ""  # Class-level prefix for environment variables (default: no prefix)
     strip_strings: bool = False  # Class-level default for stripping string values
 
@@ -680,6 +688,190 @@ class DotEnvConfig(metaclass=ConfigMeta):
         instance._load_fields(data, validate=validate)
         instance._loaded = True
         return instance
+
+    @classmethod
+    def cached(
+        cls,
+        env: str | None = None,
+        *,
+        override: bool = True,
+        env_dir: Path | None = None,
+    ) -> Self:
+        """Return the process-wide cached instance for this exact config class, loading it on first call.
+
+        Lazy and thread-safe: concurrent first callers race on a lock; only one
+        calls `load()`, the rest block and receive the same instance. Subsequent
+        calls (from any thread) return the cached instance immediately without
+        re-reading the environment, ignoring any arguments passed after the first
+        call (a warning is logged if non-default arguments are passed against an
+        already-warm cache).
+
+        The cached instance is stored as a private class attribute on the config
+        class itself (not in a module-level registry), so its lifetime is tied
+        to the class object — when nothing else references the class, both the
+        class and its cached instance become collectible together.
+
+        Calling `.reload()` on the returned instance mutates it in place; since
+        `cached()` always returns the same object, subsequent `cached()` calls
+        see the reloaded values.
+
+        This is the supported way to get a single shared instance in application
+        code. Call `reset_cached()` to force the next `cached()` call to reload —
+        this is the supported way to exercise more than one configuration in the
+        same process (e.g. between tests).
+
+        When to use:
+            - In application code to obtain a single shared config instance
+            - When you want lazy initialization that reads the environment only
+              on first access
+            - When you need thread-safe singleton initialization without
+              hand-rolling your own lock
+
+        When NOT to use:
+            - In tests that need different configurations per test: use
+              `cached_override()` for a scoped, self-restoring override, or call
+              `reset_cached()` in a fixture between tests; otherwise use
+              `load()` or `load_from_dict()` instead of `cached()`
+            - When you need multiple instances with different parameters
+            - From within a `post_load()` hook or field `validator` on the same
+              class: a reentrant `cached()` call for the same class while its
+              first load is still in flight raises `RuntimeError` (see below)
+
+        Args:
+            env: Environment name (e.g., "dev", "prod", "test"). If None, reads
+                from the `ENV` environment variable, defaults to "dev". Only
+                used on the first call; ignored once the cache is warm.
+            override: If True, .env file values override existing environment
+                variables. If False, existing env vars take precedence over
+                .env files. Only used on the first call; ignored once the cache
+                is warm.
+            env_dir: Custom base directory for .env files. If None, uses the
+                `DOTENV_DIR` environment variable or current working directory.
+                Only used on the first call; ignored once the cache is warm.
+
+        Returns:
+            The cached instance of this config class. On the first call, loads
+            and caches a new instance; on subsequent calls, returns the
+            existing cached instance.
+
+        Raises:
+            MissingFieldError: If a required field is not set in any source
+                (only on first call)
+            TypeCoercionError: If a value cannot be coerced to the field type
+                (only on first call)
+            ConstraintViolationError: If a value fails validation constraints
+                (only on first call)
+            MultipleValidationErrors: If multiple fields fail validation
+                simultaneously (only on first call)
+            RuntimeError: If `cached()` is called reentrantly for the same
+                class from within that class's own `load()` / `post_load()` /
+                field `validator` hooks. This would otherwise deadlock on the
+                non-reentrant internal lock. Hooks that need the instance
+                mid-load should call `cls.load()` directly or use `self`.
+
+        Example:
+            ```python
+            # Application code — first call loads, rest reuse
+            config = AppConfig.cached()
+            config.port  # 8000
+
+            # In tests, reset between configurations
+            AppConfig.reset_cached()
+            os.environ["PORT"] = "9000"
+            config = AppConfig.cached()
+            config.port  # 9000
+
+            # reload() on the cached instance is visible to all holders
+            config.reload(env="prod")
+            AppConfig.cached().port  # prod value
+            ```
+
+        See Also:
+            - [`load`][dotenvmodel.config.DotEnvConfig.load]: One-shot loading.
+            - [`reset_cached`][dotenvmodel.config.DotEnvConfig.reset_cached]:
+              Clear the cache for this class.
+            - [`cached_override`][dotenvmodel.config.DotEnvConfig.cached_override]:
+              Scoped, self-restoring override for tests.
+        """
+        return cast(Self, acquire_cached(cls, env, override, env_dir))
+
+    @classmethod
+    def reset_cached(cls) -> None:
+        """Clear this class's cached `cached()` instance, if any.
+
+        The next call to `cached()` will call `load()` again. Use this in test
+        teardown/fixtures when a test changes environment variables and needs
+        `cached()` to observe the new values. For a single test that needs a
+        different config, prefer `cached_override()` (scoped and self-restoring).
+        Only affects this exact class — other `DotEnvConfig` subclasses' caches
+        are unaffected.
+
+        When to use:
+            - In test fixtures to ensure each test gets a fresh config
+            - After changing environment variables to force `cached()` to
+              re-read the environment
+
+        Example:
+            ```python
+            @pytest.fixture(autouse=True)
+            def reset_config_cache():
+                yield
+                AppConfig.reset_cached()
+            ```
+
+        See Also:
+            - [`cached`][dotenvmodel.config.DotEnvConfig.cached]: Get the
+              cached instance.
+        """
+        clear_cached(cls)
+
+    @classmethod
+    @contextmanager
+    def cached_override(cls, instance: Self) -> Iterator[Self]:
+        """Temporarily replace the cached() instance for this class inside a `with` block.
+
+        On exit, restores whatever was cached before the `with` block started —
+        the previous instance if one existed, or nothing (uncached) if `cached()`
+        had never been called. Restoration happens even if the `with` block
+        raises. This is a scoped, self-cleaning alternative to `reset_cached()`
+        for tests: a forgotten `reset_cached()` call leaks state into the next
+        test, whereas `cached_override()` cannot forget to clean up.
+
+        Warning:
+            ``cached_override()`` is not designed for use while other threads
+            may concurrently call ``cached()`` on the same class. The override
+            window (between the initial set and the final restore) is not
+            synchronized against concurrent readers beyond the lock-protected
+            set/restore operations themselves. Overlapping a
+            ``cached_override()`` block with genuinely concurrent cross-thread
+            ``cached()`` calls on the same class is unsupported and racy in
+            terms of *which* threads observe the override vs. the restored
+            value during the transition, even though no data corruption occurs.
+
+        Args:
+            instance: The instance `cached()` should return for the duration of
+                the `with` block.
+
+        Yields:
+            `instance`, unchanged, for convenience in a `with ... as` binding.
+
+        Example:
+            ```python
+            test_config = AppConfig.load_from_dict({"PORT": "9000"})
+            with AppConfig.cached_override(test_config):
+                assert AppConfig.cached() is test_config
+            # Previous cached() state (or absence of one) is restored here.
+            ```
+
+        See Also:
+            - [`reset_cached`][dotenvmodel.config.DotEnvConfig.reset_cached]:
+              Unconditional clear, not scoped/auto-restoring.
+        """
+        had_cached, previous = begin_override(cls, instance)
+        try:
+            yield instance
+        finally:
+            end_override(cls, had_cached, previous)
 
     def post_load(self) -> list[ValidationError] | None:
         """Normalize derived values and run cross-field validation after loading.
