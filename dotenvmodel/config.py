@@ -655,6 +655,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
         logger.info(f"{self.__class__.__name__} configuration reloaded successfully")
         logger.debug(f"Reloaded fields: {', '.join(self._fields.keys())}")
 
+        self._load_env = reload_env
+        self._load_override = reload_override
+        self._load_env_dir = reload_env_dir
         return self
 
     @classmethod

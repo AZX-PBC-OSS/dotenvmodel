@@ -236,6 +236,28 @@ class TestCached:
             reported = list(caplog.records)
         assert reported == []
 
+    def test_reload_with_new_env_updates_loaded_with(self, monkeypatch) -> None:
+        """``reload(env=...)`` must update ``loaded_with()`` so a subsequent bare reload reuses it.
+
+        Without this, ``reload(env="prod")`` leaves ``loaded_with()`` reporting the original
+        env, a bare ``reload()`` silently reverts to it, and ``cached()`` warns on the
+        env the instance actually holds because ``loaded_with()`` still says the old one.
+        """
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        instance = Config.load(env="dev", override=False)
+        assert instance.loaded_with() == ("dev", False, None)
+
+        instance.reload(env="prod")
+
+        assert instance.loaded_with() == ("prod", False, None)
+
+        instance.reload()
+
+        assert instance.loaded_with() == ("prod", False, None)
+
     def test_a_reset_cache_is_not_judged_against_the_arguments_it_dropped(
         self, monkeypatch, caplog
     ) -> None:
