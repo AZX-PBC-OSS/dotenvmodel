@@ -222,9 +222,9 @@ assert config is same_config
 
 `cached()` is lazy — the environment is only read on the very first call. It is also thread-safe: if multiple threads call `cached()` simultaneously before the first load completes, they race on a lock and only one thread calls `load()`; the rest block and receive the same instance. Once the cache is warm, all calls return immediately without acquiring the lock.
 
-Arguments (`env`, `override`, `env_dir`) are only used on the first call. Once the instance is cached, subsequent calls ignore any arguments and return the existing instance. A warning is logged if non-default arguments are passed against an already-warm cache.
+Arguments (`env`, `override`, `env_dir`) are only used on the first call. Once the instance is cached, subsequent calls ignore any arguments and return the existing instance. A warning is logged when the arguments passed disagree with the ones the cached instance was loaded with — so an accessor that consistently passes the same non-default arguments (`override=False`, say) stays silent, while a caller asking for something the cache does not hold is told what it actually holds.
 
-Calling `.reload()` on the cached instance mutates it in place; since `cached()` always returns the same object, subsequent `cached()` calls see the reloaded values.
+Calling `.reload()` on the cached instance mutates it in place; since `cached()` always returns the same object, subsequent `cached()` calls see the reloaded values. A reload also updates what the instance reports as its load arguments, so `reload(env="prod")` is reflected by both `loaded_with()` and the comparison above.
 
 !!! warning "Reentrant `cached()` calls raise `RuntimeError`"
 
