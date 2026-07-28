@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.3](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.6.2...v0.6.3) (2026-07-28)
+
+
+### Bug Fixes
+
+* reload() must update the instance's recorded load arguments ([#56](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/56)) ([a293461](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/a2934612da52130cc539be65bd1fe196a4381dde))
+
 ## [0.6.2](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.6.1...v0.6.2) (2026-07-28)
 
 
