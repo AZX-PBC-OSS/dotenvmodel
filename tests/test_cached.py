@@ -210,6 +210,32 @@ class TestCached:
         assert third is first
         assert repeats_reported == []
 
+    def test_a_bare_reload_keeps_the_precedence_the_cache_was_loaded_with(
+        self, monkeypatch, caplog
+    ) -> None:
+        """The SIGHUP shape: ``reload()`` with no arguments must not revert to ``override=True``.
+
+        A hot-reload handler calls ``reload()`` bare. If that silently reset precedence to
+        "``.env`` files beat the process environment", a running service would flip to the
+        opposite configuration on a signal it was told was a no-op refresh — and an accessor
+        passing ``override=False`` would then also start warning, having never changed.
+        """
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        instance = Config.cached(override=False, env_dir=Path("/tmp"))
+        assert instance.loaded_with() == (None, False, Path("/tmp"))
+
+        instance.reload()
+
+        assert instance.loaded_with() == (None, False, Path("/tmp"))
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            assert Config.cached(override=False, env_dir=Path("/tmp")) is instance
+            reported = list(caplog.records)
+        assert reported == []
+
     def test_a_reset_cache_is_not_judged_against_the_arguments_it_dropped(
         self, monkeypatch, caplog
     ) -> None:

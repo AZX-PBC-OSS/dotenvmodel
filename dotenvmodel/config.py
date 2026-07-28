@@ -567,6 +567,20 @@ class DotEnvConfig(metaclass=ConfigMeta):
         instance._load_env_dir = env_dir
         return instance
 
+    def loaded_with(self) -> tuple[str | None, bool, Path | None]:
+        """The ``(env, override, env_dir)`` this instance was last loaded with.
+
+        `reload()` uses it to repeat a load without restating its arguments — so a SIGHUP
+        handler calling `reload()` with no arguments keeps the original precedence rather than
+        silently reverting to `override=True`. `cached()`'s warm path uses it to tell a caller
+        who agrees with how the cache was built from one who disagrees.
+
+        Exposed rather than read field-by-field so there is one definition of "how was this
+        loaded", and callers outside this class do not reach into three private attributes.
+        Values reflect the most recent `reload()`, not only the original `load()`.
+        """
+        return (self._load_env, self._load_override, self._load_env_dir)
+
     def reload(
         self,
         env: str | None = None,
@@ -628,9 +642,10 @@ class DotEnvConfig(metaclass=ConfigMeta):
         """
         logger.info(f"Reloading {self.__class__.__name__} configuration")
 
-        reload_env = env if env is not None else self._load_env
-        reload_override = override if override is not None else self._load_override
-        reload_env_dir = env_dir if env_dir is not None else self._load_env_dir
+        loaded_env, loaded_override, loaded_env_dir = self.loaded_with()
+        reload_env = env if env is not None else loaded_env
+        reload_override = override if override is not None else loaded_override
+        reload_env_dir = env_dir if env_dir is not None else loaded_env_dir
 
         load_env_files(env=reload_env, override=reload_override, env_dir=reload_env_dir)
 
@@ -709,8 +724,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
         calls `load()`, the rest block and receive the same instance. Subsequent
         calls (from any thread) return the cached instance immediately without
         re-reading the environment, ignoring any arguments passed after the first
-        call (a warning is logged if non-default arguments are passed against an
-        already-warm cache).
+        call (a warning is logged if arguments that disagree with the ones
+        that populated the cache are passed against an already-warm cache).
 
         The cached instance is stored as a private class attribute on the config
         class itself (not in a module-level registry), so its lifetime is tied
@@ -897,11 +912,11 @@ class DotEnvConfig(metaclass=ConfigMeta):
             - [`reset_cached`][dotenvmodel.config.DotEnvConfig.reset_cached]:
               Unconditional clear, not scoped/auto-restoring.
         """
-        had_cached, previous, previous_args = begin_override(cls, instance)
+        had_cached, previous = begin_override(cls, instance)
         try:
             yield instance
         finally:
-            end_override(cls, had_cached, previous, previous_args)
+            end_override(cls, had_cached, previous)
 
     def post_load(self) -> list[ValidationError] | None:
         """Normalize derived values and run cross-field validation after loading.
