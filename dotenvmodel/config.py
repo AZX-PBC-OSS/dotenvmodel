@@ -897,11 +897,11 @@ class DotEnvConfig(metaclass=ConfigMeta):
             - [`reset_cached`][dotenvmodel.config.DotEnvConfig.reset_cached]:
               Unconditional clear, not scoped/auto-restoring.
         """
-        had_cached, previous = begin_override(cls, instance)
+        had_cached, previous, previous_args = begin_override(cls, instance)
         try:
             yield instance
         finally:
-            end_override(cls, had_cached, previous)
+            end_override(cls, had_cached, previous, previous_args)
 
     def post_load(self) -> list[ValidationError] | None:
         """Normalize derived values and run cross-field validation after loading.

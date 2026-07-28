@@ -59,8 +59,22 @@ if TYPE_CHECKING:
 logger = logging.getLogger(LOGGER_NAME)
 
 _CACHED_ATTR = "_cached_instance"
+_CACHED_ARGS_ATTR = "_cached_instance_args"
+"""The ``(env, override, env_dir)`` that actually populated the cache.
+
+Kept so the warm-path warning can fire on DISAGREEMENT rather than merely on non-default
+arguments. Without it, any consumer whose correct configuration is non-default — the motivating
+case is ``override=False``, i.e. "the process environment beats .env files", which is what
+12-factor requires and what an application accessor passes on *every* call — would be warned on
+every call after the first, for doing nothing wrong. That trains readers to ignore the warning,
+which costs it the one job it has: catching a caller who believes they are configuring an
+instance that was in fact already built with different arguments.
+"""
+
 _cache_lock = threading.RLock()
 _loading_local = threading.local()
+
+_CachedArgs = tuple[str | None, bool, Path | None]
 
 
 def _get_loading_set() -> set[type[DotEnvConfig]]:
@@ -95,13 +109,35 @@ def has_cached(cls: type[DotEnvConfig]) -> bool:
     return _CACHED_ATTR in cls.__dict__
 
 
-def set_cached(cls: type[DotEnvConfig], instance: DotEnvConfig) -> None:
+def set_cached(
+    cls: type[DotEnvConfig],
+    instance: DotEnvConfig,
+    args: _CachedArgs | None = None,
+) -> None:
     """Store *instance* as the cached singleton on *cls*.
+
+    *args* is the ``(env, override, env_dir)`` that produced *instance*, recorded so
+    :func:`acquire_cached` can tell a later caller who AGREES with how the cache was populated
+    from one who disagrees. ``None`` means "not recorded" — used by
+    :func:`cached_override`/:func:`begin_override`, where the instance was supplied directly and
+    no load arguments exist to compare against; a later ``cached()`` call then never warns,
+    which is correct, since an override deliberately says the arguments no longer describe the
+    instance.
 
     This is an unlocked primitive — callers are responsible for acquiring
     ``_cache_lock`` when thread-safety is required.
     """
     setattr(cls, _CACHED_ATTR, instance)
+    setattr(cls, _CACHED_ARGS_ATTR, args)
+
+
+def get_cached_args(cls: type[DotEnvConfig]) -> _CachedArgs | None:
+    """Return the arguments that populated *cls*'s cache, or ``None`` if unrecorded.
+
+    Reads ``cls.__dict__`` for the same reason :func:`get_cached` does: an entry inherited from
+    a parent class via the MRO describes that parent's cache, not this one's.
+    """
+    return cls.__dict__.get(_CACHED_ARGS_ATTR)
 
 
 def clear_cached(cls: type[DotEnvConfig]) -> None:
@@ -129,6 +165,10 @@ def clear_cached(cls: type[DotEnvConfig]) -> None:
     with _cache_lock:
         if has_cached(cls):
             delattr(cls, _CACHED_ATTR)
+        # Cleared together: a stale args entry outliving its instance would make the next
+        # populate-then-compare warn against arguments from a cache that no longer exists.
+        if _CACHED_ARGS_ATTR in cls.__dict__:
+            delattr(cls, _CACHED_ARGS_ATTR)
 
 
 def acquire_cached(
@@ -168,15 +208,22 @@ def acquire_cached(
     """
     cached = get_cached(cls)
     if cached is not None:
-        if env is not None or override is not True or env_dir is not None:
+        # Warn on DISAGREEMENT, not on non-default arguments. An application accessor that
+        # consistently passes the same non-default arguments (e.g. `override=False`) on every
+        # call is asking for exactly what it already got, and warning it every time would train
+        # readers to filter the message out. A caller passing something the cache was NOT built
+        # with is the real bug this catches, and it still fires.
+        recorded = get_cached_args(cls)
+        if recorded is not None and (env, override, env_dir) != recorded:
             logger.warning(
                 "cached() called on %s with arguments (env=%r, override=%r, "
-                "env_dir=%r) but the cache is already populated; "
-                "arguments were ignored.",
+                "env_dir=%r) but the cache is already populated with "
+                "(env=%r, override=%r, env_dir=%r); arguments were ignored.",
                 cls.__name__,
                 env,
                 override,
                 env_dir,
+                *recorded,
             )
         return cached
 
@@ -204,7 +251,7 @@ def acquire_cached(
                 return cached
 
             instance = cls.load(env=env, override=override, env_dir=env_dir)
-            set_cached(cls, instance)
+            set_cached(cls, instance, (env, override, env_dir))
             return instance
     finally:
         loading.discard(cls)
@@ -213,12 +260,13 @@ def acquire_cached(
 def begin_override(
     cls: type[DotEnvConfig],
     instance: DotEnvConfig,
-) -> tuple[bool, DotEnvConfig | None]:
+) -> tuple[bool, DotEnvConfig | None, _CachedArgs | None]:
     """Save the current cached state on *cls* and install *instance* as the override.
 
-    Returns ``(had_cached, previous)`` so the caller can restore the exact
-    pre-override state via :func:`end_override`. Acquires ``_cache_lock``
-    internally.
+    Returns ``(had_cached, previous, previous_args)`` so the caller can restore the exact
+    pre-override state via :func:`end_override` — including the arguments that populated it, so
+    a ``cached()`` call after the block ends compares against the same values it did before.
+    Acquires ``_cache_lock`` internally.
 
     Raises:
         RuntimeError: If called for *cls* from within that class's own
@@ -239,19 +287,22 @@ def begin_override(
     with _cache_lock:
         had_cached = has_cached(cls)
         previous = get_cached(cls)
+        previous_args = get_cached_args(cls)
         set_cached(cls, instance)
-    return had_cached, previous
+    return had_cached, previous, previous_args
 
 
 def end_override(
     cls: type[DotEnvConfig],
     had_cached: bool,
     previous: DotEnvConfig | None,
+    previous_args: _CachedArgs | None = None,
 ) -> None:
     """Restore the cached state saved by :func:`begin_override`.
 
-    If *had_cached* is ``True``, *previous* is restored. If *had_cached* is
-    ``False`` and *cls* now has its own entry (e.g. a concurrent ``cached()``
+    If *had_cached* is ``True``, *previous* is restored together with *previous_args*, so the
+    warm-path argument comparison behaves after the block exactly as it did before it. If
+    *had_cached* is ``False`` and *cls* now has its own entry (e.g. a concurrent ``cached()``
     call set one), the entry is removed. Acquires ``_cache_lock`` internally.
 
     No same-class loading guard here by design: via ``cached_override()`` this
@@ -260,6 +311,8 @@ def end_override(
     """
     with _cache_lock:
         if had_cached:
-            set_cached(cls, cast("DotEnvConfig", previous))
+            set_cached(cls, cast("DotEnvConfig", previous), previous_args)
         elif has_cached(cls):
             delattr(cls, _CACHED_ATTR)
+            if _CACHED_ARGS_ATTR in cls.__dict__:
+                delattr(cls, _CACHED_ARGS_ATTR)
