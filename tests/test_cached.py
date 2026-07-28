@@ -162,8 +162,10 @@ class TestCached:
         assert_type(config, MyConfig)
         assert config.value == "typed"
 
-    def test_warning_logged_when_non_default_args_on_warm_cache(self, monkeypatch, caplog) -> None:
-        """cached() logs a warning when non-default args are passed against a warm cache."""
+    def test_warning_logged_when_args_disagree_with_the_warm_cache(
+        self, monkeypatch, caplog
+    ) -> None:
+        """cached() warns when a caller's args differ from the ones that populated the cache."""
 
         class Config(DotEnvConfig):
             value: str = Field(default="x")
@@ -175,6 +177,108 @@ class TestCached:
 
         assert result is Config.cached()
         assert any("arguments were ignored" in r.message for r in caplog.records)
+
+    def test_repeating_the_arguments_the_cache_was_built_with_is_silent(
+        self, monkeypatch, caplog
+    ) -> None:
+        """Asking for what you already got is not a mistake and must not be reported as one.
+
+        The motivating case is an application accessor that must pass ``override=False`` (the
+        process environment beats ``.env`` files, per 12-factor) on every call. Warning it every
+        time emits a line per settings access for entirely correct usage — and a warning that
+        fires on correct usage is one readers learn to filter out, costing it the job it exists
+        for, which ``test_warning_logged_when_args_disagree_with_the_warm_cache`` still covers.
+
+        Asserts on WHETHER anything was reported, never on the wording: the promise is silence,
+        not a particular sentence, and a reworded message must not fail this test.
+        """
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        args = {"env": "prod", "override": False, "env_dir": Path("/tmp")}
+        first = Config.cached(**args)
+
+        # Window opened AFTER the populating call, so only the repeats are observed.
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            second = Config.cached(**args)
+            third = Config.cached(**args)
+            repeats_reported = list(caplog.records)
+
+        assert second is first
+        assert third is first
+        assert repeats_reported == []
+
+    def test_a_bare_reload_keeps_the_precedence_the_cache_was_loaded_with(
+        self, monkeypatch, caplog
+    ) -> None:
+        """The SIGHUP shape: ``reload()`` with no arguments must not revert to ``override=True``.
+
+        A hot-reload handler calls ``reload()`` bare. If that silently reset precedence to
+        "``.env`` files beat the process environment", a running service would flip to the
+        opposite configuration on a signal it was told was a no-op refresh — and an accessor
+        passing ``override=False`` would then also start warning, having never changed.
+        """
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        instance = Config.cached(override=False, env_dir=Path("/tmp"))
+        assert instance.loaded_with() == (None, False, Path("/tmp"))
+
+        instance.reload()
+
+        assert instance.loaded_with() == (None, False, Path("/tmp"))
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            assert Config.cached(override=False, env_dir=Path("/tmp")) is instance
+            reported = list(caplog.records)
+        assert reported == []
+
+    def test_a_reset_cache_is_not_judged_against_the_arguments_it_dropped(
+        self, monkeypatch, caplog
+    ) -> None:
+        """After ``reset_cached()`` the next call repopulates, so it cannot disagree with anything."""
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        Config.cached(override=False)
+        Config.reset_cached()
+        # Repopulate OUTSIDE the window: a real load emits its own unrelated warnings (e.g. "no
+        # .env files found"), and this test is about the warm path, not about loading.
+        Config.cached(env="prod")
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            Config.cached(env="prod")
+            reported = list(caplog.records)
+
+        assert reported == []
+
+    def test_a_scoped_override_leaves_the_warm_cache_judged_as_before(
+        self, monkeypatch, caplog
+    ) -> None:
+        """Exiting ``cached_override()`` restores the pre-override state, warnings included."""
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        Config.cached(override=False)
+        with Config.cached_override(Config.load_from_dict({"VALUE": "y"})):
+            pass
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            Config.cached(override=False)
+            agreeing = list(caplog.records)
+            caplog.clear()
+            Config.cached(env="prod")
+            disagreeing = list(caplog.records)
+
+        assert agreeing == []
+        assert len(disagreeing) == 1
 
     def test_thread_safety_concurrent_first_access(self, monkeypatch) -> None:
         """Concurrent first callers all receive the same single instance."""

@@ -141,8 +141,8 @@ def acquire_cached(
 
     Implements double-checked locking: a lock-free fast path checks
     ``cls.__dict__``; if the cache is warm, the existing instance is returned
-    immediately (with a warning if non-default arguments were passed against
-    an already-warm cache). If the cache is cold, a module-level lock is
+    immediately (with a warning if arguments that disagree with the ones
+    that populated the cache are passed). If the cache is cold, a module-level lock is
     acquired and the check is repeated before calling ``cls.load()``.
 
     Reentrant calls for the same class from within that class's own
@@ -168,15 +168,28 @@ def acquire_cached(
     """
     cached = get_cached(cls)
     if cached is not None:
-        if env is not None or override is not True or env_dir is not None:
+        # Warn on DISAGREEMENT, not on non-default arguments. An application accessor that
+        # consistently passes the same non-default arguments (e.g. `override=False`) on every
+        # call is asking for exactly what it already got, and warning it every time would train
+        # readers to filter the message out. A caller passing something the cache was NOT built
+        # with is the real bug this catches, and it still fires.
+        #
+        # Compared against the INSTANCE's own record of how it was loaded — the same fields
+        # `reload()` reuses — rather than a second copy kept beside the cache. One source of
+        # truth, and self-correcting: `reload(env="prod")` updates them, so a later `cached()`
+        # is judged against what the cached object actually holds now, not against whatever
+        # populated it originally.
+        loaded = cached.loaded_with()
+        if (env, override, env_dir) != loaded:
             logger.warning(
                 "cached() called on %s with arguments (env=%r, override=%r, "
-                "env_dir=%r) but the cache is already populated; "
-                "arguments were ignored.",
+                "env_dir=%r) but the cache is already populated with "
+                "(env=%r, override=%r, env_dir=%r); arguments were ignored.",
                 cls.__name__,
                 env,
                 override,
                 env_dir,
+                *loaded,
             )
         return cached
 
