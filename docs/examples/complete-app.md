@@ -175,13 +175,13 @@ redis_config = RedisConfig.load(env="prod")
 app_config = AppConfig.load(env="prod")
 
 # Access typed values with full IntelliSense
-print(app_config.host)              # '0.0.0.0'  (str)
-print(app_config.port)              # 8000       (int)
-print(app_config.debug)             # True       (bool)
-print(db_config.password)           # SecretStr('**********')
+print(app_config.host)  # '0.0.0.0'  (str)
+print(app_config.port)  # 8000       (int)
+print(app_config.debug)  # True       (bool)
+print(db_config.password)  # SecretStr('**********')
 print(db_config.password.get_secret_value())  # actual password
-print(app_config.allowed_origins)   # ['http://localhost:3000', ...]
-print(app_config.upload_dir)        # PosixPath('/tmp/uploads')
+print(app_config.allowed_origins)  # ['http://localhost:3000', ...]
+print(app_config.upload_dir)  # PosixPath('/tmp/uploads')
 ```
 
 !!! tip "Loading order"
@@ -210,7 +210,7 @@ print(app_config.port)  # 8000
 
 def hot_reload(signum: int, frame: object) -> None:
     """Reload all configurations on SIGHUP."""
-    db_config.reload()     # Reuses original env="dev"
+    db_config.reload()  # Reuses original env="dev"
     redis_config.reload()
     app_config.reload()
     print("Configuration reloaded")
@@ -341,9 +341,7 @@ describe_configs(
     all_required: list[str] = []
     for cls in [DatabaseConfig, RedisConfig, AppConfig]:
         spec = json.loads(cls.describe(output_format="json"))
-        all_required.extend(
-            f["env_var"] for f in spec["fields"] if f["required"]
-        )
+        all_required.extend(f["env_var"] for f in spec["fields"] if f["required"])
 
     missing = [var for var in all_required if var not in os.environ]
     if missing:
