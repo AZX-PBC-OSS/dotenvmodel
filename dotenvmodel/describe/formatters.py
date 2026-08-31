@@ -429,8 +429,22 @@ def _render_collection_item(item: Any) -> str:
 
     ``str(Color.RED)`` is ``"Color.RED"``, which fails coercion when the
     rendered example is uncommented; the member's value round-trips.
+
+    Sensitive instances mask by value, not just by annotation: loosely
+    typed annotations (bare ``list``, ``list[object]``, ``dict[str, object]``)
+    and ``Enum`` classes whose members wrap secrets are invisible to the
+    type-based ``_is_sensitive_collection`` check, and ``str()`` on them
+    prints the secret — a ``SecretStr`` shows ``********``-asterisks that
+    would round-trip as literal asterisk strings, and a ``BaseDsn`` prints
+    its password verbatim.
     """
-    return str(item.value if isinstance(item, Enum) else item)
+    if isinstance(item, Enum):
+        item = item.value
+    if isinstance(item, SecretStr):
+        return "<secret>"
+    if isinstance(item, BaseDsn):
+        return redact_url_password(str.__str__(item))
+    return str(item)
 
 
 def _bounded(rendered: str, truncate: bool) -> str:

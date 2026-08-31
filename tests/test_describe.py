@@ -1172,6 +1172,146 @@ class TestSensitiveCollectionMasking:
         assert "<secret>" not in output
 
 
+class TestLooselyTypedSensitiveCollectionMasking:
+    """Secret instances mask by value where the annotation-based check cannot see them.
+
+    ``_is_sensitive_collection`` inspects annotation arguments, so bare
+    ``list``, ``list[object]``, ``set[object]``, ``dict[str, object]``, and
+    ``Enum`` classes whose members wrap secrets escape the wholesale mask.
+    ``_render_collection_item`` masks those by value instead: a
+    ``SecretStr`` renders ``<secret>`` (never ``**********``, which would
+    round-trip as literal asterisks) and a ``BaseDsn`` renders with its
+    password redacted.
+    """
+
+    def test_bare_list_with_dsn_element_redacts_password(self) -> None:
+        """A bare ``list`` default holding a DSN renders redacted, never the raw password."""
+
+        class Config(DotEnvConfig):
+            endpoints: list = Field(default=[PostgresDsn("postgresql://u:hunter2@h:5432/d")])
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "hunter2" not in rendered
+            assert "postgresql://u:hunter2@h:5432/d" not in rendered
+            assert "**********" not in rendered
+        assert "# ENDPOINTS=postgresql://u:***@h:5432/d" in example
+        assert "postgresql://u:***@" in output
+
+    def test_list_object_with_dsn_element_redacts_password(self) -> None:
+        """``list[object]`` hides secrets from the type check; the item masks by value."""
+
+        class Config(DotEnvConfig):
+            endpoints: list[object] = Field(
+                default=[PostgresDsn("postgresql://u:hunter2@h:5432/d")]
+            )
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "hunter2" not in rendered
+            assert "postgresql://u:hunter2@h:5432/d" not in rendered
+            assert "**********" not in rendered
+        assert "# ENDPOINTS=postgresql://u:***@h:5432/d" in example
+
+    def test_set_object_with_dsn_element_redacts_password(self) -> None:
+        """``set[object]`` defaults render the sorted redacted DSN, never the raw one."""
+
+        class Config(DotEnvConfig):
+            dsn_pool: set[object] = Field(
+                default_factory=lambda: {PostgresDsn("postgresql://u:hunter2@h:5432/d")}
+            )
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "hunter2" not in rendered
+            assert "postgresql://u:hunter2@h:5432/d" not in rendered
+            assert "**********" not in rendered
+        assert "# DSN_POOL=postgresql://u:***@h:5432/d" in example
+
+    def test_dict_str_object_with_dsn_value_redacts_password(self) -> None:
+        """``dict[str, object]`` values render redacted; the password never joins the pairs."""
+
+        class Config(DotEnvConfig):
+            services: dict[str, object] = Field(
+                default_factory=lambda: {"primary": PostgresDsn("postgresql://u:hunter2@h:5432/d")}
+            )
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "hunter2" not in rendered
+            assert "postgresql://u:hunter2@h:5432/d" not in rendered
+            assert "**********" not in rendered
+        assert "# SERVICES=primary=postgresql://u:***@h:5432/d" in example
+
+    def test_list_of_enum_with_dsn_valued_members_redacts_password(self) -> None:
+        """Enum members wrapping DSNs render redacted inside collections."""
+        from enum import Enum
+
+        class DsnChoice(Enum):
+            PROD = PostgresDsn("postgresql://deploy:hunter2@localhost:5432/prod")
+            FALLBACK = PostgresDsn("postgresql://deploy:standby-pw@localhost:5432/fb")
+
+        class Config(DotEnvConfig):
+            dsn_chain: list[DsnChoice] = Field(default=[DsnChoice.PROD, DsnChoice.FALLBACK])
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "hunter2" not in rendered
+            assert "standby-pw" not in rendered
+            assert "**********" not in rendered
+        assert (
+            "# DSN_CHAIN=postgresql://deploy:***@localhost:5432/prod,"
+            "postgresql://deploy:***@localhost:5432/fb" in example
+        )
+
+    def test_list_of_enum_with_secretstr_valued_members_masks(self) -> None:
+        """Enum members wrapping SecretStr render ``<secret>``, never joinable asterisks."""
+        from enum import Enum
+
+        class KeyRing(Enum):
+            PRIMARY = SecretStr("alpha-key")
+            SECONDARY = SecretStr("beta-key")
+
+        class Config(DotEnvConfig):
+            keys: list[KeyRing] = Field(default=[KeyRing.PRIMARY, KeyRing.SECONDARY])
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "alpha-key" not in rendered
+            assert "beta-key" not in rendered
+            assert "**********" not in rendered
+            assert "<secret>,<secret>" in rendered
+        assert "# KEYS=<secret>,<secret>" in example
+
+    def test_plain_value_collections_keep_exact_renders(self) -> None:
+        """Regression guard: collections without secret instances render byte-identical."""
+        from enum import Enum
+
+        class Color(str, Enum):  # noqa: UP042
+            RED = "red"
+            BLUE = "blue"
+
+        class Config(DotEnvConfig):
+            tags: list[str] = Field(default=["a", "b"])
+            ports: set[int] = Field(default={80, 443})
+            limits: dict[str, int] = Field(default_factory=lambda: {"cpu": 4, "mem": 2})
+            palette: list[Color] = Field(default=[Color.RED, Color.BLUE])
+
+        example = Config.generate_env_example()
+        assert "# TAGS=a,b" in example
+        assert "# PORTS=443,80" in example
+        assert "# LIMITS=cpu=4,mem=2" in example
+        assert "# PALETTE=red,blue" in example
+        assert "<secret>" not in example
+        assert "***" not in example
+
+
 class TestDescribeClass:
     """Test describe_class function."""
 
