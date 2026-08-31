@@ -961,6 +961,24 @@ class TestNoDotenvInternals:
         assert imported == {"dotenv"}
 
 
+class TestPackageRootExports:
+    """`read_env_files` is the designated migration landing spot for the removed
+    `load_env_files()` — `from dotenvmodel import read_env_files` must work.
+    """
+
+    def test_reader_and_its_layer_type_are_importable_from_the_package_root(self) -> None:
+        import dotenvmodel
+        import dotenvmodel.loading as loading_module
+
+        assert "read_env_files" in dotenvmodel.__all__
+        assert "DotenvLayer" in dotenvmodel.__all__
+
+        from dotenvmodel import DotenvLayer, read_env_files
+
+        assert read_env_files is loading_module.read_env_files
+        assert DotenvLayer is loading_module.DotenvLayer
+
+
 class TestBareKeyParity:
     """A bare `KEY` line is unset in every layer, matching python-dotenv's load_dotenv()."""
 

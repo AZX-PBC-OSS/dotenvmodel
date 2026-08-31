@@ -15,6 +15,8 @@ The package exports the following public API:
 - [`RedisDsn`][dotenvmodel.types.RedisDsn]: Redis DSN type
 - [`Json`][dotenvmodel.types.Json]: JSON parsing type
 - [`LoadParams`][dotenvmodel.loading.LoadParams]: Resolved load parameters, as returned by `DotEnvConfig.loaded_with()`
+- [`read_env_files`][dotenvmodel.loading.read_env_files]: Read the merged `.env` cascade without touching `os.environ`
+- [`DotenvLayer`][dotenvmodel.loading.DotenvLayer]: The merged-cascade record (values, base_dir, files) returned by `read_env_files()`
 - [`describe_configs`][dotenvmodel.describe.describe_configs]: Document multiple configs
 - [`generate_env_example`][dotenvmodel.describe.generate_env_example]: Generate .env.example
 - [`configure_logging`][dotenvmodel.logging_config.configure_logging]: Enable logging

@@ -32,6 +32,11 @@ Public API:
     - `LoadParams`: Frozen record of resolved load parameters (env, override,
       env_dir, read_dotfiles, load_local), as returned by
       `DotEnvConfig.loaded_with()`
+    - `read_env_files`: Read the merged .env cascade without touching the
+      process environment — the migration landing spot for the removed
+      `load_env_files()`
+    - `DotenvLayer`: The merged-cascade record (values, base_dir, files)
+      returned by `read_env_files()`
     - `describe_configs`: Generate docs for multiple config classes
     - `generate_env_example`: Generate .env.example files
     - `configure_logging`, `disable_logging`: Logging utilities
@@ -58,7 +63,7 @@ from dotenvmodel.exceptions import (
     ValidationError,
 )
 from dotenvmodel.fields import Field, Required, ValidatorContext
-from dotenvmodel.loading import LoadParams
+from dotenvmodel.loading import DotenvLayer, LoadParams, read_env_files
 from dotenvmodel.logging_config import configure_logging, disable_logging
 from dotenvmodel.types import (
     HttpUrl,
@@ -73,6 +78,7 @@ __all__ = [
     "ConstraintViolationError",
     "DotEnvConfig",
     "DotEnvModelError",
+    "DotenvLayer",
     "Field",
     "HttpUrl",
     "Json",
@@ -91,4 +97,5 @@ __all__ = [
     "describe_configs",
     "disable_logging",
     "generate_env_example",
+    "read_env_files",
 ]

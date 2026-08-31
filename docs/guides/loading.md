@@ -31,8 +31,18 @@ The `.env` cascade is merged once per load (later, more specific files win withi
 
     Two more changes from the same release:
 
-    - **`load_env_files()` was removed.** Use `read_env_files()` — the pure reader that returns the merged cascade as a `DotenvLayer` — or python-dotenv's `load_dotenv()`. For the full old injection behavior: `os.environ.update(read_env_files(env="dev").values)`. Note the real environment still wins under the new default precedence; add `override=True` (or `DOTENV_OVERRIDE=true`) if the injected values must beat it.
+    - **`load_env_files()` was removed.** Use `read_env_files()` — the pure reader that returns the merged cascade as a `DotenvLayer` — or python-dotenv's `load_dotenv()`.
     - **`loaded_with()` returns a `LoadParams`.** Unpack with `p.env, p.override, p.env_dir, p.read_dotfiles, p.load_local`, or use attribute access (`p.override`, `p.load_local`, ...).
+
+    To reproduce the full old injection behavior with the reader:
+
+    ```python
+    from dotenvmodel import read_env_files
+
+    os.environ.update(read_env_files(env="dev").values)
+    ```
+
+    Caution: `os.environ.update()` **overwrites** existing keys — the injected file values clobber the real environment, exactly the old 0.6.x default behavior. To inject while letting the real environment keep precedence, call python-dotenv's `load_dotenv()` without `override=True` instead.
 
 ## .env File Cascading
 
