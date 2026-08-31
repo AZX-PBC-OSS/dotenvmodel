@@ -252,7 +252,7 @@ class TestFieldValidatorTypedBeforeResults:
 
         key = Config.load_from_dict({"API_KEY": " k "}).api_key
         # The padded value survives untouched and get_secret_value() stays
-        # a str — the pre-fix pipeline nested SecretStr(SecretStr(...)).
+        # a str, with no SecretStr(SecretStr(...)) nesting.
         assert isinstance(key.get_secret_value(), str)
         assert key.get_secret_value() == " k "
 
@@ -267,6 +267,18 @@ class TestFieldValidatorTypedBeforeResults:
                 return int(value) * 2
 
         assert Config.load_from_dict({"PORT": "21"}).port == 42
+
+    def test_before_hook_returning_none_for_optional_field_loads(self) -> None:
+        """A None return on an Optional field adopts None; nothing re-coerces it."""
+
+        class Config(DotEnvConfig):
+            port: int | None = Field(default=None)
+
+            @field_validator("port", mode="before")
+            def parse(self, value: str, ctx: ValidatorContext) -> int | None:
+                return None
+
+        assert Config.load_from_dict({"PORT": "8000"}).port is None
 
     def test_wrong_typed_result_raises_clean_type_coercion_error(self) -> None:
         class Config(DotEnvConfig):
@@ -319,6 +331,89 @@ class TestFieldValidatorTypedBeforeResults:
         assert "bytes" in err.error_msg
         assert "pk-super-secret" not in str(err)
         assert "**********" in str(err)
+
+    def test_any_typed_field_non_str_result_raises_clean_type_coercion_error(self) -> None:
+        """Any passes inspect.isclass yet rejects isinstance; the failure must
+        still surface as the library's field error, aggregated like every other
+        one — never a bare internal TypeError."""
+
+        class Config(DotEnvConfig):
+            blob: Any = Field()
+
+            @field_validator("blob", mode="before")
+            def to_int(self, value: str, ctx: ValidatorContext) -> int:
+                return 5
+
+        with pytest.raises(TypeCoercionError) as single_info:
+            Config.load_from_dict({"BLOB": "x"})
+
+        err = single_info.value
+        assert err.field_name == "blob"
+        assert err.env_var_name == "BLOB"
+        assert "int" in err.error_msg
+
+        class WithOtherError(DotEnvConfig):
+            blob: Any = Field()
+            other: str = Field(min_length=10)
+
+            @field_validator("blob", mode="before")
+            def to_int(self, value: str, ctx: ValidatorContext) -> int:
+                return 5
+
+        with pytest.raises(MultipleValidationErrors) as agg_info:
+            WithOtherError.load_from_dict({"BLOB": "x", "OTHER": "short"})
+
+        assert [type(e) for e in agg_info.value.errors] == [
+            TypeCoercionError,
+            ConstraintViolationError,
+        ]
+
+    def test_isinstance_rejecting_declared_type_fails_cleanly(self) -> None:
+        """A declared type that defeats isinstance (Any does; a hostile
+        metaclass can too) lands in the library's coercion error, never the
+        bare TypeError raised by the check itself."""
+
+        class InstanceCheckRejects(type):
+            def __instancecheck__(cls, obj: object) -> bool:
+                raise TypeError("no instance checks")
+
+        class Opaque(metaclass=InstanceCheckRejects):
+            pass
+
+        class Sub(Opaque):
+            # isinstance() fast-paths exact-type matches past the metaclass;
+            # a subclass instance is what actually consults it.
+            pass
+
+        class Config(DotEnvConfig):
+            blob: Opaque = Field()
+
+            @field_validator("blob", mode="before")
+            def build(self, value: str, ctx: ValidatorContext) -> Opaque:
+                return Sub()
+
+        with pytest.raises(TypeCoercionError) as exc_info:
+            Config.load_from_dict({"BLOB": "x"})
+
+        err = exc_info.value
+        assert err.field_name == "blob"
+        assert "Opaque" in err.error_msg
+
+    def test_generic_declared_type_named_in_error(self) -> None:
+        """The error names list[str]; GenericAlias.__name__ would degrade it
+        to the bare origin list."""
+
+        class Config(DotEnvConfig):
+            items: list[str] = Field()
+
+            @field_validator("items", mode="before")
+            def as_tuple(self, value: str, ctx: ValidatorContext) -> tuple[str, ...]:
+                return (value,)
+
+        with pytest.raises(TypeCoercionError) as exc_info:
+            Config.load_from_dict({"ITEMS": "x"})
+
+        assert "list[str]" in exc_info.value.error_msg
 
     def test_choices_see_before_hook_transformed_value(self) -> None:
         """Constraints validate the transformed value, not the raw string."""

@@ -267,9 +267,10 @@ def _typed_before_hook_result(
     ``list[str]`` matched by their origin — is used as-is: re-coercing a
     typed value would at best rebuild it and at worst die on a string-only
     method (``bool`` has no ``lower``, ``list`` no ``split``, ``UUID`` no
-    ``replace``). Any other non-``str`` value is a hook-contract violation
-    and fails with the library's coercion error, never a bare
-    ``AttributeError`` from inside a coercer.
+    ``replace``). ``Any`` names no concrete type to instance-check against,
+    so it adopts nothing either. Every other non-``str`` value is a
+    hook-contract violation and fails with the library's coercion error,
+    never a bare ``AttributeError`` from inside a coercer.
 
     Raises:
         TypeCoercionError: If the value is neither ``None`` nor an instance
@@ -280,14 +281,25 @@ def _typed_before_hook_result(
         # runner; coercion would only map None to None again.
         return None
     declared = unwrap_optional(field_type)
-    declared_name = getattr(declared, "__name__", str(declared))
     origin = get_origin(declared)
+    # str() keeps parameterized names (list[str]) readable in the error;
+    # GenericAlias.__name__ degrades them to the bare origin (list).
+    declared_name = (
+        str(declared) if origin is not None else getattr(declared, "__name__", str(declared))
+    )
     if inspect.isclass(origin):
         # list[str] and friends are not classes; an already-shaped
         # collection is accepted by its origin, elements untouched.
         declared = origin
-    if inspect.isclass(declared) and isinstance(value, declared):
-        return value
+    if inspect.isclass(declared) and declared is not Any:
+        try:
+            if isinstance(value, declared):
+                return value
+        except TypeError:
+            # Special typing forms can pass inspect.isclass yet reject
+            # isinstance (Any does); a non-match must reach the coercion
+            # error below, never escape as a bare internal TypeError.
+            pass
     raise TypeCoercionError(
         field_name=field_name,
         # Masking is decided by the declared type, like every other hook
