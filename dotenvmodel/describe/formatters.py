@@ -77,6 +77,7 @@ class FieldDescription:
         default: Formatted default value string (e.g., "8000", "None", "-")
         description: Field description or "-" if none
         constraints: Formatted constraints string (e.g., "ge=1, le=65535")
+        separator: Delimiter the field uses for collection values (default ",")
     """
 
     env_var: str
@@ -86,6 +87,7 @@ class FieldDescription:
     default: str
     description: str
     constraints: str
+    separator: str = ","
 
 
 def _extract_enum_from_type(field_type: TypeForm[Any]) -> type[Enum] | None:
@@ -399,36 +401,30 @@ def _render_collection_item(item: Any) -> str:
     return str(item.value if isinstance(item, Enum) else item)
 
 
-def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: bool = True) -> str:
-    """Format a field's default value for display.
+def _bounded(rendered: str, truncate: bool) -> str:
+    """Cap a joined/JSON default at ``TRUNCATE_THRESHOLD_MEDIUM`` when truncating.
 
-    Renders values in the format dotenvmodel itself parses so generated
-    ``.env.example`` files round-trip: ``list``/``set``/``tuple`` defaults
-    are joined with the field's ``separator``, ``dict`` defaults as
-    ``key=value`` pairs, and ``Json[...]`` fields as JSON. A
-    ``default_factory`` is invoked once to render its result; if it raises,
-    a warning is logged and the ``SET_PER_ENVIRONMENT`` placeholder is
-    returned so generation never crashes and no callable repr is shown.
+    Truncated display formats (table, markdown) bound collection renders
+    the way the repr path always has; the dotenv format renders
+    untruncated so ``.env.example`` values stay complete and
+    round-trippable.
     """
-    if field_info.default is _MISSING and field_info.default_factory is None:
-        return "-"
+    if truncate and len(rendered) > TRUNCATE_THRESHOLD_MEDIUM:
+        return rendered[: TRUNCATE_THRESHOLD_MEDIUM - 3] + "..."
+    return rendered
 
-    if field_info.default_factory is not None:
-        factory = field_info.default_factory
-        try:
-            value = factory()
-        except Exception as exc:
-            logger.warning(
-                "default_factory %s raised while rendering an example value "
-                "(%s); rendering the '%s' placeholder instead",
-                _validator_name(factory),
-                exc,
-                SET_PER_ENVIRONMENT,
-            )
-            return SET_PER_ENVIRONMENT
-    else:
-        value = field_info.default
 
+def _render_default_value(
+    value: Any,
+    field_info: FieldInfo,
+    field_type: TypeForm[Any],
+    truncate: bool,
+) -> str:
+    """Render a default value in the format dotenvmodel itself parses back.
+
+    Split out from ``format_default`` so the whole rendering pipeline can
+    be guarded by its never-crash handler.
+    """
     if value is None:
         return "None"
 
@@ -445,12 +441,20 @@ def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: b
         return f'"{redact_url_password(str.__str__(value))}"'
 
     if _is_json_typed(field_type) and isinstance(value, (list, dict)):
-        return json.dumps(value)
+        return _bounded(json.dumps(value), truncate)
 
     if isinstance(value, str):
+        if is_string_like_type(field_type):
+            # Str-typed fields keep the quoted rendering (pinned behavior).
+            if truncate and len(value) > TRUNCATE_THRESHOLD_SHORT:
+                return f'"{value[: TRUNCATE_THRESHOLD_SHORT - 3]}..."'
+            return f'"{value}"'
+        # A str default for a non-str field is coerced at load (e.g.
+        # list[str] splits it on the separator); quoting it would corrupt
+        # the round trip (['"a', 'b"']), so render it unquoted.
         if truncate and len(value) > TRUNCATE_THRESHOLD_SHORT:
-            return f'"{value[: TRUNCATE_THRESHOLD_SHORT - 3]}..."'
-        return f'"{value}"'
+            return value[: TRUNCATE_THRESHOLD_SHORT - 3] + "..."
+        return value
 
     if isinstance(value, bool):
         return str(value)
@@ -469,23 +473,79 @@ def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: b
     # would parse back as a list containing the string "[]"). Enum items
     # unwrap to their values so the joined output parses back.
     if isinstance(value, (list, tuple)):
-        return field_info.separator.join(_render_collection_item(item) for item in value)
+        return _bounded(
+            field_info.separator.join(_render_collection_item(item) for item in value),
+            truncate,
+        )
 
     if isinstance(value, set):
         # Hash order varies with PYTHONHASHSEED; sort the rendered strings
         # so .env.example output is deterministic (no diff churn).
         items = sorted(_render_collection_item(item) for item in value)
-        return field_info.separator.join(items)
+        return _bounded(field_info.separator.join(items), truncate)
 
     if isinstance(value, dict):
-        return field_info.separator.join(
-            f"{k}={_render_collection_item(v)}" for k, v in value.items()
+        return _bounded(
+            field_info.separator.join(
+                f"{k}={_render_collection_item(v)}" for k, v in value.items()
+            ),
+            truncate,
         )
 
     repr_str = repr(value)
     if truncate and len(repr_str) > TRUNCATE_THRESHOLD_MEDIUM:
         return repr_str[: TRUNCATE_THRESHOLD_MEDIUM - 3] + "..."
     return repr_str
+
+
+def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: bool = True) -> str:
+    """Format a field's default value for display.
+
+    Renders values in the format dotenvmodel itself parses so generated
+    ``.env.example`` files round-trip: ``list``/``set``/``tuple`` defaults
+    are joined with the field's ``separator``, ``dict`` defaults as
+    ``key=value`` pairs, and ``Json[...]`` fields as JSON. A
+    ``default_factory`` is invoked once to render its result. Rendering
+    never crashes: a factory that raises, or a value that fails to render
+    (e.g. a non-serializable ``Json[...]`` default), logs a warning and
+    returns the ``SET_PER_ENVIRONMENT`` placeholder instead. Warnings
+    carry the exception type only — messages can embed secret values.
+    When ``truncate`` is true, joined/JSON renders are capped at
+    ``TRUNCATE_THRESHOLD_MEDIUM``; the dotenv format renders untruncated
+    so example values stay complete.
+    """
+    if field_info.default is _MISSING and field_info.default_factory is None:
+        return "-"
+
+    if field_info.default_factory is not None:
+        factory = field_info.default_factory
+        try:
+            value = factory()
+        except Exception as exc:
+            # Log the exception type only: messages can embed secret values.
+            logger.warning(
+                "default_factory %s raised while rendering an example value "
+                "(%s); rendering the '%s' placeholder instead",
+                _validator_name(factory),
+                type(exc).__name__,
+                SET_PER_ENVIRONMENT,
+            )
+            return SET_PER_ENVIRONMENT
+    else:
+        value = field_info.default
+
+    try:
+        return _render_default_value(value, field_info, field_type, truncate)
+    except Exception as exc:
+        # The rendering pipeline must never crash generation (a broken
+        # repr, an unserializable Json default, an exotic __str__). Log
+        # the exception type only: messages can embed secret values.
+        logger.warning(
+            "rendering a default value failed (%s); rendering the '%s' placeholder instead",
+            type(exc).__name__,
+            SET_PER_ENVIRONMENT,
+        )
+        return SET_PER_ENVIRONMENT
 
 
 def describe_class(
@@ -528,6 +588,7 @@ def describe_class(
                 default=default_str,
                 description=description,
                 constraints=constraints_str,
+                separator=field_info.separator,
             )
         )
 

@@ -8,7 +8,6 @@ from typing import TYPE_CHECKING
 
 from dotenvmodel.describe.formatters import (
     MAX_WIDTHS,
-    SET_PER_ENVIRONMENT,
     FieldDescription,
 )
 
@@ -192,22 +191,17 @@ def render_dotenv(
             type_info += f" | Constraints: {field.constraints}"
         lines.append(type_info)
 
-        if include_examples:
-            # SET_PER_ENVIRONMENT means the default is unknowable (a raising
-            # factory): no Example line at all, not even a type-based one.
-            # The token also sits in the exclusion tuple below as a backstop
-            # so it can never be shown as a purported value.
-            if field.default == SET_PER_ENVIRONMENT:
-                pass
-            elif field.default and field.default not in (
-                "-",
-                "None",
-                "<secret>",
-                SET_PER_ENVIRONMENT,
-            ):
-                lines.append(f"# Example: {field.env_var}={field.default}")
-            elif field.type_name.startswith("list["):
-                lines.append(f"# Example: {field.env_var}=value1,value2,value3")
+        # Type-based Example lines cover only the cases where the value line
+        # below shows nothing useful: required fields (default "-") and empty
+        # defaults (""). Any other default is already shown on the value
+        # line, so an Example line would be a byte-identical duplicate.
+        # Unknowable defaults (a raising factory renders
+        # SET_PER_ENVIRONMENT), secrets, and None defaults get no Example
+        # line either.
+        if include_examples and field.default in ("", "-"):
+            if field.type_name.startswith("list["):
+                sep = field.separator
+                lines.append(f"# Example: {field.env_var}=value1{sep}value2{sep}value3")
             elif field.type_name == "int":
                 lines.append(f"# Example: {field.env_var}=8000")
             elif field.type_name == "bool":

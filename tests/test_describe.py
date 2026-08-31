@@ -7,6 +7,7 @@ import pytest
 from dotenvmodel import DotEnvConfig, Field, Required, SecretStr, describe_configs
 from dotenvmodel.describe import FieldDescription, describe_class
 from dotenvmodel.describe.formatters import (
+    TRUNCATE_THRESHOLD_MEDIUM,
     format_constraints,
     format_default,
     format_type_name,
@@ -383,6 +384,64 @@ class TestFormatDefault:
         field_info = FieldInfo(default="")
         result = format_default(field_info, str)
         assert result == '""'
+
+    def test_long_list_default_truncated_at_medium(self) -> None:
+        """Joined collection defaults are capped when truncating."""
+        field_info = FieldInfo(default=[f"item{i:02d}" for i in range(20)])
+        result = format_default(field_info, list[str], truncate=True)
+        assert len(result) == TRUNCATE_THRESHOLD_MEDIUM
+        assert result.startswith("item00,item01")
+        assert result.endswith("...")
+
+    def test_long_json_default_truncated_at_medium(self) -> None:
+        """JSON renders are capped when truncating."""
+        from dotenvmodel.types import Json
+
+        field_info = FieldInfo(default=[f"role{i:02d}" for i in range(20)])
+        result = format_default(field_info, Json[list[str]], truncate=True)  # type: ignore[arg-type]
+        assert len(result) == TRUNCATE_THRESHOLD_MEDIUM
+        assert result.endswith("...")
+
+    def test_long_list_default_untruncated(self) -> None:
+        """Without truncation the joined default is complete (dotenv round-trip)."""
+        items = [f"item{i:02d}" for i in range(20)]
+        field_info = FieldInfo(default=items)
+        result = format_default(field_info, list[str], truncate=False)
+        assert result == ",".join(items)
+
+    def test_str_default_unquoted_for_non_str_field_type(self) -> None:
+        """A str default for a non-str field renders unquoted (coerced at load)."""
+        field_info = FieldInfo(default="a,b")
+        assert format_default(field_info, list[str]) == "a,b"
+
+    def test_long_str_default_on_non_str_field_truncated_unquoted(self) -> None:
+        field_info = FieldInfo(default="a" * 30)
+        result = format_default(field_info, list[str], truncate=True)
+        assert result == "a" * (20 - 3) + "..."
+        assert '"' not in result
+
+    def test_custom_object_default_repr_not_truncated(self) -> None:
+        """truncate=False keeps the full repr of a non-collection custom object."""
+
+        class Widget:
+            def __repr__(self) -> str:
+                return "Widget(" + "x" * 40 + ")"
+
+        field_info = FieldInfo(default=Widget())
+        result = format_default(field_info, Widget, truncate=False)
+        assert result == "Widget(" + "x" * 40 + ")"
+
+    def test_markdown_bounded_for_long_list_default(self) -> None:
+        """Markdown cells (no per-cell truncation) stay bounded via format_default."""
+
+        class Config(DotEnvConfig):
+            items: list[str] = Field(default=[f"item{i:02d}" for i in range(20)])
+
+        markdown = Config.describe(output_format="markdown")
+        assert "item19" not in markdown
+
+        _, _, fields = describe_class(Config, truncate=True)
+        assert len(fields[0].default) == TRUNCATE_THRESHOLD_MEDIUM
 
 
 class TestDescribeClassmethod:
