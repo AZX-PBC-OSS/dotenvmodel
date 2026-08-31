@@ -485,12 +485,13 @@ def read_env_files(
         else:
             logger.debug(f"{file_path} not found (skipping)")
 
-    # Interpolate once, against the whole merged layer: a ${VAR} reference
-    # resolves against the merged cascade first, then os.environ as the
-    # fallback base, so a reference to a variable defined only in the
-    # process environment still resolves. That base is deliberately
-    # independent of load()'s override knob, which only governs per-field
-    # precedence afterwards.
+    # Interpolate in one pass over the merged layer, progressively in
+    # merged-key order: a ${VAR} reference sees the keys defined earlier
+    # in the merge (with their already-resolved values) over os.environ,
+    # so a later file can build on an earlier file's value, while a
+    # forward or self reference sees only os.environ. That base is
+    # deliberately independent of load()'s override knob, which only
+    # governs per-field precedence afterwards.
     # Unresolved references become "" (python-dotenv 1.2.3 semantics: ${VAR}
     # / ${VAR:-default} only; $VAR shorthand is not interpolated), and no
     # None values entered the merge, so none leave — every output is a str.
