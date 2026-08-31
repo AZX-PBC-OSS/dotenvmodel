@@ -125,6 +125,54 @@ class TestDefaultInterpolationBase:
         assert override_mode.api_url == "http://from-file/api"
 
 
+class TestReferencesAreAbsoluteNames:
+    """A reference inside a default names an absolute environment variable."""
+
+    def test_prefix_does_not_apply_inside_references(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """${HOST} resolves HOST, not APP_HOST, even on a class with env_prefix="APP_"."""
+        monkeypatch.setenv("HOST", "unprefixed.internal")
+        monkeypatch.setenv("APP_HOST", "prefixed.internal")
+
+        class Config(DotEnvConfig):
+            env_prefix = "APP_"
+            api_url: str = Field(default="http://${HOST}/v1")
+
+        config = Config.load(env_dir=tmp_path)
+
+        assert config.api_url == "http://unprefixed.internal/v1"
+
+    def test_prefixed_reference_resolves_when_spelled_out(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """${APP_HOST} resolves APP_HOST — the prefix applies when the reference itself spells it."""
+        monkeypatch.setenv("HOST", "unprefixed.internal")
+        monkeypatch.setenv("APP_HOST", "prefixed.internal")
+
+        class Config(DotEnvConfig):
+            env_prefix = "APP_"
+            api_url: str = Field(default="http://${APP_HOST}/v1")
+
+        config = Config.load(env_dir=tmp_path)
+
+        assert config.api_url == "http://prefixed.internal/v1"
+
+    def test_alias_does_not_apply_inside_references(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """${TOKEN} resolves TOKEN, not the field's alias name."""
+        monkeypatch.setenv("TOKEN", "via-absolute-name")
+        monkeypatch.delenv("SECRET_TOKEN", raising=False)
+
+        class Config(DotEnvConfig):
+            token: str = Field(alias="SECRET_TOKEN", default="${TOKEN}")
+
+        config = Config.load(env_dir=tmp_path)
+
+        assert config.token == "via-absolute-name"
+
+
 class TestDefaultColonDashFallback:
     """The `:-` default applies only when the name is absent from the base."""
 
@@ -294,6 +342,22 @@ class TestDefaultFormsAndRefresh:
         assert config.api_url == "http://one.internal/v1"
 
         monkeypatch.setenv("API_HOST", "two.internal")
+        config.reload()
+
+        assert config.api_url == "http://two.internal/v1"
+
+    def test_reload_reresolves_against_a_changed_dotfile(self, tmp_path: Path) -> None:
+        """A bare reload() re-reads the .env cascade, so a default re-resolves to a changed file value."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("API_HOST=one.internal\n")
+
+        class Config(DotEnvConfig):
+            api_url: str = Field(default="http://${API_HOST}/v1")
+
+        config = Config.load(env_dir=tmp_path)
+        assert config.api_url == "http://one.internal/v1"
+
+        env_file.write_text("API_HOST=two.internal\n")
         config.reload()
 
         assert config.api_url == "http://two.internal/v1"
