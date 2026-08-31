@@ -1,10 +1,15 @@
 """Field descriptor and Required sentinel for dotenvmodel."""
 
+import copy
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
 from typing import Any, TypeVar
+from uuid import UUID
+
+from dotenvmodel.types import BaseDsn, SecretStr
 
 # Type variable for generic field types
 T = TypeVar("T")
@@ -92,6 +97,67 @@ def _validator_name(fn: Callable[..., Any]) -> str:
     so rendering is consistent across ``FieldInfo.__repr__`` and error paths.
     """
     return getattr(fn, "__name__", type(fn).__name__)
+
+
+# Immutable default types are handed out as-is: sharing them is safe.
+# Membership is by EXACT type (pydantic's smart_deepcopy semantics) —
+# subclasses of str/int/bytes/etc. can carry mutable state, so they fall
+# through to copy.deepcopy. datetime subclasses date but is listed for
+# clarity. Path instances (PosixPath/WindowsPath), DSN subclasses
+# (HttpUrl, PostgresDsn, RedisDsn), and Enum members are not exact
+# members; deepcopy handles them (enum singletons come back identical).
+_IMMUTABLE_DEFAULT_TYPES: frozenset[type[Any]] = frozenset(
+    {
+        type(None),
+        bool,
+        int,
+        float,
+        complex,
+        str,
+        bytes,
+        range,
+        date,
+        datetime,
+        time,
+        timedelta,
+        Decimal,
+        UUID,
+        SecretStr,
+        BaseDsn,
+    }
+)
+
+
+def smart_deepcopy(value: Any) -> Any:
+    """Return a value safe to hand out as a per-load default.
+
+    Values whose exact type is immutable (``None``, ``bool``, ``int``,
+    ``float``, ``complex``, ``str``, ``bytes``, ``range``, dates/times,
+    ``timedelta``, ``Decimal``, ``UUID``, ``SecretStr``, ``BaseDsn``) are
+    returned as-is at zero cost. Empty ``list``/``dict``/``set`` values get
+    a shallow ``copy()`` — they hold nothing that could be shared.
+    Everything else — non-empty or possibly nested containers, subclasses
+    (which can carry mutable state), custom objects — is
+    ``copy.deepcopy``-ed; singletons such as ``Enum`` members come back
+    from ``deepcopy`` as the same object.
+
+    This mirrors pydantic's ``smart_deepcopy`` (exact-type membership) so
+    that a literal mutable default such as ``Field(default=["localhost"])``
+    is isolated per ``load()`` call instead of being shared — and mutated —
+    across every instance.
+
+    Args:
+        value: The literal default value to copy.
+
+    Returns:
+        The same object for exact-type immutable values, otherwise an
+        independent copy.
+    """
+    if type(value) in _IMMUTABLE_DEFAULT_TYPES:
+        return value
+    if type(value) in (list, dict, set) and not value:
+        return value.copy()
+    return copy.deepcopy(value)
 
 
 class FieldInfo:
@@ -322,12 +388,23 @@ class FieldInfo:
         self.required = default is _MISSING and default_factory is None
 
     def get_default(self) -> Any:
-        """Get the default value for this field."""
+        """Get the default value for this field.
+
+        Literal defaults pass through ``smart_deepcopy`` so every load
+        receives an independent value: mutating one instance's default
+        cannot leak into other instances or future loads (pydantic parity).
+        Literal defaults must therefore be deep-copyable — a default
+        holding state ``copy.deepcopy`` cannot handle (a lock, a socket)
+        raises here; use ``default_factory`` for such values. Immutable
+        defaults are returned as-is. ``default_factory`` is invoked on
+        every load and its result is handed out as-is, never copied: if
+        the factory returns a shared object, that object stays shared.
+        """
         if self.default_factory is not None:
             return self.default_factory()
         if self.default is _MISSING:
             return _MISSING
-        return self.default
+        return smart_deepcopy(self.default)
 
     @property
     def has_default(self) -> bool:
@@ -417,15 +494,25 @@ def Field(
         - Use `Field(default=value)` for optional fields with defaults
 
     When to use `default` vs `default_factory`:
-        - Use `default` for immutable values (str, int, float, bool, None)
-        - Use `default_factory` for mutable values (list, dict, set) to avoid
-          shared mutable state between instances
+        - Use `default` for immutable values (str, int, float, bool, None).
+          Literal defaults must be deep-copyable (each load deep-copies
+          them); use `default_factory` for values that are not
+        - Mutable `default` values (list, dict, set) are safe — each load
+          deep-copies them — but `default_factory` avoids that per-load
+          copy cost
+        - `default_factory` is invoked on every load and its result is
+          handed out as-is, never copied — construct new values inside
+          the factory; a factory returning a shared object keeps it shared
 
     Args:
         default: Default value if environment variable not set. Use `...` (ellipsis)
-            or omit for required fields. Use a value for optional fields.
-        default_factory: Callable that returns a default value. Use this instead of
-            `default` for mutable defaults like `list` or `dict`.
+            or omit for required fields. Use a value for optional fields. Literal
+            defaults must be deep-copyable (deep-copied per load); use
+            `default_factory` for values that are not (locks, sockets).
+        default_factory: Callable that returns a default value. Prefer this over a
+            mutable `default` (e.g. a list or dict) to avoid the per-load deep-copy
+            cost; the factory is invoked on every load and its result is handed
+            out as-is, never copied — construct new values inside the factory.
             Example: `default_factory=list`
         alias: Alternative environment variable name to read from. When set, the
             field name is not used for env var lookup, and `env_prefix` is NOT applied.

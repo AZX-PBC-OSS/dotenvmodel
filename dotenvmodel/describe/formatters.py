@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import collections.abc
 import inspect
+import json
+import logging
 import re
 import types
 from dataclasses import dataclass
@@ -14,13 +16,16 @@ from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from typing_extensions import TypeForm
 
+from dotenvmodel._constants import LOGGER_NAME
 from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.coercion import is_string_like_type
 from dotenvmodel.fields import _MISSING, FieldInfo, _validator_name
-from dotenvmodel.types import BaseDsn, SecretStr
+from dotenvmodel.types import BaseDsn, SecretStr, is_sensitive_type
 
 if TYPE_CHECKING:
     from dotenvmodel.config import DotEnvConfig
+
+logger = logging.getLogger(LOGGER_NAME)
 
 # Maximum column widths to prevent unbounded table growth
 MAX_WIDTHS = {
@@ -36,6 +41,10 @@ MAX_WIDTHS = {
 TRUNCATE_THRESHOLD_SHORT = 20
 TRUNCATE_THRESHOLD_MEDIUM = 25
 TRUNCATE_THRESHOLD_LONG = 35
+
+# Rendered for fields whose default_factory raised while being invoked for
+# display; render_dotenv turns it into a commented placeholder line.
+SET_PER_ENVIRONMENT = "<<set per environment>>"
 
 # Type parsing hint mapping
 TYPE_PARSING_HINTS = {
@@ -68,6 +77,7 @@ class FieldDescription:
         default: Formatted default value string (e.g., "8000", "None", "-")
         description: Field description or "-" if none
         constraints: Formatted constraints string (e.g., "ge=1, le=65535")
+        separator: Delimiter the field uses for collection values (default ",")
     """
 
     env_var: str
@@ -77,6 +87,7 @@ class FieldDescription:
     default: str
     description: str
     constraints: str
+    separator: str = ","
 
 
 def _extract_enum_from_type(field_type: TypeForm[Any]) -> type[Enum] | None:
@@ -110,7 +121,7 @@ def format_type_name(field_type: TypeForm[Any]) -> str:
 
     enum_type = _extract_enum_from_type(field_type)
     if enum_type is not None and field_type is enum_type:
-        values = [str(m.value) for m in enum_type]
+        values = [_format_enum_member_value(m.value) for m in enum_type]
         return f"{enum_type.__name__} ({', '.join(values)})"
 
     origin = get_origin(field_type)
@@ -281,7 +292,7 @@ def format_constraints(
 
     enum_type = _extract_enum_from_type(field_type) if field_type is not None else None
     if enum_type is not None:
-        values = [str(m.value) for m in enum_type]
+        values = [_format_enum_member_value(m.value) for m in enum_type]
         choices_str = ", ".join(values)
         if truncate and len(choices_str) > TRUNCATE_THRESHOLD_MEDIUM:
             choices_str = choices_str[: TRUNCATE_THRESHOLD_MEDIUM - 3] + "..."
@@ -369,28 +380,110 @@ def _is_type_in_union(field_type: TypeForm[Any] | types.UnionType, target: type)
     return any(isinstance(m, type) and issubclass(m, target) for m in _union_members(field_type))
 
 
-def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: bool = True) -> str:
-    """Format default value for display."""
-    if field_info.default is _MISSING and field_info.default_factory is None:
-        return "-"
+def _is_json_typed(field_type: TypeForm[Any] | types.UnionType) -> bool:
+    """True if any member of ``field_type`` is a runtime ``Json[...]`` type.
 
-    if field_info.default_factory is not None:
-        factory = field_info.default_factory
-        if factory is list:
-            return "[]"
-        if factory is dict:
-            return "{}"
-        if factory is set:
-            return "set()"
-        return f"<{getattr(factory, '__name__', 'factory')}()>"
+    Mirrors the coercion-side detection (``__name__`` starts with
+    ``"Json["``) so example rendering matches what ``coerce_value`` parses.
+    """
+    return any(
+        isinstance(m, type) and getattr(m, "__name__", "").startswith("Json[")
+        for m in _union_members(field_type)
+    )
 
-    default = field_info.default
 
-    if default is None:
+def _is_sensitive_collection(field_type: TypeForm[Any] | types.UnionType) -> bool:
+    """True when a list/set/tuple/dict annotation holds sensitive members.
+
+    ``Optional``/``Union`` is unwrapped first so ``list[SecretStr] | None``
+    is caught. Any sensitive member argument (``SecretStr`` or a ``BaseDsn``
+    subclass — for dicts, keys and values both) masks the whole collection:
+    element-wise rendering would leak each secret.
+    """
+    for member in _union_members(field_type):
+        origin = get_origin(member)
+        if origin in (list, set, tuple, dict) and any(
+            is_sensitive_type(arg) for arg in get_args(member)
+        ):
+            return True
+    return False
+
+
+def _format_enum_member_value(value: object) -> str:
+    """Render an Enum member's value for display, masking sensitive values.
+
+    ``str(member.value)`` on a ``SecretStr`` shows asterisks (not the
+    ``<secret>`` sentinel) and on a ``BaseDsn`` shows the raw connection
+    string with its password, so sensitive member values are handled here
+    once, shared by the type-name, constraints, and default renderers.
+    """
+    if isinstance(value, SecretStr):
+        return "<secret>"
+    if isinstance(value, BaseDsn):
+        return redact_url_password(str.__str__(value))
+    return str(value)
+
+
+def _render_collection_item(item: Any) -> str:
+    """Render a collection item, unwrapping ``Enum`` members to their values.
+
+    ``str(Color.RED)`` is ``"Color.RED"``, which fails coercion when the
+    rendered example is uncommented; the member's value round-trips.
+
+    Sensitive instances mask by value, not just by annotation: loosely
+    typed annotations (bare ``list``, ``list[object]``, ``dict[str, object]``)
+    and ``Enum`` classes whose members wrap secrets are invisible to the
+    type-based ``_is_sensitive_collection`` check, and ``str()`` on them
+    prints the secret — a ``SecretStr`` shows ``********``-asterisks that
+    would round-trip as literal asterisk strings, and a ``BaseDsn`` prints
+    its password verbatim.
+    """
+    if isinstance(item, Enum):
+        item = item.value
+    if isinstance(item, SecretStr):
+        return "<secret>"
+    if isinstance(item, BaseDsn):
+        return redact_url_password(str.__str__(item))
+    return str(item)
+
+
+def _bounded(rendered: str, truncate: bool) -> str:
+    """Cap a joined/JSON default at ``TRUNCATE_THRESHOLD_MEDIUM`` when truncating.
+
+    Truncated display formats (table, markdown) bound collection renders
+    the way the repr path always has; the dotenv format renders
+    untruncated so ``.env.example`` values stay complete and
+    round-trippable.
+    """
+    if truncate and len(rendered) > TRUNCATE_THRESHOLD_MEDIUM:
+        return rendered[: TRUNCATE_THRESHOLD_MEDIUM - 3] + "..."
+    return rendered
+
+
+def _render_default_value(
+    value: Any,
+    field_info: FieldInfo,
+    field_type: TypeForm[Any],
+    truncate: bool,
+) -> str:
+    """Render a default value in the format dotenvmodel itself parses back.
+
+    Split out from ``format_default`` so the whole rendering pipeline can
+    be guarded by its never-crash handler.
+    """
+    if value is None:
         return "None"
 
-    if isinstance(default, Enum):
-        return str(default.value)
+    if isinstance(value, Enum):
+        member_value = value.value
+        # An Enum wrapping a SecretStr/DSN bypasses the scalar redaction
+        # checks below (str(member.value) prints the raw secret); mask it here.
+        if isinstance(member_value, SecretStr):
+            return "<secret>"
+        if isinstance(member_value, BaseDsn):
+            # Match the scalar DSN default render: quoted, password redacted.
+            return f'"{_format_enum_member_value(member_value)}"'
+        return str(member_value)
 
     # Recognise DSN/SecretStr even inside an Optional/multi-member Union
     # (e.g. `PostgresDsn | RedisDsn | None`) so nested defaults are redacted.
@@ -398,30 +491,127 @@ def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: b
         return "<secret>"
 
     # DSN defaults may embed credentials; redact the password before display.
-    if _is_type_in_union(field_type, BaseDsn) and isinstance(default, str):
-        return f'"{redact_url_password(str.__str__(default))}"'
+    if _is_type_in_union(field_type, BaseDsn) and isinstance(value, str):
+        return f'"{redact_url_password(str.__str__(value))}"'
 
-    if isinstance(default, str):
-        if truncate and len(default) > TRUNCATE_THRESHOLD_SHORT:
-            return f'"{default[: TRUNCATE_THRESHOLD_SHORT - 3]}..."'
-        return f'"{default}"'
+    if _is_json_typed(field_type) and isinstance(value, (list, dict)):
+        return _bounded(json.dumps(value), truncate)
 
-    if isinstance(default, bool):
-        return str(default)
+    # Empty collections reveal nothing; "" (which parses back as an empty
+    # collection) must win over the sensitive-collection mask below. This
+    # sits after the Json branch so an empty Json default keeps its "[]".
+    if isinstance(value, (list, set, tuple, dict)) and not value:
+        return ""
 
-    if isinstance(default, (int, float)):
-        return str(default)
+    # Sensitive collections (list[SecretStr], set[BaseDsn],
+    # dict[str, SecretStr], Optional[...]) mask wholesale: element-wise
+    # rendering would leak each secret.
+    if _is_sensitive_collection(field_type):
+        return "<secret>"
 
-    if isinstance(default, timedelta):
-        return str(default)
+    if isinstance(value, str):
+        if is_string_like_type(field_type):
+            # Str-typed fields keep the quoted rendering (pinned behavior).
+            if truncate and len(value) > TRUNCATE_THRESHOLD_SHORT:
+                return f'"{value[: TRUNCATE_THRESHOLD_SHORT - 3]}..."'
+            return f'"{value}"'
+        # A str default for a non-str field is coerced at load (e.g.
+        # list[str] splits it on the separator); quoting it would corrupt
+        # the round trip (['"a', 'b"']), so render it unquoted.
+        if truncate and len(value) > TRUNCATE_THRESHOLD_SHORT:
+            return value[: TRUNCATE_THRESHOLD_SHORT - 3] + "..."
+        return value
 
-    if isinstance(default, Path):
-        return f"Path({str(default)!r})"
+    if isinstance(value, bool):
+        return str(value)
 
-    repr_str = repr(default)
+    if isinstance(value, (int, float)):
+        return str(value)
+
+    if isinstance(value, timedelta):
+        return str(value)
+
+    if isinstance(value, Path):
+        return f"Path({str(value)!r})"
+
+    # Collections render exactly as _coerce_list/_coerce_dict parse them
+    # back; empty collections render as an empty value (not "[]", which
+    # would parse back as a list containing the string "[]"). Enum items
+    # unwrap to their values so the joined output parses back.
+    if isinstance(value, (list, tuple)):
+        return _bounded(
+            field_info.separator.join(_render_collection_item(item) for item in value),
+            truncate,
+        )
+
+    if isinstance(value, set):
+        # Hash order varies with PYTHONHASHSEED; sort the rendered strings
+        # so .env.example output is deterministic (no diff churn).
+        items = sorted(_render_collection_item(item) for item in value)
+        return _bounded(field_info.separator.join(items), truncate)
+
+    if isinstance(value, dict):
+        return _bounded(
+            field_info.separator.join(
+                f"{k}={_render_collection_item(v)}" for k, v in value.items()
+            ),
+            truncate,
+        )
+
+    repr_str = repr(value)
     if truncate and len(repr_str) > TRUNCATE_THRESHOLD_MEDIUM:
         return repr_str[: TRUNCATE_THRESHOLD_MEDIUM - 3] + "..."
     return repr_str
+
+
+def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: bool = True) -> str:
+    """Format a field's default value for display.
+
+    Renders values in the format dotenvmodel itself parses so generated
+    ``.env.example`` files round-trip: ``list``/``set``/``tuple`` defaults
+    are joined with the field's ``separator``, ``dict`` defaults as
+    ``key=value`` pairs, and ``Json[...]`` fields as JSON. A
+    ``default_factory`` is invoked once to render its result. Rendering
+    never crashes: a factory that raises, or a value that fails to render
+    (e.g. a non-serializable ``Json[...]`` default), logs a warning and
+    returns the ``SET_PER_ENVIRONMENT`` placeholder instead. Warnings
+    carry the exception type only — messages can embed secret values.
+    When ``truncate`` is true, joined/JSON renders are capped at
+    ``TRUNCATE_THRESHOLD_MEDIUM``; the dotenv format renders untruncated
+    so example values stay complete.
+    """
+    if field_info.default is _MISSING and field_info.default_factory is None:
+        return "-"
+
+    if field_info.default_factory is not None:
+        factory = field_info.default_factory
+        try:
+            value = factory()
+        except Exception as exc:
+            # Log the exception type only: messages can embed secret values.
+            logger.warning(
+                "default_factory %s raised while rendering an example value "
+                "(%s); rendering the '%s' placeholder instead",
+                _validator_name(factory),
+                type(exc).__name__,
+                SET_PER_ENVIRONMENT,
+            )
+            return SET_PER_ENVIRONMENT
+    else:
+        value = field_info.default
+
+    try:
+        return _render_default_value(value, field_info, field_type, truncate)
+    except Exception as exc:
+        # The rendering pipeline must never crash generation (a broken
+        # repr, an unserializable Json default, an exotic __str__). Log
+        # the exception type only: messages can embed secret values.
+        logger.warning(
+            "rendering a default value failed (%s); rendering the '%s' placeholder instead",
+            type(exc).__name__,
+            SET_PER_ENVIRONMENT,
+        )
+        return SET_PER_ENVIRONMENT
 
 
 def describe_class(
@@ -464,6 +654,7 @@ def describe_class(
                 default=default_str,
                 description=description,
                 constraints=constraints_str,
+                separator=field_info.separator,
             )
         )
 
