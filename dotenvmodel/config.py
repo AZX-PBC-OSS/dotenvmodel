@@ -80,6 +80,8 @@ def _run_sensitive_validator(
     is_optional: bool,
     name: str,
     context: ValidatorContext,
+    *,
+    rewrap_result: bool = True,
 ) -> Any:
     """Run a validator hook for a sensitive-typed field.
 
@@ -90,7 +92,9 @@ def _run_sensitive_validator(
     ``validator=<name>`` constraint and message. The masked error is raised
     outside the ``except`` block with ``__cause__``/``__context__`` cleared
     (an empty chain). A plain-``str`` return value is re-wrapped in the
-    declared type so the secret stays masked in ``repr``.
+    declared type so the secret stays masked in ``repr`` — unless
+    ``rewrap_result`` is False, for ``mode="before"`` decorator hooks whose
+    raw-string result must flow on to the strip/coerce pipeline.
 
     Note:
         Traceback frame locals across the load path still reference the live
@@ -107,7 +111,7 @@ def _run_sensitive_validator(
         # str subclass and an instance of the declared type (passes through).
         # Only a bare str gets (re-)constructed — a ValueError from DSN
         # construction is caught below and masked.
-        if isinstance(result, str) and not isinstance(result, unwrapped_type):
+        if rewrap_result and isinstance(result, str) and not isinstance(result, unwrapped_type):
             result = unwrapped_type(result)
     except Exception:
         # Carry nothing over from the hook exception — message, constraint, or
@@ -192,12 +196,18 @@ def _run_field_validator(
     field_type: TypeForm[Any],
     validator: Callable[[Any, ValidatorContext], Any],
     env_var_name: str,
+    *,
+    rewrap_result: bool = True,
 ) -> Any:
-    """Run a field's custom ``validator`` hook and return the final value.
+    """Run one field validator hook (inline or decorator-attached) and return its result.
 
-    The hook receives the coerced, built-in-constraint-validated value plus a
-    ``ValidatorContext``; its return value replaces the field value (built-in
-    constraints are not re-run on a transformed value).
+    The hook receives the value plus a ``ValidatorContext``; its return value
+    replaces the value for the next pipeline stage. For the inline
+    ``validator=`` hook and ``mode="after"`` decorator hooks the value is the
+    coerced, built-in-constraint-validated one and a bare-``str`` result is
+    re-wrapped in a declared sensitive type; ``mode="before"`` decorator hooks
+    pass the raw external string with ``rewrap_result=False`` so their result
+    stays raw for the strip/coerce pipeline.
 
     Masking is decided by the declared type (Optional-unwrapped), not by
     ``isinstance(value)``, so a default-path value that has not been wrapped
@@ -229,6 +239,7 @@ def _run_field_validator(
             is_optional,
             name,
             context,
+            rewrap_result=rewrap_result,
         )
     return _run_plain_validator(
         field_name,
@@ -542,10 +553,29 @@ class DotEnvConfig(metaclass=ConfigMeta):
                                 error_msg=_mask_template_resolution(err.error_msg, value),
                             ) from None
         else:
+            # Decorator before-hooks run on the raw external value, ahead of
+            # the built-in strip and coercion; their result feeds the normal
+            # strip/coerce path. They never see field defaults — defaults are
+            # author-controlled values, not external input needing
+            # normalization — and they run regardless of the validate flag,
+            # like strip itself. Sensitive fields mask hook failures here too:
+            # a before-hook sees the raw plaintext string.
+            for hook in field_info.before_validators:
+                raw_value = _run_field_validator(
+                    field_name,
+                    raw_value,
+                    field_type,
+                    hook.resolve(self),
+                    env_var_name,
+                    rewrap_result=False,
+                )
+
             # Strip string-like raw values before coercion. This is value
             # processing, not validation — it runs regardless of the
-            # validate flag, so min_length etc. see the final string.
-            if is_string_like_type(field_type):
+            # validate flag, so min_length etc. see the final string. A
+            # before-hook may return a non-str (coerced as-is), which strip
+            # must not touch.
+            if is_string_like_type(field_type) and isinstance(raw_value, str):
                 strip_mode = field_info.strip
                 if strip_mode is None:
                     strip_mode = type(self).strip_strings
@@ -585,12 +615,21 @@ class DotEnvConfig(metaclass=ConfigMeta):
                         error_msg=_mask_template_resolution(err.error_msg, str(value)),
                     ) from None
 
-        # Custom validator hook: runs even when validate=False (it may
+        # Custom validator hooks: runs even when validate=False (they may
         # transform the value — transformation is part of loading, not
-        # validation), but never on None values.
+        # validation), but never on None values. The inline
+        # Field(validator=...) hook runs first, then @field_validator
+        # decorator hooks in definition order; a hook returning None (valid
+        # only for Optional fields) ends the chain.
         if field_info.validator is not None and value is not None:
             value = _run_field_validator(
                 field_name, value, field_type, field_info.validator, env_var_name
+            )
+        for hook in field_info.after_validators:
+            if value is None:
+                break
+            value = _run_field_validator(
+                field_name, value, field_type, hook.resolve(self), env_var_name
             )
 
         return value

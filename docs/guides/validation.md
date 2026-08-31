@@ -266,6 +266,76 @@ Semantics:
 
 ---
 
+## Decorator Validators: `field_validator`
+
+Validation logic doesn't have to live inside the `Field(...)` expression. Decorate a method with `@field_validator("field_name")` and the metaclass attaches it to that field. The hook receives the same `(value, ctx)` contract as `Field(validator=...)`, its return value feeds the next pipeline stage, and you can attach **several** hooks to one field (stacking the decorator on one method also registers it for several fields).
+
+```python
+import logging
+
+from dotenvmodel import DotEnvConfig, Field, ValidatorContext, field_validator
+
+
+class AppConfig(DotEnvConfig):
+    log_level: str = Field(default="ERROR", strip=True)
+
+    # Normalize the raw string before coercion...
+    @field_validator("log_level", mode="before")
+    def uppercase_log_level(self, value: str, ctx: ValidatorContext) -> str:
+        return value.upper()
+
+    # ...then map the coerced value to a logging level
+    @field_validator("log_level")
+    def convert_to_logging_int(self, value: str, ctx: ValidatorContext) -> int:
+        return logging.getLevelNamesMapping().get(value, logging.ERROR)
+```
+
+With `LOG_LEVEL= info` the before hook uppercases to ` INFO`, the built-in strip removes the whitespace, coercion yields `"INFO"`, and the after hook maps it to `20`.
+
+### Modes
+
+| Mode | Receives | Runs | May |
+|------|----------|------|-----|
+| `mode="after"` (default) | The coerced, built-in-constraint-validated value — identical semantics to `Field(validator=...)` | After coercion and built-in constraints; never on `None`; even with `validate=False` | Transform (built-ins are not re-run) |
+| `mode="before"` | The raw external string (environment or `load_from_dict()` value) | Before the built-in `strip` and before type coercion; even with `validate=False` | Replace the raw value — strip and coercion see the result |
+
+A `before` hook may return a non-string; the value is passed to coercion as-is. Pre-typed `int`, `float`, `Decimal`, `str`, and `Path` values round-trip cleanly — for other types (`bool`, `UUID`, `datetime`, `SecretStr`, collections) coercion still expects the value's string form.
+
+!!! note "Before hooks never see defaults"
+    `mode="before"` hooks run only on values sourced from the environment or a `load_from_dict()` dict. Defaults are author-controlled values that already have their final form — normalizing external input never applies to them — so they skip before hooks. After hooks, like the inline `validator=`, still run on defaults.
+
+### Supported callable forms
+
+The receiver is detected from the first positional parameter's name:
+
+- Plain method — `def hook(self, value, ctx)`: bound to the loading instance
+- `@classmethod` — `def hook(cls, value, ctx)`: bound to the config class
+- `@staticmethod` or module-level function — `def hook(value, ctx)`: no receiver. Decorate the module-level function at module level and assign it inside the class body.
+
+Either decorator order works (`@field_validator` above or below `@staticmethod`/`@classmethod`).
+
+### Ordering
+
+With several hooks on one field, the pipeline runs:
+
+1. `mode="before"` hooks, in definition order
+2. The built-in `strip`
+3. Type coercion
+4. Built-in constraints (unless `validate=False`)
+5. The inline `Field(validator=...)` hook
+6. `mode="after"` hooks, in definition order
+
+A hook returning `None` (valid only for `Optional` fields) ends the chain — later after hooks are skipped, consistent with the never-on-`None` rule.
+
+### Errors, secrets, and inheritance
+
+- A `ValueError`/`TypeError` from a hook is wrapped in `ConstraintViolationError` with `constraint="validator=<method name>"` and aggregates into `MultipleValidationErrors` like any other failure; other exceptions propagate unchanged.
+- For sensitive fields (`SecretStr`, DSN types) any hook failure is masked generically — including `before` hooks, which see the raw plaintext — exactly like the inline `validator=` path.
+- Hooks are inherited. Redefining a same-named method in a subclass **replaces** that hook; redefining it without the decorator removes it. The parent class's hooks are never affected, and hooks survive a field being redeclared with a fresh `Field(...)` (whose other parameters reset per redeclaration).
+- A decorator naming a field that doesn't exist (on the class or any base) fails at class definition time with a `ValueError`.
+
+---
+
 ## Cross-Field Validation with `post_load`
 
 Constraints and per-field `validator` hooks see one value at a time. For invariants that span several fields (`lock_lease >= 4 * heartbeat_interval`) or derived values built from multiple inputs (a replica DSN falling back to the primary), override the model-level `post_load()` hook. It runs **once after all fields load cleanly**, on every load path — `load()`, `load_from_dict()`, `reload()`, and nested config loading — and always runs, even with `validate=False` (transformation is part of loading, same as the per-field `validator` hook). The default implementation is a no-op.
