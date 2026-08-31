@@ -643,8 +643,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
             ValueError: If `env` contains invalid characters (path traversal protection)
 
         Note:
-            `load()` never mutates `os.environ`. Code that relied on the old
-            side effect should call python-dotenv's `load_dotenv()` directly.
+            `load()` never mutates `os.environ`; code that wants dotfile
+            values injected into the process environment should call
+            python-dotenv's `load_dotenv()` directly.
 
         Example:
             ```python
