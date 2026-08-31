@@ -110,7 +110,7 @@ There are three equivalent ways to mark a field as required. All produce identic
 
 === "`default` — Immutable values"
 
-    Use `default` for immutable values like `str`, `int`, `float`, `bool`, and `None`. Literal mutable defaults (`list`, `dict`, `set`) are safe too — each `load()` deep-copies them, so instances never share the same object.
+    Use `default` for immutable values like `str`, `int`, `float`, `bool`, and `None`. Literal mutable defaults (`list`, `dict`, `set`) are safe too — each `load()` deep-copies them, so instances never share the same object. Literal defaults must be deep-copyable: a default holding state that `copy.deepcopy` cannot handle (a lock, a socket) raises at load time — use `default_factory` for such values.
 
     ```python
     class Config(DotEnvConfig):
@@ -123,7 +123,7 @@ There are three equivalent ways to mark a field as required. All produce identic
 
 === "`default_factory` — Mutable values, no copy cost"
 
-    Prefer `default_factory` for mutable defaults: the factory result is already fresh on every load, so there is no per-load deep-copy cost. `Field()` raises a `ValueError` if you specify both `default` and `default_factory`.
+    Prefer `default_factory` for mutable defaults: the factory is invoked on every load and its result is handed out as-is — never copied — so there is no per-load deep-copy cost. Construct new values inside the factory: a factory that returns a shared object keeps that object shared across loads. `Field()` raises a `ValueError` if you specify both `default` and `default_factory`.
 
     ```python
     class Config(DotEnvConfig):

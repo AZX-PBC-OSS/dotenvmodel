@@ -4,8 +4,9 @@
 ``Field(default=[...])`` (and for bare mutable class attrs wrapped by the
 metaclass), so mutating one instance's value corrupted every other instance
 and all future ``load()`` calls. Literal defaults are now deep-copied per
-load; ``default_factory`` results are already fresh per call and stay
-uncopied.
+load. ``default_factory`` is invoked on every load and its result is handed
+out as-is (never copied); a factory returning a shared object keeps that
+object shared.
 """
 
 import threading
@@ -138,7 +139,7 @@ class TestImmutableDefaultsKeepIdentity:
 
 
 class TestDefaultFactoryParity:
-    """Factory results are already fresh per call and are never copied."""
+    """Factory results are handed out as-is on every load, never copied."""
 
     def test_default_factory_result_fresh_per_load(self) -> None:
         class Config(DotEnvConfig):

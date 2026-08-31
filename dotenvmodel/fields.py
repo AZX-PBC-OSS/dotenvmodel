@@ -393,8 +393,12 @@ class FieldInfo:
         Literal defaults pass through ``smart_deepcopy`` so every load
         receives an independent value: mutating one instance's default
         cannot leak into other instances or future loads (pydantic parity).
-        Immutable defaults are returned as-is and ``default_factory``
-        results are already fresh per call, so neither pays a copy cost.
+        Literal defaults must therefore be deep-copyable — a default
+        holding state ``copy.deepcopy`` cannot handle (a lock, a socket)
+        raises here; use ``default_factory`` for such values. Immutable
+        defaults are returned as-is. ``default_factory`` is invoked on
+        every load and its result is handed out as-is, never copied: if
+        the factory returns a shared object, that object stays shared.
         """
         if self.default_factory is not None:
             return self.default_factory()
@@ -490,17 +494,25 @@ def Field(
         - Use `Field(default=value)` for optional fields with defaults
 
     When to use `default` vs `default_factory`:
-        - Use `default` for immutable values (str, int, float, bool, None)
+        - Use `default` for immutable values (str, int, float, bool, None).
+          Literal defaults must be deep-copyable (each load deep-copies
+          them); use `default_factory` for values that are not
         - Mutable `default` values (list, dict, set) are safe — each load
           deep-copies them — but `default_factory` avoids that per-load
           copy cost
+        - `default_factory` is invoked on every load and its result is
+          handed out as-is, never copied — construct new values inside
+          the factory; a factory returning a shared object keeps it shared
 
     Args:
         default: Default value if environment variable not set. Use `...` (ellipsis)
-            or omit for required fields. Use a value for optional fields.
+            or omit for required fields. Use a value for optional fields. Literal
+            defaults must be deep-copyable (deep-copied per load); use
+            `default_factory` for values that are not (locks, sockets).
         default_factory: Callable that returns a default value. Prefer this over a
             mutable `default` (e.g. a list or dict) to avoid the per-load deep-copy
-            cost; a fresh value is created on every load.
+            cost; the factory is invoked on every load and its result is handed
+            out as-is, never copied — construct new values inside the factory.
             Example: `default_factory=list`
         alias: Alternative environment variable name to read from. When set, the
             field name is not used for env var lookup, and `env_prefix` is NOT applied.

@@ -36,14 +36,15 @@ print(AppConfig.describe())
     ```text
     AppConfig
     =========
-    +--------------+------+----------+---------+---------------------------+----------------+
-    | ENV Variable | Type | Required | Default | Description               | Constraints    |
-    +--------------+------+----------+---------+---------------------------+----------------+
-    | DATABASE_URL | str  | Yes      | -       | PostgreSQL connection ... | -              |
-    | PORT         | int  | No       | 8000    | Server port               | ge=1, le=65535 |
-    | DEBUG        | bool | No       | False   | Enable debug mode         | -              |
-    | WORKERS      | int  | No       | 4       | Number of worker proces...| ge=1, le=16    |
-    +--------------+------+----------+---------+---------------------------+----------------+
+
+    +--------------+------+----------+---------+------------------------------+----------------+
+    | ENV Variable | Type | Required | Default | Description                  | Constraints    |
+    +--------------+------+----------+---------+------------------------------+----------------+
+    | DATABASE_URL | str  | Yes      | -       | PostgreSQL connection string | -              |
+    | PORT         | int  | No       | 8000    | Server port                  | ge=1, le=65535 |
+    | DEBUG        | bool | No       | False   | Enable debug mode            | -              |
+    | WORKERS      | int  | No       | 4       | Number of worker processes   | ge=1, le=16    |
+    +--------------+------+----------+---------+------------------------------+----------------+
     ```
 
 === "Markdown"
@@ -87,11 +88,12 @@ print(AppConfig.describe())
         {
           "env_var": "DATABASE_URL",
           "field_name": "database_url",
-          "type": "str",
+          "type_name": "str",
           "required": true,
           "default": "-",
           "description": "PostgreSQL connection string",
-          "constraints": "-"
+          "constraints": "-",
+          "separator": ","
         }
       ]
     }
@@ -174,7 +176,6 @@ class AppConfig(DotEnvConfig):
     allowed_hosts: list[str] = Field(
         default_factory=list,
         separator=";",
-        min_items=1,
         max_items=10,
         description="Allowed hostnames for CORS",
     )
@@ -200,7 +201,6 @@ APP_API_KEY=
 
 # Server port number
 # Type: int | Constraints: ge=1, le=65535
-# Example: APP_PORT=8000
 # APP_PORT=8000
 
 # Database connection password
@@ -208,8 +208,8 @@ APP_API_KEY=
 # APP_DATABASE_PASSWORD=your_secret_here
 
 # Allowed hostnames for CORS
-# Type: list[str] | Constraints: min_items=1, max_items=10, separator=';'
-# Example: APP_ALLOWED_HOSTS=value1,value2,value3
+# Type: list[str] | Constraints: max_items=10, separator=';'
+# Example: APP_ALLOWED_HOSTS=value1;value2;value3
 # APP_ALLOWED_HOSTS=
 ```
 
@@ -218,19 +218,20 @@ The `.env.example` file includes:
 - **Type information** — Shows the expected Python type
 - **Parsing hints** — Explains how to format complex types (e.g., comma-separated values for lists)
 - **Constraints** — Documents validation rules (min/max length, numeric ranges, etc.)
-- **Examples** — Shows example values for required fields
+- **Examples** — Shows example values for required fields and empty collection defaults (a field with a real default shows it on its own commented line instead)
 - **Commented defaults** — Optional fields are commented out with their default values
 - **Secret handling** — `SecretStr` fields are masked appropriately
 
 ### How default values are rendered
 
-Defaults render in the format dotenvmodel itself parses, so uncommenting a default line round-trips:
+Defaults render in the format dotenvmodel itself parses, so uncommenting a default line round-trips — as long as no value contains the field's `separator` (or `=` for `dict` values). `a,b` parses back as `["a", "b"]`, but a value that itself contains a comma would split incorrectly. For data whose values may contain the delimiter, use a `Json[...]` field instead.
 
-- `list`, `set`, and `tuple` defaults are joined with the field's `separator` (e.g. `a,b` or `a;b`); an empty collection renders as an empty value, not `[]` (which would parse back as `["[]"]`)
+- `list`, `set`, and `tuple` defaults are joined with the field's `separator` (e.g. `a,b` or `a;b`); `set` items are sorted so generated files are deterministic; an empty collection renders as an empty value, not `[]` (which would parse back as `["[]"]`)
 - `dict` defaults render as `key=value` pairs, e.g. `cpu=4,mem=2`
 - `Json[...]` fields render as JSON, e.g. `{"beta": true}`
-- A `default_factory` is invoked once at generation time and its result is rendered with the same rules — you never see a `<<lambda()>>` callable repr
-- A factory that raises during generation logs a warning and renders a placeholder comment, e.g. `# KEY=<<set per environment>>` (never as an example value)
+- `Enum` members render as their values, including members inside collections
+- A `default_factory` is invoked once per render and its result is rendered with the same rules — you never see a `<<lambda()>>` callable repr. Generation and `describe()` therefore **execute** the factory: side-effecting or expensive factories run at generation time
+- A factory that raises during generation — or a default that cannot be rendered (e.g. a non-serializable `Json[...]` value) — logs a warning and renders a placeholder comment, e.g. `# KEY=<<set per environment>>` (never as an example value). The JSON output format emits the `"<<set per environment>>"` string as its documented sentinel for unrenderable defaults
 
 ## Documenting Multiple Configurations
 
