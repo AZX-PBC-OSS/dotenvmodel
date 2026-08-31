@@ -191,11 +191,17 @@ def render_dotenv(
             type_info += f" | Constraints: {field.constraints}"
         lines.append(type_info)
 
-        if include_examples:
-            if field.default and field.default not in ("-", "None", "<secret>"):
-                lines.append(f"# Example: {field.env_var}={field.default}")
-            elif field.type_name.startswith("list["):
-                lines.append(f"# Example: {field.env_var}=value1,value2,value3")
+        # Type-based Example lines cover only the cases where the value line
+        # below shows nothing useful: required fields (default "-") and empty
+        # defaults (""). Any other default is already shown on the value
+        # line, so an Example line would be a byte-identical duplicate.
+        # Unknowable defaults (a raising factory renders
+        # SET_PER_ENVIRONMENT), secrets, and None defaults get no Example
+        # line either.
+        if include_examples and field.default in ("", "-"):
+            if field.type_name.startswith("list["):
+                sep = field.separator
+                lines.append(f"# Example: {field.env_var}=value1{sep}value2{sep}value3")
             elif field.type_name == "int":
                 lines.append(f"# Example: {field.env_var}=8000")
             elif field.type_name == "bool":
@@ -208,9 +214,13 @@ def render_dotenv(
         else:
             if field.default == "<secret>":
                 lines.append(f"# {field.env_var}=your_secret_here")
-            elif field.default and field.default != "-":
+            elif field.default and field.default not in ("-", "None"):
                 lines.append(f"# {field.env_var}={field.default}")
             else:
+                # A "None" default lands here on purpose: "KEY=None" fails
+                # coercion for non-str fields when uncommented, and env
+                # files cannot express None — the empty value (which
+                # Optional fields map back to None) is the honest render.
                 lines.append(f"# {field.env_var}=")
 
         lines.append("")
