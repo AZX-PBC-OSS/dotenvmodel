@@ -52,6 +52,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from dotenvmodel._constants import LOGGER_NAME
+from dotenvmodel.loading import resolve_load_params
 
 if TYPE_CHECKING:
     from dotenvmodel.config import DotEnvConfig
@@ -134,16 +135,19 @@ def clear_cached(cls: type[DotEnvConfig]) -> None:
 def acquire_cached(
     cls: type[DotEnvConfig],
     env: str | None,
-    override: bool,
+    override: bool | None,
     env_dir: Path | None,
+    read_dotfiles: bool | None,
+    load_local: bool | None,
 ) -> DotEnvConfig:
     """Return the cached instance for *cls*, loading on first call.
 
     Implements double-checked locking: a lock-free fast path checks
     ``cls.__dict__``; if the cache is warm, the existing instance is returned
-    immediately (with a warning if arguments that disagree with the ones
-    that populated the cache are passed). If the cache is cold, a module-level lock is
-    acquired and the check is repeated before calling ``cls.load()``.
+    immediately (with a warning if the caller's arguments resolve differently
+    from the parameters the cached instance holds). If the cache is cold, a
+    module-level lock is acquired and the check is repeated before calling
+    ``cls.load()``.
 
     Reentrant calls for the same class from within that class's own
     ``load()`` / ``post_load()`` / field ``validator`` hooks are detected
@@ -155,8 +159,10 @@ def acquire_cached(
     Args:
         cls: The config class to cache for.
         env: Environment name (only used on first call).
-        override: Whether .env files override env vars (only used on first call).
+        override: Whether dotfiles beat the process env (only used on first call).
         env_dir: Custom .env directory (only used on first call).
+        read_dotfiles: Whether to read dotfiles at all (only used on first call).
+        load_local: Whether to include ``.local`` files (only used on first call).
 
     Returns:
         The cached ``DotEnvConfig`` instance.
@@ -168,29 +174,52 @@ def acquire_cached(
     """
     cached = get_cached(cls)
     if cached is not None:
-        # Warn on DISAGREEMENT, not on non-default arguments. An application accessor that
-        # consistently passes the same non-default arguments (e.g. `override=False`) on every
-        # call is asking for exactly what it already got, and warning it every time would train
-        # readers to filter the message out. A caller passing something the cache was NOT built
-        # with is the real bug this catches, and it still fires.
-        #
-        # Compared against the INSTANCE's own record of how it was loaded — the same fields
-        # `reload()` reuses — rather than a second copy kept beside the cache. One source of
-        # truth, and self-correcting: `reload(env="prod")` updates them, so a later `cached()`
-        # is judged against what the cached object actually holds now, not against whatever
-        # populated it originally.
-        loaded = cached.loaded_with()
-        if (env, override, env_dir) != loaded:
-            logger.warning(
-                "cached() called on %s with arguments (env=%r, override=%r, "
-                "env_dir=%r) but the cache is already populated with "
-                "(env=%r, override=%r, env_dir=%r); arguments were ignored.",
-                cls.__name__,
+        # An instance installed via cached_override() that never went through
+        # an environment load (load_from_dict(), bare construction) has no
+        # recorded parameters to disagree with — loaded_with() would raise,
+        # and there is nothing to compare, so it is returned unjudged.
+        if cached._load_params is not None:
+            # Warn on DISAGREEMENT, not on non-default arguments. The caller's
+            # arguments are resolved through the same tier model the cache was
+            # built with first, so an accessor that consistently asks for what
+            # it already got (however it spells it) stays silent; a warning
+            # that fires on correct usage is one readers learn to filter out.
+            # A caller whose *resolved* request differs from what the cache
+            # holds is the real bug this catches, and it still fires.
+            #
+            # Compared against the INSTANCE's own record of how it was loaded —
+            # the same fields `reload()` reuses — rather than a second copy
+            # kept beside the cache. One source of truth, and self-correcting:
+            # `reload(env="prod")` updates them, so a later `cached()` is
+            # judged against what the cached object actually holds now, not
+            # against whatever populated it originally.
+            requested = resolve_load_params(
                 env,
-                override,
-                env_dir,
-                *loaded,
+                override=override,
+                env_dir=env_dir,
+                read_dotfiles=read_dotfiles,
+                load_local=load_local,
             )
+            loaded = cached.loaded_with()
+            if requested != loaded:
+                logger.warning(
+                    "cached() called on %s with arguments (env=%r, override=%r, "
+                    "env_dir=%r, read_dotfiles=%r, load_local=%r) that resolve "
+                    "differently from the parameters the cache holds (env=%r, "
+                    "override=%r, env_dir=%r, read_dotfiles=%r, load_local=%r); "
+                    "arguments were ignored.",
+                    cls.__name__,
+                    requested.env,
+                    requested.override,
+                    requested.env_dir,
+                    requested.read_dotfiles,
+                    requested.load_local,
+                    loaded.env,
+                    loaded.override,
+                    loaded.env_dir,
+                    loaded.read_dotfiles,
+                    loaded.load_local,
+                )
         return cached
 
     loading = _get_loading_set()
@@ -216,7 +245,13 @@ def acquire_cached(
             if cached is not None:
                 return cached
 
-            instance = cls.load(env=env, override=override, env_dir=env_dir)
+            instance = cls.load(
+                env=env,
+                override=override,
+                env_dir=env_dir,
+                read_dotfiles=read_dotfiles,
+                load_local=load_local,
+            )
             set_cached(cls, instance)
             return instance
     finally:

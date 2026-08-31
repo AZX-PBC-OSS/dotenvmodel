@@ -2,6 +2,7 @@
 
 import builtins
 import logging
+import os
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
@@ -25,7 +26,13 @@ from dotenvmodel.exceptions import (
     ValidationError,
 )
 from dotenvmodel.fields import FieldInfo, ValidatorContext, _validator_name
-from dotenvmodel.loading import get_env_var, get_env_var_name, load_env_files
+from dotenvmodel.loading import (
+    DotenvLayer,
+    LoadParams,
+    get_env_var_name,
+    read_env_files,
+    resolve_load_params,
+)
 from dotenvmodel.metaclass import ConfigMeta
 from dotenvmodel.types import SecretStr, is_sensitive_type, is_sensitive_value
 from dotenvmodel.validation import validate_field
@@ -241,6 +248,35 @@ def _raise_collected(errors: list[ValidationError] | None) -> None:
     raise MultipleValidationErrors(errors)
 
 
+def _resolve_raw_value(
+    env_var_name: str,
+    dotenv_layer: DotenvLayer | None,
+    override: bool,
+) -> str | None:
+    """Resolve one field's raw value across the process-env and dotfile layers.
+
+    With ``override`` False (the default) the process environment wins;
+    with ``override`` True the merged dotfile layer wins. The losing layer
+    is the fallback, and ``None`` (field default) only when both are unset.
+    """
+    os_value = os.getenv(env_var_name)
+    file_value = dotenv_layer.values.get(env_var_name) if dotenv_layer is not None else None
+    if override:
+        value, source = (
+            (file_value, "dotfile layer") if file_value is not None else (os_value, "process env")
+        )
+    else:
+        value, source = (
+            (os_value, "process env") if os_value is not None else (file_value, "dotfile layer")
+        )
+    # Log the source only, never the value — a raw value may be a secret.
+    if value is not None:
+        logger.debug(f"{env_var_name}: resolved from {source}")
+    else:
+        logger.debug(f"{env_var_name}: unset in every layer, using the field default")
+    return value
+
+
 class DotEnvConfig(metaclass=ConfigMeta):
     """Base class for type-safe environment configuration.
 
@@ -300,9 +336,11 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
     _fields: builtins.dict[str, tuple[type, FieldInfo]]
     _loaded: bool = False
-    _load_env: str | None = None  # Store the env used during load
-    _load_override: bool = True  # Store the override flag used during load
-    _load_env_dir: Path | None = None  # Store the env_dir used during load
+    # Resolved load settings from the most recent load()/reload(); None
+    # until an environment load succeeds. load_from_dict() records nothing
+    # — a dict load has no environment parameters to record, so
+    # loaded_with() raises for its instances.
+    _load_params: LoadParams | None = None
     # Bare annotation only — no assignment. An actual `= None` here would
     # place a real entry in DotEnvConfig.__dict__, making has_cached() treat
     # the base class as already-cached and letting reset_cached() delete the
@@ -323,6 +361,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
         *,
         env_source: builtins.dict[str, str] | None = None,
         validate: bool = True,
+        dotenv_layer: DotenvLayer | None = None,
+        override: bool = False,
     ) -> Any:
         """
         Process a single field: handle missing values, coerce, and validate.
@@ -338,6 +378,13 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 Forwarded to nested `DotEnvConfig` fields so they resolve
                 from the same source as their parent.
             validate: Whether to perform validation (default: True)
+            dotenv_layer: The merged dotfile layer passed to the enclosing
+                `_load_fields` call. Forwarded to nested `DotEnvConfig`
+                fields so they see the same file values as their parent —
+                without this, nested configs would lose dotfile values the
+                pre-0.7 os.environ injection used to give them.
+            override: The override policy of the enclosing load, forwarded
+                to nested `DotEnvConfig` fields alongside `dotenv_layer`.
 
         Returns:
             Processed and validated value
@@ -375,7 +422,12 @@ class DotEnvConfig(metaclass=ConfigMeta):
         # TestRequiredNestedConfigField below for the pinned behavior.
         if isinstance(field_type, type) and issubclass(field_type, DotEnvConfig):
             nested = field_type()
-            nested._load_fields(env_source, validate=validate)
+            nested._load_fields(
+                env_source,
+                validate=validate,
+                dotenv_layer=dotenv_layer,
+                override=override,
+            )
             return nested
 
         # Handle missing values
@@ -442,6 +494,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
         env_source: dict[str, str] | None,
         *,
         validate: bool = True,
+        dotenv_layer: DotenvLayer | None = None,
+        override: bool = False,
     ) -> None:
         """Process all fields from the given source, setting attributes on self.
 
@@ -449,6 +503,14 @@ class DotEnvConfig(metaclass=ConfigMeta):
             env_source: If None, reads from environment variables. If a dict,
                 reads from the dict (for load_from_dict / testing).
             validate: Whether to perform validation (default True).
+            dotenv_layer: The merged .env cascade for this load, or None
+                when no dotfiles were read (dict loads, or
+                read_dotfiles=False). Only consulted when env_source is
+                None: each field resolves process env first unless
+                `override`, falling back to the other layer.
+            override: Whether the dotfile layer beats the process
+                environment (only meaningful alongside a dotenv_layer, with
+                env_source None).
 
         Raises:
             ValidationError: If any field fails validation. Collects all errors
@@ -466,7 +528,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 if raw_value is None:
                     raw_value = env_source.get(field_name)
             else:
-                raw_value = get_env_var(field_name, field_info.alias, prefix)
+                raw_value = _resolve_raw_value(env_var_name, dotenv_layer, override)
 
             try:
                 value = self._process_field(
@@ -477,6 +539,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
                     env_var_name,
                     env_source=env_source,
                     validate=validate,
+                    dotenv_layer=dotenv_layer,
+                    override=override,
                 )
                 setattr(self, field_name, value)
             except ValidationError as e:
@@ -496,10 +560,34 @@ class DotEnvConfig(metaclass=ConfigMeta):
         cls,
         env: str | None = None,
         *,
-        override: bool = True,
+        override: bool | None = None,
         env_dir: Path | None = None,
+        read_dotfiles: bool | None = None,
+        load_local: bool | None = None,
     ) -> Self:
         """Load configuration from environment variables and .env files.
+
+        Each field is resolved across three layers, with no `os.environ`
+        mutation (a breaking change from <= 0.6.3, which injected dotfile
+        values into the process environment):
+
+        - default (`override=False`): process environment -> merged dotfile cascade -> field default
+        - `override=True` (opt-in): merged dotfile cascade -> process environment -> field default
+
+        The dotfile cascade (`.env`, `.env.local`, `.env.{env}`,
+        `.env.{env}.local`) is merged once per load with later files
+        winning, then the override policy is applied once against the
+        whole merged layer.
+
+        Every parameter follows explicit argument > environment variable > default:
+
+        | Parameter | Env var | Default |
+        |---|---|---|
+        | `env` | `ENV` | `"dev"` |
+        | `env_dir` | `DOTENV_DIR` | `Path.cwd()` |
+        | `override` | `DOTENV_OVERRIDE` | `False` |
+        | `read_dotfiles` | `DOTENV_READ_DOTFILES` | `True` |
+        | `load_local` | `DOTENV_LOAD_LOCAL` | `False` when the resolved env is `"test"`, else `True` |
 
         When to use:
             - In application startup to load config from the environment
@@ -513,10 +601,22 @@ class DotEnvConfig(metaclass=ConfigMeta):
         Args:
             env: Environment name (e.g., "dev", "prod", "test"). If None, reads from
                 the `ENV` environment variable, defaults to "dev"
-            override: If True, .env file values override existing environment variables.
-                If False, existing env vars take precedence over .env files
+            override: If True, .env file values take precedence over existing
+                environment variables. If False or None-without-`DOTENV_OVERRIDE`
+                (the default), existing environment variables take precedence
+                over .env files
             env_dir: Custom base directory for .env files. If None, uses
                 the `DOTENV_DIR` environment variable or current working directory
+            read_dotfiles: If False, skip the .env cascade entirely — no files
+                are probed, no "No .env files found" warning is logged, and a
+                missing `env_dir` does not raise; fields resolve from the
+                process environment and defaults only (`override` becomes moot)
+            load_local: If False, `.env.local` and `.env.{env}.local` are not
+                read in any environment. If None, `DOTENV_LOAD_LOCAL` applies,
+                else the default: skip `.local` files only when the resolved
+                env is "test" (Next.js/dotenv-flow convention — tests should
+                produce the same results for everyone); `.env.{env}` itself,
+                e.g. `.env.test`, is still read
 
         Returns:
             Instance of the config class with all fields populated and validated
@@ -526,8 +626,13 @@ class DotEnvConfig(metaclass=ConfigMeta):
             TypeCoercionError: If a value cannot be coerced to the field type
             ConstraintViolationError: If a value fails validation constraints
             MultipleValidationErrors: If multiple fields fail validation simultaneously
-            FileNotFoundError: If `env_dir` is provided but doesn't exist
+            FileNotFoundError: If dotfiles are read (read_dotfiles is not
+                False) and the resolved env_dir doesn't exist
             ValueError: If `env` contains invalid characters (path traversal protection)
+
+        Note:
+            `load()` never mutates `os.environ`. Code that relied on the old
+            side effect should call python-dotenv's `load_dotenv()` directly.
 
         Example:
             ```python
@@ -537,8 +642,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
             # Explicit environment
             config = Config.load(env="prod")
 
-            # Don't override existing env vars
-            config = Config.load(override=False)
+            # Opt in: dotfiles beat the process environment
+            config = Config.load(override=True)
 
             # Custom .env file location
             from pathlib import Path
@@ -551,35 +656,58 @@ class DotEnvConfig(metaclass=ConfigMeta):
         """
         logger.info(f"Loading {cls.__name__} configuration")
 
-        load_env_files(env=env, override=override, env_dir=env_dir)
+        params = resolve_load_params(
+            env,
+            override=override,
+            env_dir=env_dir,
+            read_dotfiles=read_dotfiles,
+            load_local=load_local,
+        )
+        dotenv_layer = (
+            read_env_files(env=params.env, env_dir=params.env_dir, load_local=params.load_local)
+            if params.read_dotfiles
+            else None
+        )
 
         instance = cls()
         logger.debug(f"Processing {len(cls._fields)} field(s)")
 
-        instance._load_fields(None)
+        instance._load_fields(None, dotenv_layer=dotenv_layer, override=params.override)
 
         logger.info(f"{cls.__name__} configuration loaded successfully")
         logger.debug(f"Loaded fields: {', '.join(cls._fields.keys())}")
 
         instance._loaded = True
-        instance._load_env = env
-        instance._load_override = override
-        instance._load_env_dir = env_dir
+        instance._load_params = params
         return instance
 
-    def loaded_with(self) -> tuple[str | None, bool, Path | None]:
-        """The ``(env, override, env_dir)`` this instance was last loaded with.
+    def loaded_with(self) -> LoadParams:
+        """The resolved `LoadParams` this instance was last loaded with.
 
         `reload()` uses it to repeat a load without restating its arguments — so a SIGHUP
-        handler calling `reload()` with no arguments keeps the original precedence rather than
-        silently reverting to `override=True`. `cached()`'s warm path uses it to tell a caller
-        who agrees with how the cache was built from one who disagrees.
+        handler calling `reload()` with no arguments keeps the original precedence and
+        file-discovery settings rather than silently reverting to the defaults.
+        `cached()`'s warm path uses it to tell a caller who agrees with how the cache was
+        built from one who disagrees.
 
         Exposed rather than read field-by-field so there is one definition of "how was this
-        loaded", and callers outside this class do not reach into three private attributes.
-        Values reflect the most recent `reload()`, not only the original `load()`.
+        loaded", and callers outside this class do not reach into private attributes.
+        Values reflect the most recent `reload()`, not only the original `load()`; the
+        recorded values are the *resolved* ones (booleans never `None`, `env_dir` the
+        resolved base directory), so a bare `reload()` is stable across cwd changes.
+
+        Raises:
+            RuntimeError: If the instance was never loaded from the
+                environment — instances from `load_from_dict()` or bare
+                construction have no recorded parameters.
         """
-        return (self._load_env, self._load_override, self._load_env_dir)
+        if self._load_params is None:
+            raise RuntimeError(
+                f"{type(self).__name__} instance was never loaded from the "
+                "environment; loaded_with() is only available after "
+                "load()/reload()/cached()."
+            )
+        return self._load_params
 
     def reload(
         self,
@@ -587,6 +715,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
         *,
         override: bool | None = None,
         env_dir: Path | None = None,
+        read_dotfiles: bool | None = None,
+        load_local: bool | None = None,
     ) -> Self:
         """Reload configuration from environment variables and .env files.
 
@@ -599,18 +729,26 @@ class DotEnvConfig(metaclass=ConfigMeta):
             - After programmatically changing environment variables
             - When switching environments at runtime (e.g., dev to prod)
 
-        By default, this uses the same parameters (env, override, env_dir) that
-        were used during the original `load()` call. You can override any of these
-        by passing new values.
+        By default, this repeats the same five resolved parameters (env,
+        override, env_dir, read_dotfiles, load_local) recorded by the
+        original `load()` — the recorded values win over the `DOTENV_*`
+        env-var tier, so a bare `reload()` never silently changes behavior.
+        You can override any of them by passing new values. An instance
+        loaded via `load_from_dict()` has nothing recorded; its `reload()`
+        resolves all five from the tiers.
 
         Args:
             env: Environment name (e.g., "dev", "prod", "test"). If None, uses
                 the env from the original load() call
-            override: If True, .env file values override existing environment variables.
-                If False, existing env vars take precedence. If None, uses the
-                override value from the original load() call
-            env_dir: Custom base directory for .env files. If None, uses
-                the env_dir from the original load() call
+            override: If True, .env file values take precedence over existing
+                environment variables. If None, uses the override value from
+                the original load() call
+            env_dir: Custom base directory for .env files. If None, uses the
+                env_dir from the original load() call
+            read_dotfiles: If False, skip the .env cascade entirely (see
+                `load()`). If None, uses the value from the original load() call
+            load_local: Whether to include `.local` files (see `load()`).
+                If None, uses the value from the original load() call
 
         Returns:
             Self (the same instance with reloaded values, useful for method chaining)
@@ -629,7 +767,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
             import os
             os.environ["PORT"] = "9000"
 
-            # Reload picks up the new value
+            # Reload picks up the new value, keeping env="dev" and override=True
             config.reload()
             print(config.port)  # 9000
 
@@ -642,22 +780,34 @@ class DotEnvConfig(metaclass=ConfigMeta):
         """
         logger.info(f"Reloading {self.__class__.__name__} configuration")
 
-        loaded_env, loaded_override, loaded_env_dir = self.loaded_with()
-        reload_env = env if env is not None else loaded_env
-        reload_override = override if override is not None else loaded_override
-        reload_env_dir = env_dir if env_dir is not None else loaded_env_dir
+        recorded = self._load_params
+        if recorded is not None:
+            env = recorded.env if env is None else env
+            override = recorded.override if override is None else override
+            env_dir = recorded.env_dir if env_dir is None else env_dir
+            read_dotfiles = recorded.read_dotfiles if read_dotfiles is None else read_dotfiles
+            load_local = recorded.load_local if load_local is None else load_local
 
-        load_env_files(env=reload_env, override=reload_override, env_dir=reload_env_dir)
+        params = resolve_load_params(
+            env,
+            override=override,
+            env_dir=env_dir,
+            read_dotfiles=read_dotfiles,
+            load_local=load_local,
+        )
+        dotenv_layer = (
+            read_env_files(env=params.env, env_dir=params.env_dir, load_local=params.load_local)
+            if params.read_dotfiles
+            else None
+        )
 
         logger.debug(f"Reloading {len(self._fields)} field(s)")
-        self._load_fields(None)
+        self._load_fields(None, dotenv_layer=dotenv_layer, override=params.override)
 
         logger.info(f"{self.__class__.__name__} configuration reloaded successfully")
         logger.debug(f"Reloaded fields: {', '.join(self._fields.keys())}")
 
-        self._load_env = reload_env
-        self._load_override = reload_override
-        self._load_env_dir = reload_env_dir
+        self._load_params = params
         return self
 
     @classmethod
@@ -718,8 +868,10 @@ class DotEnvConfig(metaclass=ConfigMeta):
         cls,
         env: str | None = None,
         *,
-        override: bool = True,
+        override: bool | None = None,
         env_dir: Path | None = None,
+        read_dotfiles: bool | None = None,
+        load_local: bool | None = None,
     ) -> Self:
         """Return the process-wide cached instance for this exact config class, loading it on first call.
 
@@ -727,8 +879,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
         calls `load()`, the rest block and receive the same instance. Subsequent
         calls (from any thread) return the cached instance immediately without
         re-reading the environment, ignoring any arguments passed after the first
-        call (a warning is logged if arguments that disagree with the ones
-        that populated the cache are passed against an already-warm cache).
+        call (a warning is logged if the caller's arguments resolve differently
+        from the `LoadParams` the cached instance holds).
 
         The cached instance is stored as a private class attribute on the config
         class itself (not in a module-level registry), so its lifetime is tied
@@ -767,12 +919,18 @@ class DotEnvConfig(metaclass=ConfigMeta):
             env: Environment name (e.g., "dev", "prod", "test"). If None, reads
                 from the `ENV` environment variable, defaults to "dev". Only
                 used on the first call; ignored once the cache is warm.
-            override: If True, .env file values override existing environment
-                variables. If False, existing env vars take precedence over
-                .env files. Only used on the first call; ignored once the cache
+            override: If True, .env file values take precedence over existing
+                environment variables. If False or None (the default),
+                existing environment variables take precedence over .env
+                files. Only used on the first call; ignored once the cache
                 is warm.
             env_dir: Custom base directory for .env files. If None, uses the
                 `DOTENV_DIR` environment variable or current working directory.
+                Only used on the first call; ignored once the cache is warm.
+            read_dotfiles: If False, skip the .env cascade entirely (see
+                `load()`). Only used on the first call; ignored once the
+                cache is warm.
+            load_local: Whether to include `.local` files (see `load()`).
                 Only used on the first call; ignored once the cache is warm.
 
         Returns:
@@ -827,7 +985,10 @@ class DotEnvConfig(metaclass=ConfigMeta):
             - [`cached_override`][dotenvmodel.config.DotEnvConfig.cached_override]:
               Scoped, self-restoring override for tests.
         """
-        return cast(Self, acquire_cached(cls, env, override, env_dir))
+        return cast(
+            Self,
+            acquire_cached(cls, env, override, env_dir, read_dotfiles, load_local),
+        )
 
     @classmethod
     def reset_cached(cls) -> None:

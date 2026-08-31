@@ -29,6 +29,9 @@ Public API:
     - `SecretStr`: String type that hides values in logs
     - `HttpUrl`, `PostgresDsn`, `RedisDsn`: URL/DSN types with validation
     - `Json`: Type for parsing JSON strings
+    - `LoadParams`: Frozen record of resolved load parameters (env, override,
+      env_dir, read_dotfiles, load_local), as returned by
+      `DotEnvConfig.loaded_with()`
     - `describe_configs`: Generate docs for multiple config classes
     - `generate_env_example`: Generate .env.example files
     - `configure_logging`, `disable_logging`: Logging utilities
@@ -55,6 +58,7 @@ from dotenvmodel.exceptions import (
     ValidationError,
 )
 from dotenvmodel.fields import Field, Required, ValidatorContext
+from dotenvmodel.loading import LoadParams
 from dotenvmodel.logging_config import configure_logging, disable_logging
 from dotenvmodel.types import (
     HttpUrl,
@@ -72,6 +76,7 @@ __all__ = [
     "Field",
     "HttpUrl",
     "Json",
+    "LoadParams",
     "MissingFieldError",
     "MultipleValidationErrors",
     "PostgresDsn",
