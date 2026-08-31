@@ -222,6 +222,8 @@ class Config(DotEnvConfig):
 !!! tip "Choices work with any type"
     `choices` validates after type coercion, so you can use it with `int`, `bool`, or any type. For example: `port: int = Field(default=80, choices=[80, 443, 8080])`.
 
+    On `SecretStr` fields, `choices` compares the secret's plaintext, so plain-string choices work; the allowed choices are listed in the error while the attempted value stays masked.
+
 ---
 
 ## Custom Validators
