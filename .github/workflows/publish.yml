@@ -121,7 +121,7 @@ jobs:
             exit 1
           fi
           url="https://pypi.org/pypi/dotenvmodel/${version}/json"
-          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "${url}")"
+          status="$(curl --silent --show-error --connect-timeout 10 --max-time 30 --output /dev/null --write-out '%{http_code}' "${url}")"
           case "${status}" in
             200)
               echo "dotenvmodel ${version} is already published on PyPI; skipping the upload"
