@@ -224,7 +224,7 @@ The `.env.example` file includes:
 
 ### How default values are rendered
 
-Defaults render in the format dotenvmodel itself parses, so uncommenting a default line round-trips — as long as no value contains the field's `separator` (or `=` for `dict` values). `a,b` parses back as `["a", "b"]`, but a value that itself contains a comma would split incorrectly. For data whose values may contain the delimiter, use a `Json[...]` field instead.
+Defaults render in the format dotenvmodel itself parses, so uncommenting a default line round-trips — for joined collections, `dict` pairs, JSON, `Enum` values, and unquoted strings for non-`str` fields — as long as no value contains the field's `separator` and no `dict` key contains `=` (a value containing `=` round-trips fine: pairs split on the first `=` only). `a,b` parses back as `["a", "b"]`, but a value that itself contains a comma would split incorrectly. For data whose values may contain the delimiter, use a `Json[...]` field instead. Repr-form scalar defaults are display-only and do not round-trip: `datetime`, `timedelta`, `Decimal`, and `UUID` defaults render reprs like `datetime.datetime(2024, 1, 1, 12, 30)`, `1:00:00`, `Decimal('19.99')`, `UUID('...')` that fail coercion loudly when uncommented, and a `Path` default renders `Path('/tmp/data')`, which silently loads the wrong value — set those via the environment or a `Json[...]` field.
 
 - `list`, `set`, and `tuple` defaults are joined with the field's `separator` (e.g. `a,b` or `a;b`); `set` items are sorted so generated files are deterministic; an empty collection renders as an empty value, not `[]` (which would parse back as `["[]"]`)
 - `dict` defaults render as `key=value` pairs, e.g. `cpu=4,mem=2`

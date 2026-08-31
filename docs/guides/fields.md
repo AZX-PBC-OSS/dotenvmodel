@@ -110,7 +110,7 @@ There are three equivalent ways to mark a field as required. All produce identic
 
 === "`default` — Immutable values"
 
-    Use `default` for immutable values like `str`, `int`, `float`, `bool`, and `None`. Literal mutable defaults (`list`, `dict`, `set`) are safe too — each `load()` deep-copies them, so instances never share the same object. Literal defaults must be deep-copyable: a default holding state that `copy.deepcopy` cannot handle (a lock, a socket) raises at load time — use `default_factory` for such values.
+    Use `default` for immutable values like `str`, `int`, `float`, `bool`, and `None`. Literal mutable defaults (`list`, `dict`, `set`) are safe too — each `load()` deep-copies them, so instances never share the same object. Literal defaults must be deep-copyable: a default holding state that `copy.deepcopy` cannot handle (a lock, a socket) raises at load time. A literal default containing a `SecretStr` (or other un-deepcopyable value) inside a collection raises `TypeError` on load — use `default_factory` for those.
 
     ```python
     class Config(DotEnvConfig):
