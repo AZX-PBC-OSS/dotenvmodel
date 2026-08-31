@@ -71,6 +71,37 @@ class TestLiteralMutableDefaults:
         a.hosts.append("corrupted")
         assert Config.load_from_dict({}).hosts == ["localhost"]
 
+    def test_secretstr_inside_collection_default_loads(self) -> None:
+        """A collection default holding SecretStr must survive the per-load copy.
+
+        ``SecretStr.__reduce__`` raises to block pickling, and ``deepcopy``
+        routes through ``__reduce_ex__`` — so a ``list[SecretStr]`` literal
+        default hits that guard and fails to load, even though a scalar
+        ``SecretStr`` default (an exact-type immutable) loads fine. The
+        anti-pickling guard exists to keep secrets out of serialized output;
+        ``deepcopy`` is in-memory and never leaves the process, so it must
+        not trip it.
+        """
+
+        class Config(DotEnvConfig):
+            keys: list[SecretStr] = Field(default=[SecretStr("s3cr3t")])
+
+        config = Config.load_from_dict({})
+
+        assert [k.get_secret_value() for k in config.keys] == ["s3cr3t"]
+
+    def test_secretstr_collection_default_not_shared_between_loads(self) -> None:
+        """The SecretStr collection default is still isolated per load."""
+
+        class Config(DotEnvConfig):
+            keys: list[SecretStr] = Field(default=[SecretStr("s3cr3t")])
+
+        first = Config.load_from_dict({})
+        first.keys.append(SecretStr("leaked"))
+        second = Config.load_from_dict({})
+
+        assert [k.get_secret_value() for k in second.keys] == ["s3cr3t"]
+
     def test_nested_mutables_in_default_deep_copied(self) -> None:
         class Config(DotEnvConfig):
             mapping: dict[str, list[str]] = Field(default={"hosts": ["a"]})
