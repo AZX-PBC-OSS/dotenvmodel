@@ -145,8 +145,10 @@ jobs:
         # a broken trusted-publisher setup fails loudly instead of hanging
         # on a missing token. uv publishes everything in dist/ by default.
         #
-        # Attestations stay off: this workflow is also invoked as a reusable
-        # workflow, where the Sigstore signing identity is the caller's
-        # top-level workflow, which cannot match this repository's PyPI
-        # trusted publisher configuration.
+        # Attestations stay off: no step in this workflow generates
+        # them (uv does not create attestations itself), so the flag
+        # only guarantees that any attestation files in dist/ are never
+        # uploaded; through workflow_call the signing identity would be
+        # the caller's workflow, which the trusted publisher cannot
+        # match anyway.
         run: uv publish --trusted-publishing always --no-attestations

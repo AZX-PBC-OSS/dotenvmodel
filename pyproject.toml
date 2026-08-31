@@ -47,7 +47,8 @@ packages = ["dotenvmodel"]
 
 [tool.hatch.build.targets.sdist]
 # Ship exactly the package plus the metadata files consumers need;
-# tests, docs, examples, CI, and dotfiles stay out of the archive.
+# tests, docs, examples, and CI stay out; hatchling force-includes
+# the project .gitignore, the sole dotfile shipped.
 only-include = [
     "dotenvmodel",
     "pyproject.toml",
