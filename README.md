@@ -944,7 +944,6 @@ class AppConfig(DotEnvConfig):
     allowed_hosts: list[str] = Field(
         default_factory=list,
         separator=";",
-        min_items=1,
         max_items=10,
         description="Allowed hostnames for CORS",
     )
@@ -970,7 +969,6 @@ APP_API_KEY=
 
 # Server port number
 # Type: int | Constraints: ge=1, le=65535
-# Example: APP_PORT=8000
 # APP_PORT=8000
 
 # Database connection password
@@ -978,9 +976,9 @@ APP_API_KEY=
 # APP_DATABASE_PASSWORD=your_secret_here
 
 # Allowed hostnames for CORS
-# Type: list[str] | Constraints: min_items=1, max_items=10, separator=';'
-# Example: APP_ALLOWED_HOSTS=[]
-# APP_ALLOWED_HOSTS=[]
+# Type: list[str] | Constraints: max_items=10, separator=';'
+# Example: APP_ALLOWED_HOSTS=value1;value2;value3
+# APP_ALLOWED_HOSTS=
 ```
 
 The `.env.example` file includes:
@@ -988,7 +986,7 @@ The `.env.example` file includes:
 - **Type information** - Shows the expected Python type
 - **Parsing hints** - Explains how to format complex types (e.g., "comma-separated values" for lists)
 - **Constraints** - Documents validation rules (min/max length, numeric ranges, etc.)
-- **Examples** - Shows example values for required fields
+- **Examples** - Shows example values for required fields and empty collection defaults (a field with a real default shows it on its own commented line instead)
 - **Commented defaults** - Optional fields are commented out with their default values
 - **Secret handling** - SecretStr fields are masked appropriately
 
@@ -1399,10 +1397,10 @@ See the [Caching guide](docs/guides/loading.md#caching-a-singleton-instance) for
    postgres_dsn: str = Field(alias="DATABASE_URL")
    ```
 
-4. **Use Default Factories**: For mutable defaults like lists and dicts
+4. **Prefer Default Factories for Mutable Defaults**: Literal mutable defaults are safe (each `load()` deep-copies them), but a factory skips that per-load copy cost
    ```python
-   hosts: list[str] = Field(default_factory=list)  # ✓ Good
-   hosts: list[str] = Field(default=[])  # ✗ Bad - mutable default
+   hosts: list[str] = Field(default_factory=list)  # ✓ Best - fresh list per load
+   hosts: list[str] = Field(default=["localhost"])  # ✓ Safe - deep-copied per load
    ```
 
 5. **Document Fields**: Use descriptions for complex configurations

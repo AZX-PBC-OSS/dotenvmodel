@@ -4,9 +4,18 @@ import json
 
 import pytest
 
-from dotenvmodel import DotEnvConfig, Field, Required, SecretStr, describe_configs
+from dotenvmodel import (
+    DotEnvConfig,
+    Field,
+    Json,
+    PostgresDsn,
+    Required,
+    SecretStr,
+    describe_configs,
+)
 from dotenvmodel.describe import FieldDescription, describe_class
 from dotenvmodel.describe.formatters import (
+    TRUNCATE_THRESHOLD_MEDIUM,
     format_constraints,
     format_default,
     format_type_name,
@@ -294,17 +303,17 @@ class TestFormatDefault:
     def test_factory_default_list(self) -> None:
         """Test list factory default formatting."""
         field_info = FieldInfo(default_factory=list)
-        assert format_default(field_info, list[str]) == "[]"
+        assert format_default(field_info, list[str]) == ""
 
     def test_factory_default_dict(self) -> None:
         """Test dict factory default formatting."""
         field_info = FieldInfo(default_factory=dict)
-        assert format_default(field_info, dict[str, str]) == "{}"
+        assert format_default(field_info, dict[str, str]) == ""
 
     def test_factory_default_set(self) -> None:
         """Test set factory default formatting."""
         field_info = FieldInfo(default_factory=set)
-        assert format_default(field_info, set[str]) == "set()"
+        assert format_default(field_info, set[str]) == ""
 
     def test_secret_str_default(self) -> None:
         """Test SecretStr default is hidden."""
@@ -347,9 +356,13 @@ class TestFormatDefault:
 
     def test_complex_default_truncation(self) -> None:
         """Test complex default value truncation."""
-        complex_default = {"key": "value" * 10}
-        field_info = FieldInfo(default=complex_default)
-        result = format_default(field_info, dict, truncate=True)
+
+        class Opaque:
+            def __repr__(self) -> str:
+                return f"Opaque({'x' * 40})"
+
+        field_info = FieldInfo(default=Opaque())
+        result = format_default(field_info, Opaque, truncate=True)
         assert "..." in result
 
     def test_complex_default_no_truncation(self) -> None:
@@ -357,18 +370,17 @@ class TestFormatDefault:
         complex_default = {"key": "short"}
         field_info = FieldInfo(default=complex_default)
         result = format_default(field_info, dict, truncate=False)
-        assert "..." not in result
-        assert "key" in result
+        assert result == "key=short"
 
     def test_custom_factory_default(self) -> None:
-        """Test custom factory default formatting."""
+        """Test custom factory default formatting: factory invoked, result joined."""
 
         def custom_factory() -> list[str]:
             return ["default"]
 
         field_info = FieldInfo(default_factory=custom_factory)
         result = format_default(field_info, list[str])
-        assert "<" in result and ">" in result  # Shows <factory_name()>
+        assert result == "default"
 
     def test_float_default(self) -> None:
         """Test float default formatting."""
@@ -380,6 +392,74 @@ class TestFormatDefault:
         field_info = FieldInfo(default="")
         result = format_default(field_info, str)
         assert result == '""'
+
+    def test_long_list_default_truncated_at_medium(self) -> None:
+        """Joined collection defaults are capped when truncating."""
+        field_info = FieldInfo(default=[f"item{i:02d}" for i in range(20)])
+        result = format_default(field_info, list[str], truncate=True)
+        assert len(result) == TRUNCATE_THRESHOLD_MEDIUM
+        assert result.startswith("item00,item01")
+        assert result.endswith("...")
+
+    def test_long_json_default_truncated_at_medium(self) -> None:
+        """JSON renders are capped when truncating."""
+        from dotenvmodel.types import Json
+
+        field_info = FieldInfo(default=[f"role{i:02d}" for i in range(20)])
+        result = format_default(field_info, Json[list[str]], truncate=True)  # type: ignore[arg-type]
+        assert len(result) == TRUNCATE_THRESHOLD_MEDIUM
+        assert result.endswith("...")
+
+    def test_long_list_default_untruncated(self) -> None:
+        """Without truncation the joined default is complete (dotenv round-trip)."""
+        items = [f"item{i:02d}" for i in range(20)]
+        field_info = FieldInfo(default=items)
+        result = format_default(field_info, list[str], truncate=False)
+        assert result == ",".join(items)
+
+    def test_str_default_unquoted_for_non_str_field_type(self) -> None:
+        """A str default for a non-str field renders unquoted (coerced at load)."""
+        field_info = FieldInfo(default="a,b")
+        assert format_default(field_info, list[str]) == "a,b"
+
+    def test_long_str_default_on_non_str_field_truncated_unquoted(self) -> None:
+        field_info = FieldInfo(default="a" * 30)
+        result = format_default(field_info, list[str], truncate=True)
+        assert result == "a" * (20 - 3) + "..."
+        assert '"' not in result
+
+    def test_custom_object_default_repr_not_truncated(self) -> None:
+        """truncate=False keeps the full repr of a non-collection custom object."""
+
+        class Widget:
+            def __repr__(self) -> str:
+                return "Widget(" + "x" * 40 + ")"
+
+        field_info = FieldInfo(default=Widget())
+        result = format_default(field_info, Widget, truncate=False)
+        assert result == "Widget(" + "x" * 40 + ")"
+
+    def test_markdown_bounded_for_long_list_default(self) -> None:
+        """Markdown cells (no per-cell truncation) stay bounded via format_default."""
+
+        class Config(DotEnvConfig):
+            items: list[str] = Field(default=[f"item{i:02d}" for i in range(20)])
+
+        markdown = Config.describe(output_format="markdown")
+        assert "item19" not in markdown
+
+        _, _, fields = describe_class(Config, truncate=True)
+        assert len(fields[0].default) == TRUNCATE_THRESHOLD_MEDIUM
+
+    def test_sensitive_collection_default_masks(self) -> None:
+        """A collection of sensitive types masks wholesale, not element-wise."""
+        field_info = FieldInfo(default=[SecretStr("alpha-token"), SecretStr("beta-token")])
+        assert format_default(field_info, list[SecretStr]) == "<secret>"
+
+    def test_empty_sensitive_collection_default_renders_empty(self) -> None:
+        """Empty collections reveal nothing; the empty render wins over masking."""
+        field_info = FieldInfo(default_factory=list)
+        assert format_default(field_info, list[SecretStr]) == ""
 
 
 class TestDescribeClassmethod:
@@ -643,7 +723,10 @@ class TestEdgeCases:
 
         output = Config.describe()
         assert "list[str]" in output
-        assert "[]" in output  # default_factory=list
+        # default_factory=list renders as an empty (parseable) default;
+        # "[]" would parse back as ["[]"]
+        _, _, fields = describe_class(Config, truncate=False)
+        assert fields[0].default == ""
 
     def test_description_truncation(self) -> None:
         """Test that long descriptions are truncated in table format."""
@@ -996,6 +1079,237 @@ class TestSecretStrMasking:
         result = format_default(field_info, SecretStr)
         assert result == "<secret>"
         assert "test-secret" not in result
+
+
+class TestSensitiveCollectionMasking:
+    """Collections holding sensitive types mask wholesale in describe output."""
+
+    def test_list_of_secretstr_defaults_masked_in_describe(self) -> None:
+        """A list[SecretStr] literal default renders <secret>, never element values."""
+
+        class Config(DotEnvConfig):
+            tokens: list[SecretStr] = Field(
+                default=[SecretStr("alpha-token"), SecretStr("beta-token")]
+            )
+
+        output = Config.describe()
+        assert "<secret>" in output
+        assert "alpha-token" not in output
+        assert "beta-token" not in output
+        assert "**********" not in output
+
+    def test_list_of_secretstr_masked_in_env_example(self) -> None:
+        """generate_env_example() emits the your_secret_here line, no values."""
+
+        class Config(DotEnvConfig):
+            tokens: list[SecretStr] = Field(
+                default=[SecretStr("alpha-token"), SecretStr("beta-token")]
+            )
+
+        output = Config.generate_env_example()
+        assert "# TOKENS=your_secret_here" in output
+        assert "alpha-token" not in output
+        assert "beta-token" not in output
+        assert "**********" not in output
+        assert "# Example: TOKENS" not in output
+
+    def test_set_of_dsns_masked_in_env_example(self) -> None:
+        """set[PostgresDsn] defaults never leak connection strings."""
+
+        class Config(DotEnvConfig):
+            dsn_pool: set[PostgresDsn] = Field(
+                default_factory=lambda: {PostgresDsn("postgresql://user:hunter2@localhost:5432/db")}
+            )
+
+        output = Config.generate_env_example()
+        assert "# DSN_POOL=your_secret_here" in output
+        assert "hunter2" not in output
+        assert "postgresql://" not in output
+
+    def test_optional_list_of_secretstr_masked(self) -> None:
+        """The Optional wrapper does not bypass sensitive-collection masking."""
+
+        class Config(DotEnvConfig):
+            opt_tokens: list[SecretStr] | None = Field(default=[SecretStr("opt-secret")])
+
+        output = Config.describe()
+        assert "<secret>" in output
+        assert "opt-secret" not in output
+
+    def test_dict_of_secretstr_masked(self) -> None:
+        """dict[str, SecretStr] defaults mask wholesale (keys and values)."""
+
+        class Config(DotEnvConfig):
+            creds: dict[str, SecretStr] = Field(
+                default_factory=lambda: {"primary": SecretStr("dict-secret")}
+            )
+
+        output = Config.describe()
+        assert "<secret>" in output
+        assert "dict-secret" not in output
+        assert "primary" not in output
+
+    def test_empty_sensitive_collection_renders_empty_with_example(self) -> None:
+        """An empty list[SecretStr] default keeps the empty render and generic example."""
+
+        class Config(DotEnvConfig):
+            tokens: list[SecretStr] = Field(default_factory=list)
+
+        output = Config.generate_env_example()
+        assert "# TOKENS=" in output
+        assert "# Example: TOKENS=value1,value2,value3" in output
+        assert "<secret>" not in output
+        assert "your_secret_here" not in output
+
+    def test_non_sensitive_collection_still_joins_values(self) -> None:
+        """list[str] defaults keep the parseable joined rendering."""
+
+        class Config(DotEnvConfig):
+            tags: list[str] = Field(default=["a", "b"])
+
+        output = Config.generate_env_example()
+        assert "# TAGS=a,b" in output
+        assert "<secret>" not in output
+
+
+class TestLooselyTypedSensitiveCollectionMasking:
+    """Secret instances mask by value where the annotation-based check cannot see them.
+
+    ``_is_sensitive_collection`` inspects annotation arguments, so bare
+    ``list``, ``list[object]``, ``set[object]``, ``dict[str, object]``, and
+    ``Enum`` classes whose members wrap secrets escape the wholesale mask.
+    ``_render_collection_item`` masks those by value instead: a
+    ``SecretStr`` renders ``<secret>`` (never ``**********``, which would
+    round-trip as literal asterisks) and a ``BaseDsn`` renders with its
+    password redacted.
+    """
+
+    def test_bare_list_with_dsn_element_redacts_password(self) -> None:
+        """A bare ``list`` default holding a DSN renders redacted, never the raw password."""
+
+        class Config(DotEnvConfig):
+            endpoints: list = Field(default=[PostgresDsn("postgresql://u:hunter2@h:5432/d")])
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "hunter2" not in rendered
+            assert "postgresql://u:hunter2@h:5432/d" not in rendered
+            assert "**********" not in rendered
+        assert "# ENDPOINTS=postgresql://u:***@h:5432/d" in example
+        assert "postgresql://u:***@" in output
+
+    def test_list_object_with_dsn_element_redacts_password(self) -> None:
+        """``list[object]`` hides secrets from the type check; the item masks by value."""
+
+        class Config(DotEnvConfig):
+            endpoints: list[object] = Field(
+                default=[PostgresDsn("postgresql://u:hunter2@h:5432/d")]
+            )
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "hunter2" not in rendered
+            assert "postgresql://u:hunter2@h:5432/d" not in rendered
+            assert "**********" not in rendered
+        assert "# ENDPOINTS=postgresql://u:***@h:5432/d" in example
+
+    def test_set_object_with_dsn_element_redacts_password(self) -> None:
+        """``set[object]`` defaults render the sorted redacted DSN, never the raw one."""
+
+        class Config(DotEnvConfig):
+            dsn_pool: set[object] = Field(
+                default_factory=lambda: {PostgresDsn("postgresql://u:hunter2@h:5432/d")}
+            )
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "hunter2" not in rendered
+            assert "postgresql://u:hunter2@h:5432/d" not in rendered
+            assert "**********" not in rendered
+        assert "# DSN_POOL=postgresql://u:***@h:5432/d" in example
+
+    def test_dict_str_object_with_dsn_value_redacts_password(self) -> None:
+        """``dict[str, object]`` values render redacted; the password never joins the pairs."""
+
+        class Config(DotEnvConfig):
+            services: dict[str, object] = Field(
+                default_factory=lambda: {"primary": PostgresDsn("postgresql://u:hunter2@h:5432/d")}
+            )
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "hunter2" not in rendered
+            assert "postgresql://u:hunter2@h:5432/d" not in rendered
+            assert "**********" not in rendered
+        assert "# SERVICES=primary=postgresql://u:***@h:5432/d" in example
+
+    def test_list_of_enum_with_dsn_valued_members_redacts_password(self) -> None:
+        """Enum members wrapping DSNs render redacted inside collections."""
+        from enum import Enum
+
+        class DsnChoice(Enum):
+            PROD = PostgresDsn("postgresql://deploy:hunter2@localhost:5432/prod")
+            FALLBACK = PostgresDsn("postgresql://deploy:standby-pw@localhost:5432/fb")
+
+        class Config(DotEnvConfig):
+            dsn_chain: list[DsnChoice] = Field(default=[DsnChoice.PROD, DsnChoice.FALLBACK])
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "hunter2" not in rendered
+            assert "standby-pw" not in rendered
+            assert "**********" not in rendered
+        assert (
+            "# DSN_CHAIN=postgresql://deploy:***@localhost:5432/prod,"
+            "postgresql://deploy:***@localhost:5432/fb" in example
+        )
+
+    def test_list_of_enum_with_secretstr_valued_members_masks(self) -> None:
+        """Enum members wrapping SecretStr render ``<secret>``, never joinable asterisks."""
+        from enum import Enum
+
+        class KeyRing(Enum):
+            PRIMARY = SecretStr("alpha-key")
+            SECONDARY = SecretStr("beta-key")
+
+        class Config(DotEnvConfig):
+            keys: list[KeyRing] = Field(default=[KeyRing.PRIMARY, KeyRing.SECONDARY])
+
+        output = Config.describe()
+        example = Config.generate_env_example()
+        for rendered in (output, example):
+            assert "alpha-key" not in rendered
+            assert "beta-key" not in rendered
+            assert "**********" not in rendered
+            assert "<secret>,<secret>" in rendered
+        assert "# KEYS=<secret>,<secret>" in example
+
+    def test_plain_value_collections_keep_exact_renders(self) -> None:
+        """Regression guard: collections without secret instances render byte-identical."""
+        from enum import Enum
+
+        class Color(str, Enum):  # noqa: UP042
+            RED = "red"
+            BLUE = "blue"
+
+        class Config(DotEnvConfig):
+            tags: list[str] = Field(default=["a", "b"])
+            ports: set[int] = Field(default={80, 443})
+            limits: dict[str, int] = Field(default_factory=lambda: {"cpu": 4, "mem": 2})
+            palette: list[Color] = Field(default=[Color.RED, Color.BLUE])
+
+        example = Config.generate_env_example()
+        assert "# TAGS=a,b" in example
+        assert "# PORTS=443,80" in example
+        assert "# LIMITS=cpu=4,mem=2" in example
+        assert "# PALETTE=red,blue" in example
+        assert "<secret>" not in example
+        assert "***" not in example
 
 
 class TestDescribeClass:
@@ -1704,7 +2018,7 @@ class TestComprehensiveIntegration:
 
         # Verify defaults
         assert "8000" in output
-        assert "[]" in output  # list default_factory
+        assert "[]" not in output  # default_factory=list renders as an empty default
         assert "development" in output
         assert "False" in output
 
@@ -1988,22 +2302,40 @@ class TestDescribeFormattingEdgeCases:
 
         output = Config.describe(output_format="dotenv")
 
-        # Optional field with no default (None) should be commented with =
-        # The field has default=None but it shows as "-" which triggers line 727
+        # Optional fields auto-default to None, which renders as an empty
+        # value line (env files cannot express None).
         assert "# OPTIONAL_VALUE=" in output
+        assert "# OPTIONAL_VALUE=None" not in output
 
     def test_dotenv_format_with_field_having_none_default(self) -> None:
-        """Test dotenv format with field having None as default value."""
+        """A None default renders an empty value line, not KEY=None."""
 
         class Config(DotEnvConfig):
-            # Explicitly test the else branch on line 727
             nullable_field: str | None = Field(default=None)
 
         output = Config.describe(output_format="dotenv")
 
-        # Should be commented since it's optional (has default)
-        # The default is "None" not "-" so it should hit line 725
-        assert "# NULLABLE_FIELD=None" in output or "# NULLABLE_FIELD=" in output
+        # "KEY=None" fails coercion when uncommented (env files cannot
+        # express None); an empty value is the closest honest render and
+        # Optional fields map it back to None.
+        assert "# NULLABLE_FIELD=" in output
+        assert "# NULLABLE_FIELD=None" not in output
+
+    def test_dotenv_format_none_default_on_typed_optional_fields(self) -> None:
+        """None defaults on Json/int/bool Optional fields render empty, not None."""
+
+        class Config(DotEnvConfig):
+            optional_json: Json[int] | None = Field(default=None)
+            optional_count: int | None = Field(default=None)
+            optional_flag: bool | None = Field(default=None)
+
+        output = Config.describe(output_format="dotenv")
+
+        for env_var in ("OPTIONAL_JSON", "OPTIONAL_COUNT", "OPTIONAL_FLAG"):
+            assert f"# {env_var}=" in output
+            assert f"# {env_var}=None" not in output
+            # None defaults stay excluded from Example lines
+            assert f"# Example: {env_var}" not in output
 
     def test_html_format_with_empty_config(self) -> None:
         """Test HTML format with empty config (no fields)."""
@@ -2124,6 +2456,79 @@ class TestEnumConstraints:
         assert "development" in output
         assert "staging" in output
         # "production" may be truncated with "..."
+
+
+class TestEnumSensitiveMemberValues:
+    """Enum members wrapping SecretStr/DSN values render masked, not raw."""
+
+    def test_enum_member_with_secretstr_value_masks(self) -> None:
+        """An Enum wrapping a SecretStr renders <secret>, not asterisks or the value."""
+        from enum import Enum
+
+        class KeyEnum(Enum):
+            PRIMARY = SecretStr("wrapped-secret")
+
+        class Config(DotEnvConfig):
+            mode: KeyEnum = Field(default=KeyEnum.PRIMARY)
+
+        output = Config.describe()
+        assert "<secret>" in output
+        assert "wrapped-secret" not in output
+        assert "**********" not in output
+
+        example = Config.generate_env_example()
+        assert "# MODE=your_secret_here" in example
+        assert "wrapped-secret" not in example
+
+    def test_enum_member_with_dsn_value_redacts_password(self) -> None:
+        """An Enum wrapping a DSN renders the redacted form; the password never leaks."""
+        from enum import Enum
+
+        class DsnChoice(Enum):
+            PROD = PostgresDsn("postgresql://deploy:hunter2@localhost:5432/prod")
+
+        class Config(DotEnvConfig):
+            dsn: DsnChoice = Field(default=DsnChoice.PROD)
+
+        output = Config.describe()
+        assert "hunter2" not in output
+
+        example = Config.generate_env_example()
+        assert "hunter2" not in example
+        assert "***" in example
+        assert '# DSN="postgresql://deploy:***@localhost:5432/prod"' in example
+
+    def test_format_default_enum_sensitive_member_shapes(self) -> None:
+        """format_default renders <secret> / quoted-redacted for sensitive members."""
+        from enum import Enum
+
+        class KeyEnum(Enum):
+            PRIMARY = SecretStr("k")
+
+        class DsnChoice(Enum):
+            PROD = PostgresDsn("postgresql://deploy:hunter2@localhost:5432/prod")
+
+        assert format_default(FieldInfo(default=KeyEnum.PRIMARY), KeyEnum) == "<secret>"
+        assert (
+            format_default(FieldInfo(default=DsnChoice.PROD), DsnChoice)
+            == '"postgresql://deploy:***@localhost:5432/prod"'
+        )
+
+    def test_plain_enum_values_still_render_round_trippable(self) -> None:
+        """Regression: plain str-valued enums keep rendering their member values."""
+        from enum import Enum
+
+        class LogLevel(str, Enum):  # noqa: UP042
+            DEBUG = "debug"
+            INFO = "info"
+
+        class Config(DotEnvConfig):
+            log_level: LogLevel = Field(default=LogLevel.INFO)
+
+        output = Config.generate_env_example()
+        assert "# LOG_LEVEL=info" in output
+        assert "<secret>" not in output
+        assert "***" not in output
 
 
 class TestDescribeStringConstraintGating:

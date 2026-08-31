@@ -166,12 +166,13 @@ API_KEY=
 # WORKERS=4
 
 # Deployment environment
-# Type: str | Choices: dev, test, staging, prod
-# ENVIRONMENT=dev
+# Type: str | Constraints: choices=[dev, test, staging, prod]
+# ENVIRONMENT="dev"
 
 # CORS allowed hosts
 # Type: list[str]
-# ALLOWED_HOSTS=[]
+# Example: ALLOWED_HOSTS=value1,value2,value3
+# ALLOWED_HOSTS=
 ```
 
 !!! tip "Automate generation in CI"

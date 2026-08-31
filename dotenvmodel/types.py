@@ -86,6 +86,37 @@ class SecretStr:
             "Extract the secret value with get_secret_value() before pickling if needed."
         )
 
+    def __deepcopy__(self, memo: dict[int, object]) -> "SecretStr":
+        """Return self: an immutable value is safe to share across copies.
+
+        Without this, ``copy.deepcopy`` falls back to ``__reduce_ex__`` and
+        trips the ``__reduce__`` anti-pickling guard. The pickling guard
+        exists to keep secrets out of serialized output; ``deepcopy`` is
+        in-memory and never leaves the process, so sharing the instance
+        leaks nothing. Safe because the value is immutable: ``__slots__``
+        is fixed and ``__setattr__``/``__delattr__`` raise.
+
+        Absent this method, ``load()`` raises ``TypeError`` when all four
+        of these hold — each one alone is enough to keep it working, which
+        is why the failure looks arbitrary from the outside:
+
+        1. The field declares a literal ``default=`` (a ``default_factory``
+           result is handed out uncopied, so it never reaches ``deepcopy``).
+        2. The env var is absent, so ``get_default()`` actually runs.
+        3. The ``SecretStr`` sits *inside* a container. A scalar
+           ``SecretStr`` default is an exact-type member of
+           ``_IMMUTABLE_DEFAULT_TYPES`` and takes the zero-copy fast path;
+           its container is not, so ``deepcopy`` recurses into the items.
+        4. Something calls ``load()`` / ``load_from_dict()`` / ``reload()``
+           / ``cached()``.
+
+        ``copy.deepcopy`` never dispatches here for a bare ``SecretStr`` —
+        it dispatches on the container, and ``_deepcopy_list``/``_dict``
+        recurse into the items. Hence condition 3: the scalar case works
+        precisely because this method is never consulted.
+        """
+        return self
+
     def __eq__(self, other: object) -> bool:
         if isinstance(other, SecretStr):
             return self.__secret == other.__secret
