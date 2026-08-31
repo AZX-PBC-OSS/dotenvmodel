@@ -641,6 +641,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
             MultipleValidationErrors: If multiple fields fail validation simultaneously
             FileNotFoundError: If dotfiles are read (read_dotfiles is not
                 False) and the resolved env_dir doesn't exist
+            NotADirectoryError: If dotfiles are read and the resolved env_dir
+                exists but is not a directory (e.g. pointed at a `.env` file
+                rather than its parent directory)
             ValueError: If `env` contains invalid characters (path traversal protection)
 
         Note:

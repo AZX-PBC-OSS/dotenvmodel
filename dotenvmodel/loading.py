@@ -123,8 +123,9 @@ def resolve_env_dir(env_dir: Path | str | None) -> Path:
     misjudging a relative spelling of the same directory.
 
     No existence check happens here. `read_env_files()` raises
-    `FileNotFoundError` when it is about to read from a missing directory;
-    a `read_dotfiles=False` load must not raise for one.
+    `FileNotFoundError` when it is about to read from a missing directory,
+    or `NotADirectoryError` when the path exists but is not a directory;
+    a `read_dotfiles=False` load must not raise for either.
 
     Args:
         env_dir: Explicit base directory — a `str` is accepted and converted
@@ -358,6 +359,9 @@ def read_env_files(
         ValueError: If `env` contains invalid characters (only alphanumeric,
             hyphens, and underscores allowed — prevents path traversal)
         FileNotFoundError: If the resolved base directory doesn't exist
+        NotADirectoryError: If the resolved base directory exists but is not
+            a directory — typically `DOTENV_DIR` or `env_dir` pointed at a
+            `.env` file itself rather than the directory containing it
 
     Example:
         ```python
@@ -379,7 +383,15 @@ def read_env_files(
     base_dir = resolve_env_dir(env_dir)
     logger.debug(f"Base directory for .env files: {base_dir}")
 
-    if not base_dir.exists():
+    # is_dir(), not exists(): a regular file passes an existence check but
+    # yields an empty cascade and a "No .env files found" warning that names
+    # the file itself — a misconfigured env_dir indistinguishable from a
+    # correctly-configured empty one. Pointing DOTENV_DIR at .env rather than
+    # its parent is the common spelling of that mistake.
+    if not base_dir.is_dir():
+        if base_dir.exists():
+            logger.error(f"Environment file directory is not a directory: {base_dir}")
+            raise NotADirectoryError(f"Environment file directory is not a directory: {base_dir}")
         logger.error(f"Environment file directory does not exist: {base_dir}")
         raise FileNotFoundError(f"Environment file directory does not exist: {base_dir}")
 

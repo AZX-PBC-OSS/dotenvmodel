@@ -195,7 +195,7 @@ config = AppConfig.load()
 
 ## The `read_dotfiles` Parameter
 
-Set `read_dotfiles=False` to skip the `.env` cascade entirely: no files are probed, no "No .env files found" warning is logged, and a missing `env_dir` does not raise `FileNotFoundError`. Fields resolve from the process environment and field defaults only — and `override` has nothing to promote in this mode.
+Set `read_dotfiles=False` to skip the `.env` cascade entirely: no files are probed, no "No .env files found" warning is logged, and an unusable `env_dir` does not raise — neither `FileNotFoundError` for a missing directory nor `NotADirectoryError` for a path that isn't one. Fields resolve from the process environment and field defaults only — and `override` has nothing to promote in this mode.
 
 ```python
 # Resolve from real env vars and defaults only — no .env files touched

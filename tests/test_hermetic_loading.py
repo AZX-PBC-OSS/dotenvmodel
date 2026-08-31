@@ -1320,6 +1320,96 @@ class TestStrEnvDirAcceptance:
         assert isinstance(config.loaded_with().env_dir, Path)
 
 
+class TestEnvDirIsADirectory:
+    """env_dir must be a directory: a file path is a distinct error, not an empty layer.
+
+    Guarding with ``exists()`` lets a regular file through, so a load with
+    ``DOTENV_DIR`` pointed at ``.env`` itself (rather than its parent) builds
+    an empty layer and warns "No .env files found" — the exact diagnostic
+    ambiguity issue #59 called out, where a misconfigured directory is
+    indistinguishable from a correctly-configured empty one. A required
+    field then fails as MissingFieldError, naming the field instead of the
+    real cause.
+    """
+
+    def test_reader_raises_not_a_directory_for_a_file_env_dir(self, tmp_path: Path) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text("VALUE=from_file\n")
+
+        with pytest.raises(NotADirectoryError, match="is not a directory"):
+            read_env_files(env_dir=env_file)
+
+    def test_load_raises_not_a_directory_for_a_file_env_dir(self, tmp_path: Path) -> None:
+        env_file = tmp_path / ".env"
+        env_file.write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        with pytest.raises(NotADirectoryError, match="is not a directory"):
+            Config.load(env_dir=env_file)
+
+    def test_dotenv_dir_pointing_at_a_file_raises(self, tmp_path: Path, monkeypatch) -> None:
+        """The env-var tier must reach the same guard as the explicit argument."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("VALUE=from_file\n")
+        monkeypatch.setenv("DOTENV_DIR", str(env_file))
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        with pytest.raises(NotADirectoryError, match="is not a directory"):
+            Config.load()
+
+    def test_file_env_dir_does_not_warn_about_missing_files(self, tmp_path: Path, caplog) -> None:
+        """The failure must not masquerade as an ordinary empty-directory load."""
+        env_file = tmp_path / ".env"
+        env_file.write_text("VALUE=from_file\n")
+
+        with (
+            caplog.at_level("WARNING", logger="dotenvmodel"),
+            pytest.raises(NotADirectoryError),
+        ):
+            read_env_files(env_dir=env_file)
+
+        assert not any("No .env files found" in r.message for r in caplog.records)
+
+    def test_missing_env_dir_still_raises_file_not_found(self, tmp_path: Path) -> None:
+        """The absent-path case keeps its own exception type; only the file case is new."""
+        with pytest.raises(FileNotFoundError, match="does not exist"):
+            read_env_files(env_dir=tmp_path / "nonexistent")
+
+    def test_not_a_directory_is_not_a_file_not_found(self, tmp_path: Path) -> None:
+        """NotADirectoryError and FileNotFoundError are sibling OSErrors, not sub/superclass.
+
+        Pins the distinction the type is chosen for: a caller catching
+        FileNotFoundError must NOT silently swallow the wrong-kind-of-path case.
+        """
+        env_file = tmp_path / ".env"
+        env_file.write_text("VALUE=from_file\n")
+
+        with pytest.raises(NotADirectoryError) as excinfo:
+            read_env_files(env_dir=env_file)
+
+        assert not isinstance(excinfo.value, FileNotFoundError)
+
+    def test_read_dotfiles_false_ignores_a_file_env_dir(self, tmp_path: Path, monkeypatch) -> None:
+        """read_dotfiles=False skips the cascade entirely, so the guard never runs.
+
+        Mirrors test_missing_env_dir_does_not_raise: the documented escape
+        hatch must stay usable no matter what env_dir points at.
+        """
+        monkeypatch.delenv("VALUE", raising=False)
+        env_file = tmp_path / ".env"
+        env_file.write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        config = Config.load(env_dir=env_file, read_dotfiles=False)
+        assert config.value == "default"
+
+
 class TestEnvNameResolution:
     """resolve_env_name(): an empty ENV env var is treated as unset."""
 
