@@ -18,7 +18,13 @@ import pytest
 
 import dotenvmodel.config as config_module
 import dotenvmodel.loading as loading_module
-from dotenvmodel import ConstraintViolationError, DotEnvConfig, Field, SecretStr
+from dotenvmodel import (
+    ConstraintViolationError,
+    DotEnvConfig,
+    Field,
+    SecretStr,
+    TypeCoercionError,
+)
 from dotenvmodel.loading import read_env_files
 
 
@@ -288,6 +294,51 @@ class TestResolvedDefaultsFlowThroughExistingMachinery:
 
         assert "short-tok" not in str(exc_info.value)
         assert "**********" in str(exc_info.value)
+
+    def test_coercion_failure_does_not_leak_a_secret_pulled_in_by_a_template(
+        self, tmp_path: Path
+    ) -> None:
+        """A template resolving to secret material must not reach the error text.
+
+        Masking is keyed to the field's declared type, so the sibling
+        SecretStr case above is already covered. This is the mirror: a
+        plainly-typed field whose template happens to reference a secret
+        var. Before defaults were templates the reference was inert text
+        that could never carry live secret material; now it resolves
+        first, so the coercion failure reports the resolved value. The
+        unresolved template is both the safe thing to print and the
+        better diagnostic — it is what the developer actually wrote.
+        """
+        (tmp_path / ".env").write_text("SECRET_TOKEN=supersecret123\n")
+
+        class Config(DotEnvConfig):
+            port: int = Field(default="${SECRET_TOKEN}")
+
+        with pytest.raises(TypeCoercionError) as exc_info:
+            Config.load(env_dir=tmp_path)
+
+        assert "supersecret123" not in str(exc_info.value)
+        assert "${SECRET_TOKEN}" in str(exc_info.value)
+
+    def test_constraint_failure_does_not_leak_a_secret_pulled_in_by_a_template(
+        self, tmp_path: Path
+    ) -> None:
+        """The constraint path reports the template too, not the resolution.
+
+        Validation runs on the resolved default whether or not coercion
+        did, and a str field skips the coercion route entirely — so this
+        path needs the same treatment rather than inheriting it.
+        """
+        (tmp_path / ".env").write_text("SECRET_TOKEN=supersecret123\n")
+
+        class Config(DotEnvConfig):
+            name: str = Field(default="${SECRET_TOKEN}", min_length=99)
+
+        with pytest.raises(ConstraintViolationError) as exc_info:
+            Config.load(env_dir=tmp_path)
+
+        assert "supersecret123" not in str(exc_info.value)
+        assert "${SECRET_TOKEN}" in str(exc_info.value)
 
 
 class TestDefaultFormsAndRefresh:

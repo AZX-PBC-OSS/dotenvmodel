@@ -56,6 +56,21 @@ def _masked_report_value(value: Any) -> Any:
     return SecretStr("**********")
 
 
+def _mask_template_resolution(error_msg: str, resolved: str) -> str:
+    """Scrub a template's resolved value out of an upstream coercion message.
+
+    Coercion errors quote the offending text (``invalid literal for int()
+    with base 10: 'supersecret123'``), so substituting only the reported
+    ``value`` would still leak a ``${VAR}`` reference's resolved secret
+    through ``error_msg``. Replace it with the same mask the sensitive-field
+    path uses. An empty resolution is skipped — ``str.replace`` on ``""``
+    would splice the mask between every character.
+    """
+    if not resolved:
+        return error_msg
+    return error_msg.replace(resolved, "**********")
+
+
 def _run_sensitive_validator(
     field_name: str,
     value: Any,
@@ -443,6 +458,12 @@ class DotEnvConfig(metaclass=ConfigMeta):
             )
             return nested
 
+        # The unresolved ${VAR} template, when the value came from an
+        # interpolated string default. Errors report it in place of the
+        # resolution, which can carry secret material out of the dotfile
+        # layer or os.environ. Stays None on every other path.
+        template: str | None = None
+
         # Handle missing values
         if raw_value is None:
             if field_info.required:
@@ -474,6 +495,14 @@ class DotEnvConfig(metaclass=ConfigMeta):
                         if dotenv_layer is not None
                         else os.environ
                     )
+                    # Keep the unresolved template for error reporting: a
+                    # reference can pull secret material out of the layer
+                    # or os.environ, and the resolved value would otherwise
+                    # reach the error text verbatim for a plainly-typed
+                    # field (masking keys off the declared type, so it does
+                    # not engage for int/list/etc.). The template is also
+                    # the better diagnostic — it is what the caller wrote.
+                    template = value
                     value = interpolate_value(value, base)
                 # Route str defaults for non-str field types through coercion.
                 # Historically the verbatim default bypassed coerce_value, so a
@@ -488,7 +517,30 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 # (int 8000, default_factory=list) are left alone. Validation
                 # runs afterwards on the typed value, so constraints now fire.
                 if isinstance(value, str) and unwrap_optional(field_type) is not str:
-                    value = coerce_value(field_name, value, field_type, env_var_name, field_info)
+                    # Same deferral as the constraint path below: a
+                    # sensitively-typed field masks itself more strongly.
+                    if template is None or is_sensitive_type(field_type):
+                        value = coerce_value(
+                            field_name, value, field_type, env_var_name, field_info
+                        )
+                    else:
+                        # Report the template, never the resolved value. Chain
+                        # with `from None`: the original error carries the
+                        # resolved value in both its `value` attribute and its
+                        # message, so re-raising `from err` would print the
+                        # secret in the "direct cause" traceback section.
+                        try:
+                            value = coerce_value(
+                                field_name, value, field_type, env_var_name, field_info
+                            )
+                        except TypeCoercionError as err:
+                            raise TypeCoercionError(
+                                field_name=field_name,
+                                value=template,
+                                field_type=field_type,
+                                env_var_name=env_var_name,
+                                error_msg=_mask_template_resolution(err.error_msg, value),
+                            ) from None
         else:
             # Strip string-like raw values before coercion. This is value
             # processing, not validation — it runs regardless of the
@@ -512,7 +564,26 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
         # Validate the value (whether from default or coerced)
         if validate:
-            validate_field(field_name, value, field_info, env_var_name)
+            # A sensitively-typed field already masks its own value to
+            # "**********" and that is the stronger guarantee, so the
+            # template substitution defers to it rather than replacing it.
+            if template is None or is_sensitive_type(field_type):
+                validate_field(field_name, value, field_info, env_var_name)
+            else:
+                # A str field skips the coercion route above, so the
+                # constraint path needs the same template substitution
+                # rather than inheriting it. `from None` for the same
+                # reason: the original carries the resolved value.
+                try:
+                    validate_field(field_name, value, field_info, env_var_name)
+                except ConstraintViolationError as err:
+                    raise ConstraintViolationError(
+                        field_name=field_name,
+                        value=template,
+                        constraint=err.constraint,
+                        env_var_name=env_var_name,
+                        error_msg=_mask_template_resolution(err.error_msg, str(value)),
+                    ) from None
 
         # Custom validator hook: runs even when validate=False (it may
         # transform the value — transformation is part of loading, not
