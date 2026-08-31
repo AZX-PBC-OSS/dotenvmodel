@@ -30,6 +30,9 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
+          # Pin the exact uv version so release artifacts are always built
+          # with a known toolchain; "latest" would drift between releases.
+          version: "0.11.32"
           enable-cache: true
 
       - name: Set up Python
@@ -77,6 +80,16 @@ jobs:
     permissions:
       id-token: write
     steps:
+      - name: Install uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          # Same pinned uv version as the build job so the upload step is
+          # reproducible and matches the toolchain that built the artifacts.
+          version: "0.11.32"
+          # Nothing is installed in this job, so a cache would only add
+          # save/restore time to every release.
+          enable-cache: false
+
       - name: Download build artifacts
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -84,6 +97,13 @@ jobs:
           path: dist/
 
       - name: Publish to PyPI
-        uses: pypa/gh-action-pypi-publish@release/v1
-        with:
-          attestations: false
+        # "always" requires the PyPI trusted publisher to succeed: uv must
+        # mint the job's OIDC token and never fall back to credentials, so
+        # a broken trusted-publisher setup fails loudly instead of hanging
+        # on a missing token. uv publishes everything in dist/ by default.
+        #
+        # Attestations stay off: this workflow is also invoked as a reusable
+        # workflow, where the Sigstore signing identity is the caller's
+        # top-level workflow, which cannot match this repository's PyPI
+        # trusted publisher configuration.
+        run: uv publish --trusted-publishing always --no-attestations
