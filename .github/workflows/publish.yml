@@ -75,6 +75,10 @@ jobs:
     needs: [build]
     runs-on: ubuntu-latest
     environment:
+      # The gate holds only while a required-reviewer protection rule
+      # stays configured for pypi under repo Settings > Environments;
+      # this workflow cannot enforce one, so removing the rule there
+      # silently disables the checkpoint.
       name: pypi
       url: https://pypi.org/project/dotenvmodel/
     permissions:
