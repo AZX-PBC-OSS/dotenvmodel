@@ -3,7 +3,8 @@
 import builtins
 import logging
 import os
-from collections.abc import Callable, Iterator
+from collections import ChainMap
+from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, ClassVar, Literal, Self, cast
@@ -30,6 +31,7 @@ from dotenvmodel.loading import (
     DotenvLayer,
     LoadParams,
     get_env_var_name,
+    interpolate_value,
     read_env_files,
     resolve_load_params,
 )
@@ -451,6 +453,26 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 )
             else:
                 value = field_info.get_default()
+                # A literal str default is a template: its ${VAR} /
+                # ${VAR:-default} references resolve at load time through
+                # interpolate_value, the same entry point the .env file
+                # layer uses, against the same base — the merged dotfile
+                # layer over os.environ (os.environ alone when no layer was
+                # read, e.g. read_dotfiles=False), independent of the
+                # override knob. default_factory results are built
+                # programmatically and stay verbatim. The "${" membership
+                # check keeps ordinary defaults off the interpolation path
+                # entirely; resolution re-runs on every load()/reload(), so
+                # a changed environment re-resolves the template.
+                if field_info.default_factory is None and isinstance(value, str) and "${" in value:
+                    # ChainMap gives the layer-over-environ lookup order
+                    # without copying the process environment.
+                    base: Mapping[str, str] = (
+                        ChainMap(dotenv_layer.values, os.environ)
+                        if dotenv_layer is not None
+                        else os.environ
+                    )
+                    value = interpolate_value(value, base)
                 # Route str defaults for non-str field types through coercion.
                 # Historically the verbatim default bypassed coerce_value, so a
                 # SecretStr str-default leaked as a plaintext str (repr exposed

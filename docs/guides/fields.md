@@ -138,6 +138,9 @@ There are three equivalent ways to mark a field as required. All produce identic
 !!! note "`str` defaults are coerced and validated for non-`str` field types"
     A `str` default for a non-`str` field type is coerced to the declared type and run through validation at load — e.g. a `bool` default of `'false'` becomes `False`, a `SecretStr` default becomes a masked `SecretStr`, and a `PostgresDsn` default is validated (a bad scheme raises at load) with its password redacted in `repr`. Non-`str` defaults (e.g. `int 8000`, `default_factory=list`) and `str` defaults for `str`-typed fields are left untouched.
 
+!!! note "`str` defaults are interpolation templates"
+    `${VAR}` and `${VAR:-default}` references in a `str` default resolve at load time against the merged `.env` values first, then the process environment — the same base `.env` values interpolate against. `default_factory` results are never interpolated, and resolution re-runs on every `load()` / `reload()`. See [Variable Interpolation](loading.md#variable-interpolation) for the full semantics.
+
 ---
 
 ## Aliases

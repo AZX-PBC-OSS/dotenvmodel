@@ -273,6 +273,57 @@ def _resolve_reference(match: re.Match[str], base: Mapping[str, str]) -> str:
     return base.get(match["name"], default if default is not None else "")
 
 
+def interpolate_value(text: str, base: Mapping[str, str]) -> str:
+    """Resolve the ``${VAR}`` / ``${VAR:-default}`` references in one string.
+
+    The single interpolation entry point: ``.env`` file values (via
+    `read_env_files`) and literal string field defaults (via
+    `DotEnvConfig.load`) both resolve through this function, so every
+    template-bearing value shares one reference syntax and one semantics
+    table. ``base`` supplies the names in lookup order (e.g. merged dotfile
+    values over ``os.environ``); a name absent from it resolves to the
+    ``:-`` default when one is given, else ``""`` — a present-but-empty
+    value beats the ``:-`` default, plain ``dict.get`` semantics. Nothing
+    else is a reference: a bare ``$``, ``$VAR`` shorthand, and an unclosed
+    ``${`` stay literal.
+
+    When to use:
+        - Resolving a template-bearing string against the same base a load
+          already interpolates against (``os.environ`` overlaid with the
+          merged dotfile values)
+
+    Args:
+        text: The string to resolve.
+        base: Names to resolve references against, in lookup order.
+
+    Returns:
+        The resolved string — *text* itself, the same object, when it
+        contains no ``${``, so template-free values never enter the regex
+        path.
+
+    Example:
+        ```python
+        interpolate_value("postgres://${HOST}/app", {"HOST": "db.internal"})
+        # 'postgres://db.internal/app'
+        ```
+    """
+    # The membership guard keeps ordinary values off the regex path: most
+    # strings — and nearly every field default — contain no "${" at all.
+    if "${" not in text:
+        return text
+    parts: list[str] = []
+    cursor = 0
+    for match in _POSIX_VARIABLE.finditer(text):
+        start, end = match.span()
+        if start > cursor:
+            parts.append(text[cursor:start])
+        parts.append(_resolve_reference(match, base))
+        cursor = end
+    if cursor < len(text):
+        parts.append(text[cursor:])
+    return "".join(parts)
+
+
 def _interpolate(values: dict[str, str]) -> dict[str, str]:
     """Resolve ${VAR} / ${VAR:-default} references, python-dotenv 1.2.3 semantics.
 
@@ -282,22 +333,13 @@ def _interpolate(values: dict[str, str]) -> dict[str, str]:
     for later references, while a later or self reference sees only
     os.environ. Unresolved references become "". Nothing between ${ and its
     closing } other than the two supported forms is a reference at all, so
-    it stays literal.
+    it stays literal. Each value resolves through `interpolate_value`, the
+    same single-string entry point the field-default path uses.
     """
     resolved: dict[str, str] = {}
     base: dict[str, str] = dict(os.environ)
     for name, value in values.items():
-        parts: list[str] = []
-        cursor = 0
-        for match in _POSIX_VARIABLE.finditer(value):
-            start, end = match.span()
-            if start > cursor:
-                parts.append(value[cursor:start])
-            parts.append(_resolve_reference(match, base))
-            cursor = end
-        if cursor < len(value):
-            parts.append(value[cursor:])
-        resolved[name] = "".join(parts)
+        resolved[name] = interpolate_value(value, base)
         base[name] = resolved[name]
     return resolved
 
