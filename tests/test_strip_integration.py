@@ -101,7 +101,7 @@ class TestStripOnQuotedDotenvValue:
     strip path through the .env file cascade.
     """
 
-    def test_quoted_value_stripped_when_strip_on(self, tmp_path: Path) -> None:
+    def test_quoted_value_stripped_when_strip_on(self, tmp_path: Path, monkeypatch) -> None:
         """strip_strings=True strips a quoted padded .env value."""
 
         class Config(DotEnvConfig):
@@ -109,16 +109,20 @@ class TestStripOnQuotedDotenvValue:
 
             name: str = Field()
 
+        # The file is the value source under test; scrub any ambient NAME
+        # (e.g. a WSL shell sets it) so the process-env layer stays empty.
+        monkeypatch.delenv("NAME", raising=False)
         (tmp_path / ".env").write_text('NAME="  hello  "\n')
         config = Config.load(env_dir=tmp_path)
         assert config.name == "hello"
 
-    def test_quoted_value_preserved_when_strip_off(self, tmp_path: Path) -> None:
+    def test_quoted_value_preserved_when_strip_off(self, tmp_path: Path, monkeypatch) -> None:
         """Without strip, a quoted padded .env value keeps its padding."""
 
         class Config(DotEnvConfig):
             name: str = Field()
 
+        monkeypatch.delenv("NAME", raising=False)
         (tmp_path / ".env").write_text('NAME="  hello  "\n')
         config = Config.load(env_dir=tmp_path)
         assert config.name == "  hello  "

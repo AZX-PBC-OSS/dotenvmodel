@@ -9,11 +9,15 @@ The package exports the following public API:
 - [`DotEnvConfig`][dotenvmodel.config.DotEnvConfig]: Base class for configuration
 - [`Field`][dotenvmodel.fields.Field]: Define fields with validation and defaults
 - [`Required`][dotenvmodel.fields.Required]: Sentinel for required fields
+- [`ValidatorContext`][dotenvmodel.fields.ValidatorContext]: Context passed to `Field(validator=...)` hooks
 - [`SecretStr`][dotenvmodel.types.SecretStr]: String type that hides secrets in logs
 - [`HttpUrl`][dotenvmodel.types.HttpUrl]: HTTP/HTTPS URL type
 - [`PostgresDsn`][dotenvmodel.types.PostgresDsn]: PostgreSQL DSN type
 - [`RedisDsn`][dotenvmodel.types.RedisDsn]: Redis DSN type
 - [`Json`][dotenvmodel.types.Json]: JSON parsing type
+- [`LoadParams`][dotenvmodel.loading.LoadParams]: Resolved load parameters, as returned by `DotEnvConfig.loaded_with()`
+- [`read_env_files`][dotenvmodel.loading.read_env_files]: Read the merged `.env` cascade without touching `os.environ`
+- [`DotenvLayer`][dotenvmodel.loading.DotenvLayer]: The merged-cascade record (values, base_dir, files) returned by `read_env_files()`
 - [`describe_configs`][dotenvmodel.describe.describe_configs]: Document multiple configs
 - [`generate_env_example`][dotenvmodel.describe.generate_env_example]: Generate .env.example
 - [`configure_logging`][dotenvmodel.logging_config.configure_logging]: Enable logging

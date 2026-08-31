@@ -11,7 +11,14 @@ from typing import assert_type
 
 import pytest
 
-from dotenvmodel import DotEnvConfig, Field, MissingFieldError, ValidationError, ValidatorContext
+from dotenvmodel import (
+    DotEnvConfig,
+    Field,
+    LoadParams,
+    MissingFieldError,
+    ValidationError,
+    ValidatorContext,
+)
 from dotenvmodel.caching import has_cached
 
 # A project-wide autouse fixture in tests/conftest.py snapshots and restores
@@ -213,11 +220,11 @@ class TestCached:
     def test_a_bare_reload_keeps_the_precedence_the_cache_was_loaded_with(
         self, monkeypatch, caplog
     ) -> None:
-        """The SIGHUP shape: ``reload()`` with no arguments must not revert to ``override=True``.
+        """The SIGHUP shape: ``reload()`` with no arguments must not revert to the default precedence.
 
         A hot-reload handler calls ``reload()`` bare. If that silently reset precedence to
-        "``.env`` files beat the process environment", a running service would flip to the
-        opposite configuration on a signal it was told was a no-op refresh — and an accessor
+        whatever ``load()`` would default to, a running service would flip to the opposite
+        configuration on a signal it was told was a no-op refresh — and an accessor
         passing ``override=False`` would then also start warning, having never changed.
         """
 
@@ -225,11 +232,14 @@ class TestCached:
             value: str = Field(default="x")
 
         instance = Config.cached(override=False, env_dir=Path("/tmp"))
-        assert instance.loaded_with() == (None, False, Path("/tmp"))
+        expected = LoadParams(
+            env="dev", override=False, env_dir=Path("/tmp"), read_dotfiles=True, load_local=True
+        )
+        assert instance.loaded_with() == expected
 
         instance.reload()
 
-        assert instance.loaded_with() == (None, False, Path("/tmp"))
+        assert instance.loaded_with() == expected
         with caplog.at_level("WARNING", logger="dotenvmodel"):
             caplog.clear()
             assert Config.cached(override=False, env_dir=Path("/tmp")) is instance
@@ -248,15 +258,21 @@ class TestCached:
             value: str = Field(default="x")
 
         instance = Config.load(env="dev", override=False)
-        assert instance.loaded_with() == ("dev", False, None)
+        assert instance.loaded_with() == LoadParams(
+            env="dev", override=False, env_dir=Path.cwd(), read_dotfiles=True, load_local=True
+        )
 
         instance.reload(env="prod")
 
-        assert instance.loaded_with() == ("prod", False, None)
+        assert instance.loaded_with() == LoadParams(
+            env="prod", override=False, env_dir=Path.cwd(), read_dotfiles=True, load_local=True
+        )
 
         instance.reload()
 
-        assert instance.loaded_with() == ("prod", False, None)
+        assert instance.loaded_with() == LoadParams(
+            env="prod", override=False, env_dir=Path.cwd(), read_dotfiles=True, load_local=True
+        )
 
     def test_a_reset_cache_is_not_judged_against_the_arguments_it_dropped(
         self, monkeypatch, caplog
@@ -849,7 +865,7 @@ class TestCachedStateFixture:
         fields = Config.get_fields()
         assert "_cached_instance" not in fields
         assert "_loaded" not in fields
-        assert "_load_env" not in fields
+        assert "_load_params" not in fields
 
     def test_fixture_removes_new_cached_entry(self) -> None:
         """The fixture removes cached entries that did not exist before the test."""

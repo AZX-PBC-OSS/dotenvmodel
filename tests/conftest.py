@@ -1,11 +1,24 @@
 """Shared pytest fixtures and configuration for dotenvmodel tests."""
 
+import os
 from collections.abc import Iterator
 
 import pytest
 
 from dotenvmodel import DotEnvConfig
 from dotenvmodel.caching import _CACHED_ATTR
+
+# Environment variables that steer load() behavior (explicit argument >
+# env var > default). Scrubbed at setup so an ambient value in the
+# developer's or CI's shell cannot silently flip behavior for one test
+# and not the next.
+_KNOB_ENV_VARS = (
+    "ENV",
+    "DOTENV_DIR",
+    "DOTENV_OVERRIDE",
+    "DOTENV_READ_DOTFILES",
+    "DOTENV_LOAD_LOCAL",
+)
 
 
 def _all_dotenv_subclasses() -> Iterator[type[DotEnvConfig]]:
@@ -30,6 +43,47 @@ def _all_dotenv_subclasses() -> Iterator[type[DotEnvConfig]]:
         seen.add(cls)
         stack.extend(cls.__subclasses__())
         yield cls
+
+
+@pytest.fixture(autouse=True)
+def _isolate_environ() -> Iterator[None]:
+    """Snapshot ``os.environ`` around every test and scrub the ``DOTENV_*`` knobs.
+
+    The load() behavior channel (explicit argument > environment variable >
+    default) means a stray ``ENV`` / ``DOTENV_DIR`` / ``DOTENV_OVERRIDE`` /
+    ``DOTENV_READ_DOTFILES`` / ``DOTENV_LOAD_LOCAL`` in the ambient
+    environment — a developer's shell, a CI runner, or a previous test that
+    forgot to clean up — would silently flip precedence or file discovery
+    for every test after it. Popping the knobs at setup makes each test
+    start from the documented defaults; restoring the exact pre-test
+    snapshot at teardown keeps any mid-test mutation (raw ``os.environ``
+    writes, subprocess helpers) from leaking onward.
+
+    ``monkeypatch`` users are unaffected: its own undo runs against the
+    same snapshot semantics, and this fixture never re-adds anything the
+    test did not leave behind.
+    """
+    yield from _snapshot_and_restore_environ()
+
+
+def _snapshot_and_restore_environ() -> Iterator[None]:
+    """Generator that snapshots/restores ``os.environ`` around a test.
+
+    This is the underlying logic for :func:`_isolate_environ`, extracted as
+    a plain (non-fixture) generator so it can be driven manually in unit
+    tests that verify the scrub/restore behavior — the same pattern as
+    ``_snapshot_and_restore_cached_state``.
+
+    Drive with ``next(gen)`` to run setup (snapshot + scrub), then
+    ``next(gen)`` again to run teardown (restore); the second call raises
+    ``StopIteration``.
+    """
+    before = dict(os.environ)
+    for var in _KNOB_ENV_VARS:
+        os.environ.pop(var, None)
+    yield
+    os.environ.clear()
+    os.environ.update(before)
 
 
 @pytest.fixture(autouse=True)

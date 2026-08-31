@@ -1,5 +1,7 @@
 """Tests for config reload functionality."""
 
+from pathlib import Path
+
 import pytest
 
 from dotenvmodel import DotEnvConfig, Field, MissingFieldError
@@ -299,25 +301,31 @@ class TestReload:
         config.reload()
         assert config.value == "dev_value_updated"
 
-    def test_reload_reuses_original_override(self, monkeypatch) -> None:
-        """Test that reload reuses original override parameter by default."""
+    def test_reload_reuses_original_override(self, tmp_path, monkeypatch) -> None:
+        """Test that reload reuses original override parameter by default.
+
+        Loaded with override=True (dotfiles beat the env var). A bare
+        reload() must keep that recorded precedence instead of reverting
+        to the override=False default — otherwise the value would flip to
+        the env var's.
+        """
 
         class Config(DotEnvConfig):
             value: str = Field()
 
-        # Set env var before load
         monkeypatch.setenv("VALUE", "env_value")
+        (tmp_path / ".env").write_text("VALUE=file_value\n")
 
-        # Load with override=False (env vars take precedence)
-        config = Config.load(override=False)
-        assert config.value == "env_value"
+        # Load with override=True (dotfiles beat env vars)
+        config = Config.load(env_dir=tmp_path, override=True)
+        assert config.value == "file_value"
 
         # Change env var
         monkeypatch.setenv("VALUE", "new_env_value")
 
-        # Reload should still use override=False
+        # Reload should still use override=True
         config.reload()
-        assert config.value == "new_env_value"
+        assert config.value == "file_value"
 
     def test_reload_stores_parameters(self, monkeypatch) -> None:
         """Test that load parameters are stored correctly."""
@@ -328,7 +336,10 @@ class TestReload:
         monkeypatch.setenv("VALUE", "test")
         config = Config.load(env="prod", override=False)
 
-        # Check stored parameters
-        assert config._load_env == "prod"
-        assert config._load_override is False
-        assert config._load_env_dir is None
+        # Check stored parameters (resolved values, via loaded_with())
+        params = config.loaded_with()
+        assert params.env == "prod"
+        assert params.override is False
+        assert params.env_dir == Path.cwd()
+        assert params.read_dotfiles is True
+        assert params.load_local is True
