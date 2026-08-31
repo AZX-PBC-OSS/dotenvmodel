@@ -1,5 +1,6 @@
 """Tests for the @field_validator decorator (before/after custom field hooks)."""
 
+import functools
 import logging
 from typing import Any
 from uuid import UUID
@@ -11,6 +12,7 @@ from dotenvmodel import (
     DotEnvConfig,
     Field,
     MultipleValidationErrors,
+    PostgresDsn,
     SecretStr,
     TypeCoercionError,
     ValidatorContext,
@@ -318,6 +320,31 @@ class TestFieldValidatorTypedBeforeResults:
         assert "pk-super-secret" not in str(err)
         assert "**********" in str(err)
 
+    def test_choices_see_before_hook_transformed_value(self) -> None:
+        """Constraints validate the transformed value, not the raw string."""
+
+        class Config(DotEnvConfig):
+            port: int = Field(choices=[80, 443])
+
+            @field_validator("port", mode="before")
+            def map_scheme(self, value: str, ctx: ValidatorContext) -> int:
+                return 80 if value == "http" else 443
+
+        assert Config.load_from_dict({"PORT": "http"}).port == 80
+
+    def test_choices_reject_before_hook_transformed_value(self) -> None:
+        class Config(DotEnvConfig):
+            port: int = Field(choices=[80, 443])
+
+            @field_validator("port", mode="before")
+            def to_8080(self, value: str, ctx: ValidatorContext) -> int:
+                return 8080
+
+        with pytest.raises(ConstraintViolationError) as exc_info:
+            Config.load_from_dict({"PORT": "http"})
+
+        assert exc_info.value.constraint == "choices=[80, 443]"
+
 
 class TestFieldValidatorCallableForms:
     """Plain methods, classmethods, staticmethods, and module functions all work."""
@@ -492,6 +519,22 @@ class TestFieldValidatorErrorWrapping:
         assert err.env_var_name == "NAME"
         assert isinstance(err.__cause__, ValueError)
 
+    def test_type_error_wrapped_for_after_hook(self) -> None:
+        class Config(DotEnvConfig):
+            name: str = Field()
+
+            @field_validator("name")
+            def reject(self, value: str, ctx: ValidatorContext) -> str:
+                raise TypeError("value must be a str")
+
+        with pytest.raises(ConstraintViolationError) as exc_info:
+            Config.load_from_dict({"NAME": "x"})
+
+        err = exc_info.value
+        assert err.constraint == "validator=reject"
+        assert "value must be a str" in err.error_msg
+        assert isinstance(err.__cause__, TypeError)
+
     def test_before_hook_returning_none_for_required_field_raises(self) -> None:
         class Config(DotEnvConfig):
             name: str = Field()
@@ -562,6 +605,58 @@ class TestFieldValidatorSensitive:
         assert isinstance(config.api_key, SecretStr)
         assert config.api_key.get_secret_value() == "sk-abc"
 
+    def test_dsn_before_hook_error_masked_with_empty_chain(self) -> None:
+        """Before-hook failures on a DSN field mask the URL password entirely."""
+
+        class Config(DotEnvConfig):
+            database_url: PostgresDsn = Field()
+
+            @field_validator("database_url", mode="before")
+            def leaky(self, value: str, ctx: ValidatorContext) -> str:
+                raise ValueError(f"bad dsn: {value}")
+
+        with pytest.raises(ConstraintViolationError) as exc_info:
+            Config.load_from_dict({"DATABASE_URL": "postgresql://user:hunter2@localhost/db"})
+
+        err = exc_info.value
+        assert err.constraint == "validator=leaky"
+        assert "hunter2" not in str(err)
+        assert "bad dsn" not in str(err)
+        assert err.__cause__ is None
+        assert err.__context__ is None
+
+    def test_dsn_after_hook_bare_str_return_is_rewrapped(self) -> None:
+        """An after hook returning a bare str keeps the value a masked DSN."""
+
+        class Config(DotEnvConfig):
+            database_url: PostgresDsn = Field()
+
+            @field_validator("database_url")
+            def to_str(self, value: PostgresDsn, ctx: ValidatorContext) -> str:
+                return str(value)
+
+        dsn = Config.load_from_dict({"DATABASE_URL": "postgresql://localhost/db"}).database_url
+        assert isinstance(dsn, PostgresDsn)
+        assert str(dsn) == "postgresql://localhost/db"
+
+    def test_dsn_before_and_after_hooks_pipeline(self) -> None:
+        """Both modes on one DSN field: trim before, re-wrap on return after."""
+
+        class Config(DotEnvConfig):
+            database_url: PostgresDsn = Field()
+
+            @field_validator("database_url", mode="before")
+            def trim(self, value: str, ctx: ValidatorContext) -> str:
+                return value.strip()
+
+            @field_validator("database_url")
+            def to_str(self, value: PostgresDsn, ctx: ValidatorContext) -> str:
+                return str(value)
+
+        dsn = Config.load_from_dict({"DATABASE_URL": " postgresql://localhost/db "}).database_url
+        assert isinstance(dsn, PostgresDsn)
+        assert str(dsn) == "postgresql://localhost/db"
+
 
 class TestFieldValidatorContext:
     """Decorator hooks receive the same ValidatorContext as the inline form."""
@@ -624,6 +719,37 @@ class TestFieldValidatorWiring:
         assert "Bad" in message
         assert "hook" in message
 
+    def test_property_wrapped_hook_raises_at_class_definition(self) -> None:
+        """A @property-wrapped hook fails loudly instead of wiring nothing."""
+
+        with pytest.raises(TypeError) as exc_info:
+
+            class Bad(DotEnvConfig):
+                name: str = Field()
+
+                @property
+                @field_validator("name")
+                def hook(self) -> str:
+                    return "never runs"
+
+        message = str(exc_info.value)
+        assert "Bad.hook" in message
+        assert "property" in message
+        assert "staticmethod" in message
+
+    def test_cached_property_wrapped_hook_raises_at_class_definition(self) -> None:
+        """Any wrapper hiding the marker fails, not just @property."""
+
+        with pytest.raises(TypeError, match="cached_property"):
+
+            class Bad(DotEnvConfig):
+                name: str = Field()
+
+                @functools.cached_property
+                @field_validator("name")
+                def hook(self) -> str:
+                    return "never runs"
+
     def test_hook_can_target_inherited_field(self) -> None:
         class Child(InheritanceBase):
             @field_validator("name")
@@ -681,6 +807,34 @@ class TestFieldValidatorInheritance:
         assert Child.load_from_dict({"NAME": "mixed"}).name == "MIXED"
         with pytest.raises(ConstraintViolationError):
             Child.load_from_dict({"NAME": "x"})
+
+    def test_reregistration_for_different_field_removes_parent_hook(self) -> None:
+        """The method name is the registration identity across three levels."""
+
+        class Grand(DotEnvConfig):
+            first: str = Field()
+            second: str = Field()
+
+            @field_validator("first")
+            def check(self, value: str, ctx: ValidatorContext) -> str:
+                return value.upper()
+
+        class Mid(Grand):
+            pass
+
+        class Leaf(Mid):
+            @field_validator("second")
+            def check(self, value: str, ctx: ValidatorContext) -> str:
+                return value.lower()
+
+        leaf = Leaf.load_from_dict({"FIRST": "x", "SECOND": "Y"})
+        # Leaf's `check` replaced the registration wholesale: `first` lost
+        # its hook, `second` gained the new one.
+        assert leaf.first == "x"
+        assert leaf.second == "y"
+        # Ancestors keep their own wiring.
+        assert Mid.load_from_dict({"FIRST": "x", "SECOND": "Y"}).first == "X"
+        assert Grand.load_from_dict({"FIRST": "x", "SECOND": "Y"}).first == "X"
 
 
 class TestFieldValidatorValidateFalse:

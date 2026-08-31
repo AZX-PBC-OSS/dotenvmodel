@@ -67,7 +67,41 @@ def _resolve_type_hints(cls: ConfigMeta) -> dict[str, Any]:
         return {}
 
 
+# Attributes through which a wrapper object can hold the function a
+# @field_validator marker was placed on. The supported forms expose the
+# marker directly; these wrappers hide it where collection never looks.
+_HIDDEN_MARKER_ATTRS = ("fget", "func", "__wrapped__")
+
+
+def _reject_hidden_validator_marker(class_name: str, attr_name: str, value: Any) -> None:
+    """Fail class definition when a namespace value hides a validator marker.
+
+    Supported hook forms (plain function, staticmethod, classmethod) expose
+    the ``@field_validator`` marker where collection looks for it. Wrapping
+    the decorated function in a ``@property``, ``@cached_property``, or a
+    similar descriptor hides the marker on ``fget``/``func``/``__wrapped__``
+    — collection would silently wire nothing, letting a hook (e.g. one
+    rejecting weak secrets) disappear without any error.
+
+    Raises:
+        TypeError: If a marker is reachable only through a wrapper.
+    """
+    for probe in _HIDDEN_MARKER_ATTRS:
+        inner = getattr(value, probe, None)
+        if inner is None:
+            continue
+        if getattr(inner, _VALIDATOR_SPECS_ATTR, None):
+            raise TypeError(
+                f"@field_validator hook {class_name}.{attr_name} is wrapped in "
+                f"{type(value).__name__}, which hides it from the metaclass; "
+                "attach @field_validator to a plain method, staticmethod, or "
+                "classmethod instead (a module-level function assigned in "
+                "the class body also works)"
+            )
+
+
 def _collect_validator_hooks(
+    class_name: str,
     namespace: dict[str, Any],
 ) -> list[tuple[str, _ValidatorSpec, _ValidatorHook]]:
     """Find `@field_validator`-decorated callables in a class namespace.
@@ -76,9 +110,11 @@ def _collect_validator_hooks(
     definition order, so hooks attach in the order they were written.
     staticmethod and classmethod wrappers are unwrapped to the underlying
     function, where the decorator places its marker — whichever order the
-    two decorators were applied in.
+    two decorators were applied in. A marker hidden inside another wrapper
+    (a property, say) is rejected instead of silently wiring nothing.
 
     Args:
+        class_name: Name of the class being created, for error messages
         namespace: The class-body namespace being turned into a class
 
     Returns:
@@ -91,6 +127,7 @@ def _collect_validator_hooks(
             func = value.__func__
         specs = getattr(func, _VALIDATOR_SPECS_ATTR, None)
         if not specs:
+            _reject_hidden_validator_marker(class_name, attr_name, value)
             continue
         bind = _hook_bind(func)
         for spec in specs:
@@ -134,7 +171,7 @@ def _wire_validator_hooks(
         own_fields: Field names whose FieldInfo was created in this class
             body (safe to mutate in place; the rest are shared with a base)
     """
-    collected = _collect_validator_hooks(namespace)
+    collected = _collect_validator_hooks(class_name, namespace)
 
     for attr_name, spec, _hook in collected:
         if spec.field_name not in fields:

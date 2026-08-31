@@ -333,6 +333,10 @@ A hook returning `None` (valid only for `Optional` fields) ends the chain — la
 - For sensitive fields (`SecretStr`, DSN types) any hook failure is masked generically — including `before` hooks, which see the raw plaintext — exactly like the inline `validator=` path.
 - Hooks are inherited. Redefining a same-named method in a subclass **replaces** that hook; redefining it without the decorator removes it. The parent class's hooks are never affected, and hooks survive a field being redeclared with a fresh `Field(...)` (whose other parameters reset per redeclaration).
 - A decorator naming a field that doesn't exist (on the class or any base) fails at class definition time with a `ValueError`.
+- A hook wrapped in `@property` (or any descriptor hiding the decorated function) fails at class definition time with a `TypeError` — it would otherwise silently wire nothing. Supported forms are a plain method, `@staticmethod`/`@classmethod`, or a module-level function assigned in the class body.
+
+!!! warning "An override silently removes inherited hooks"
+    The **method name is the registration identity**. A subclass that defines any same-named method removes the parent's registration — regardless of which field it targeted — even when the new method is undecorated or registered for a *different* field. Security-relevant hooks (e.g. rejecting weak secrets) must be re-registered on every override, or the check silently stops running for the subclass.
 
 ---
 
