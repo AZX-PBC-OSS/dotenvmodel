@@ -41,6 +41,11 @@ Changelog = "https://github.com/AZX-PBC-OSS/dotenvmodel/blob/main/CHANGELOG.md"
 package = true
 exclude-newer = "48h"
 constraint-dependencies = ["pygments>=2.21.0"]
+# Single source for the uv version: uv enforces it on every local
+# invocation and astral-sh/setup-uv resolves it in CI. ~=0.12.8 means
+# >=0.12.8,<0.13, so patch releases are picked up automatically and a
+# minor bump is a deliberate change here.
+required-version = "~=0.12.8"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dotenvmodel"]

@@ -21,6 +21,11 @@ permissions:
 
 jobs:
   build:
+    outputs:
+      # Resolved from required-version in pyproject.toml; the publish
+      # job installs this exact version so the toolchain that uploads
+      # matches the one that built the artifacts.
+      uv-version: ${{ steps.install-uv.outputs.uv-version }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -28,11 +33,12 @@ jobs:
           ref: ${{ inputs.tag_name || github.ref }}
 
       - name: Install uv
+        # No version input: setup-uv resolves [tool.uv] required-version
+        # from pyproject.toml, so releases build with the uv series the
+        # project requires and the pin cannot go stale.
+        id: install-uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          # Pin the exact uv version so release artifacts are always built
-          # with a known toolchain; "latest" would drift between releases.
-          version: "0.11.32"
           enable-cache: true
 
       - name: Set up Python
@@ -89,9 +95,11 @@ jobs:
       - name: Install uv
         uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:
-          # Same pinned uv version as the build job so the upload step is
-          # reproducible and matches the toolchain that built the artifacts.
-          version: "0.11.32"
+          # No checkout in this job, so required-version cannot be
+          # re-discovered from pyproject.toml: install the exact version
+          # the build job resolved, keeping the upload toolchain identical
+          # to the one that built the artifacts.
+          version: ${{ needs.build.outputs.uv-version }}
           # Nothing is installed in this job, so a cache would only add
           # save/restore time to every release.
           enable-cache: false
