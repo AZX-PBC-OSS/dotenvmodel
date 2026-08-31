@@ -7,6 +7,7 @@ import pytest
 from dotenvmodel import (
     DotEnvConfig,
     Field,
+    Json,
     PostgresDsn,
     Required,
     SecretStr,
@@ -2161,22 +2162,40 @@ class TestDescribeFormattingEdgeCases:
 
         output = Config.describe(output_format="dotenv")
 
-        # Optional field with no default (None) should be commented with =
-        # The field has default=None but it shows as "-" which triggers line 727
+        # Optional fields auto-default to None, which renders as an empty
+        # value line (env files cannot express None).
         assert "# OPTIONAL_VALUE=" in output
+        assert "# OPTIONAL_VALUE=None" not in output
 
     def test_dotenv_format_with_field_having_none_default(self) -> None:
-        """Test dotenv format with field having None as default value."""
+        """A None default renders an empty value line, not KEY=None."""
 
         class Config(DotEnvConfig):
-            # Explicitly test the else branch on line 727
             nullable_field: str | None = Field(default=None)
 
         output = Config.describe(output_format="dotenv")
 
-        # Should be commented since it's optional (has default)
-        # The default is "None" not "-" so it should hit line 725
-        assert "# NULLABLE_FIELD=None" in output or "# NULLABLE_FIELD=" in output
+        # "KEY=None" fails coercion when uncommented (env files cannot
+        # express None); an empty value is the closest honest render and
+        # Optional fields map it back to None.
+        assert "# NULLABLE_FIELD=" in output
+        assert "# NULLABLE_FIELD=None" not in output
+
+    def test_dotenv_format_none_default_on_typed_optional_fields(self) -> None:
+        """None defaults on Json/int/bool Optional fields render empty, not None."""
+
+        class Config(DotEnvConfig):
+            optional_json: Json[int] | None = Field(default=None)
+            optional_count: int | None = Field(default=None)
+            optional_flag: bool | None = Field(default=None)
+
+        output = Config.describe(output_format="dotenv")
+
+        for env_var in ("OPTIONAL_JSON", "OPTIONAL_COUNT", "OPTIONAL_FLAG"):
+            assert f"# {env_var}=" in output
+            assert f"# {env_var}=None" not in output
+            # None defaults stay excluded from Example lines
+            assert f"# Example: {env_var}" not in output
 
     def test_html_format_with_empty_config(self) -> None:
         """Test HTML format with empty config (no fields)."""

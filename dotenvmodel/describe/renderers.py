@@ -214,9 +214,13 @@ def render_dotenv(
         else:
             if field.default == "<secret>":
                 lines.append(f"# {field.env_var}=your_secret_here")
-            elif field.default and field.default != "-":
+            elif field.default and field.default not in ("-", "None"):
                 lines.append(f"# {field.env_var}={field.default}")
             else:
+                # A "None" default lands here on purpose: "KEY=None" fails
+                # coercion for non-str fields when uncommented, and env
+                # files cannot express None — the empty value (which
+                # Optional fields map back to None) is the honest render.
                 lines.append(f"# {field.env_var}=")
 
         lines.append("")
