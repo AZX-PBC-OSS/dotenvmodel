@@ -13,6 +13,7 @@ For the complete API reference, see [Fields API](../api-reference/fields.md).
 ```python
 from dotenvmodel import DotEnvConfig, Field
 
+
 class Config(DotEnvConfig):
     # Required field (no default)
     database_url: str = Field()
@@ -68,6 +69,7 @@ There are three equivalent ways to mark a field as required. All produce identic
     ```python
     from dotenvmodel import DotEnvConfig, Field
 
+
     class Config(DotEnvConfig):
         api_key: str = Field(...)
         database_url: str = Field(...)
@@ -80,6 +82,7 @@ There are three equivalent ways to mark a field as required. All produce identic
     ```python
     from dotenvmodel import DotEnvConfig, Field
 
+
     class Config(DotEnvConfig):
         database_url: str = Field()
         api_key: str = Field()
@@ -91,6 +94,7 @@ There are three equivalent ways to mark a field as required. All produce identic
 
     ```python
     from dotenvmodel import DotEnvConfig, Required
+
 
     class Config(DotEnvConfig):
         database_url: str = Required
@@ -200,6 +204,7 @@ The `strip` parameter cleans raw string values **before** coercion and validatio
 ```python
 import re
 
+
 class Config(DotEnvConfig):
     # Whitespace strip: "  hello  " -> "hello"
     name: str = Field(strip=True)
@@ -217,7 +222,7 @@ Set the `strip_strings` class attribute to strip every string-like field by defa
 class Config(DotEnvConfig):
     strip_strings: bool = True
 
-    name: str = Field()                # stripped (inherits class setting)
+    name: str = Field()  # stripped (inherits class setting)
     literal: str = Field(strip=False)  # per-field override wins
 ```
 
@@ -238,6 +243,7 @@ Two parameters control `Path` field behavior:
 
 ```python
 from pathlib import Path
+
 
 class Config(DotEnvConfig):
     # Resolved by default (expanduser + resolve)

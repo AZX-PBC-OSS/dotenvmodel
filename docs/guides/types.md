@@ -88,6 +88,7 @@ For the complete API reference, see [Types API](../api-reference/types.md).
     ```python
     from pathlib import Path
 
+
     class Config(DotEnvConfig):
         config_path: Path = Field(default=Path("/etc/app"))
         # Resolved: ~/logs -> /home/user/logs, ./output -> /cwd/output
@@ -206,6 +207,7 @@ Collection types are parsed from comma-separated strings by default. Use the `se
     ```python
     from uuid import UUID
 
+
     class Config(DotEnvConfig):
         tenant_id: UUID = Field()
     ```
@@ -217,7 +219,7 @@ Collection types are parsed from comma-separated strings by default. Use the `se
 
     ```python
     config = Config.load()
-    assert config.tenant_id == UUID('550e8400-e29b-41d4-a716-446655440000')
+    assert config.tenant_id == UUID("550e8400-e29b-41d4-a716-446655440000")
     ```
 
     Use `uuid_version` to require a specific UUID version. See [Validation](validation.md#uuid-version).
@@ -229,9 +231,10 @@ Collection types are parsed from comma-separated strings by default. Use the `se
     ```python
     from decimal import Decimal
 
+
     class Config(DotEnvConfig):
         price: Decimal = Field()
-        tax_rate: Decimal = Field(ge=Decimal('0'), le=Decimal('1'))
+        tax_rate: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
     ```
 
     ```bash
@@ -242,7 +245,7 @@ Collection types are parsed from comma-separated strings by default. Use the `se
 
     ```python
     config = Config.load()
-    assert config.price == Decimal('19.99')
+    assert config.price == Decimal("19.99")
     ```
 
 === "Datetime"
@@ -251,6 +254,7 @@ Collection types are parsed from comma-separated strings by default. Use the `se
 
     ```python
     from datetime import datetime
+
 
     class Config(DotEnvConfig):
         created_at: datetime = Field()
@@ -274,6 +278,7 @@ Collection types are parsed from comma-separated strings by default. Use the `se
 
     ```python
     from datetime import timedelta
+
 
     class Config(DotEnvConfig):
         cache_ttl: timedelta = Field()
@@ -314,6 +319,7 @@ Collection types are parsed from comma-separated strings by default. Use the `se
 from dotenvmodel import DotEnvConfig, Field
 from dotenvmodel.types import SecretStr
 
+
 class Config(DotEnvConfig):
     api_key: SecretStr = Field(min_length=32)
     password: SecretStr = Field()
@@ -327,9 +333,9 @@ PASSWORD=hunter2
 
 ```python
 config = Config.load()
-print(config.api_key)                       # SecretStr('**********')
-print(repr(config.api_key))                 # "SecretStr('**********')"
-print(config.api_key.get_secret_value())    # 'super-secret-key-with-at-least-32-chars'
+print(config.api_key)  # SecretStr('**********')
+print(repr(config.api_key))  # "SecretStr('**********')"
+print(config.api_key.get_secret_value())  # 'super-secret-key-with-at-least-32-chars'
 ```
 
 !!! warning "SecretStr cannot be pickled"
@@ -348,6 +354,7 @@ URL/DSN types work like strings but validate the scheme and provide parsed compo
     ```python
     from dotenvmodel.types import HttpUrl
 
+
     class Config(DotEnvConfig):
         api_url: HttpUrl = Field()
     ```
@@ -359,10 +366,10 @@ URL/DSN types work like strings but validate the scheme and provide parsed compo
 
     ```python
     config = Config.load()
-    print(config.api_url)        # https://api.example.com/v1
-    print(config.api_url.host)   # api.example.com
-    print(config.api_url.port)   # None (no explicit port)
-    print(config.api_url.path)   # /v1
+    print(config.api_url)  # https://api.example.com/v1
+    print(config.api_url.host)  # api.example.com
+    print(config.api_url.port)  # None (no explicit port)
+    print(config.api_url.path)  # /v1
     ```
 
 === "PostgresDsn"
@@ -371,6 +378,7 @@ URL/DSN types work like strings but validate the scheme and provide parsed compo
 
     ```python
     from dotenvmodel.types import PostgresDsn
+
 
     class Config(DotEnvConfig):
         database_url: PostgresDsn = Field()
@@ -383,11 +391,11 @@ URL/DSN types work like strings but validate the scheme and provide parsed compo
 
     ```python
     config = Config.load()
-    print(config.database_url.host)       # localhost
-    print(config.database_url.port)       # 5432
-    print(config.database_url.database)   # mydb
-    print(config.database_url.username)   # user
-    print(config.database_url.password)   # pass (URL-decoded)
+    print(config.database_url.host)  # localhost
+    print(config.database_url.port)  # 5432
+    print(config.database_url.database)  # mydb
+    print(config.database_url.username)  # user
+    print(config.database_url.password)  # pass (URL-decoded)
     ```
 
 === "RedisDsn"
@@ -396,6 +404,7 @@ URL/DSN types work like strings but validate the scheme and provide parsed compo
 
     ```python
     from dotenvmodel.types import RedisDsn
+
 
     class Config(DotEnvConfig):
         redis_url: RedisDsn = Field()
@@ -408,9 +417,9 @@ URL/DSN types work like strings but validate the scheme and provide parsed compo
 
     ```python
     config = Config.load()
-    print(config.redis_url.host)        # localhost
-    print(config.redis_url.port)        # 6379
-    print(config.redis_url.database)    # 0
+    print(config.redis_url.host)  # localhost
+    print(config.redis_url.port)  # 6379
+    print(config.redis_url.database)  # 0
     ```
 
 !!! info "Available properties"
@@ -429,6 +438,7 @@ Use `Json[T]` to parse JSON strings into Python objects. The inner type paramete
 ```python
 from dotenvmodel import DotEnvConfig, Field
 from dotenvmodel.types import Json
+
 
 class Config(DotEnvConfig):
     # JSON object
@@ -466,6 +476,7 @@ Optional types automatically default to `None` if no explicit default is provide
 ```python
 from typing import Optional
 
+
 class Config(DotEnvConfig):
     # These automatically default to None — no need for default=None
     optional_value: str | None = Field()
@@ -498,11 +509,13 @@ Enum fields are coerced by matching the environment variable string against enum
 ```python
 from enum import Enum
 
+
 class LogLevel(Enum):
     DEBUG = "debug"
     INFO = "info"
     WARNING = "warning"
     ERROR = "error"
+
 
 class Config(DotEnvConfig):
     log_level: LogLevel = Field(default=LogLevel.INFO)

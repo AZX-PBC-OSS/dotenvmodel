@@ -80,10 +80,10 @@ This loads files in cascade order &mdash; `.env` → `.env.local` → `.env.dev`
 Every field on the config object has the exact type you declared. No manual casting, no `os.getenv()` strings to parse:
 
 ```python
-print(f"Database: {config.database_url}")   # config.database_url: str
-print(f"Port:     {config.port}")           # config.port: int
-print(f"Debug:    {config.debug}")          # config.debug: bool
-print(f"Workers:  {config.workers}")        # config.workers: int
+print(f"Database: {config.database_url}")  # config.database_url: str
+print(f"Port:     {config.port}")  # config.port: int
+print(f"Debug:    {config.debug}")  # config.debug: bool
+print(f"Workers:  {config.workers}")  # config.workers: int
 print(f"Hosts:    {config.allowed_hosts}")  # config.allowed_hosts: list[str]
 ```
 
@@ -107,13 +107,13 @@ Because dotenvmodel uses real type annotations, your IDE and type checkers (mypy
 config = AppConfig.load(env="dev")
 
 # ✅ These are correct — types match the declarations
-db_url: str = config.database_url      # str = str
-port_num: int = config.port            # int = int
-is_debug: bool = config.debug          # bool = bool
+db_url: str = config.database_url  # str = str
+port_num: int = config.port  # int = int
+is_debug: bool = config.debug  # bool = bool
 
 # ❌ A type checker flags these as errors
-wrong: int = config.database_url       # Error: str is not assignable to int
-wrong: str = config.debug              # Error: bool is not assignable to str
+wrong: int = config.database_url  # Error: str is not assignable to int
+wrong: str = config.debug  # Error: bool is not assignable to str
 ```
 
 Your IDE will give you:

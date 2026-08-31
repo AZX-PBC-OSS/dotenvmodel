@@ -282,8 +282,10 @@ Then test your changes interactively:
 ```python
 from dotenvmodel import DotEnvConfig, Field
 
+
 class TestConfig(DotEnvConfig):
     value: str = Field()
+
 
 config = TestConfig.load_from_dict({"value": "test"})
 print(config.value)
@@ -327,6 +329,7 @@ Always use type hints:
 def process_value(value: str, default: int = 0) -> int:
     return int(value) if value else default
 
+
 # Bad
 def process_value(value, default=0):
     return int(value) if value else default
@@ -358,8 +361,7 @@ Write helpful error messages:
 ```python
 # Good
 raise ValueError(
-    f"Invalid format '{format}'. "
-    f"Supported formats: table, markdown, json, html, dotenv"
+    f"Invalid format '{format}'. Supported formats: table, markdown, json, html, dotenv"
 )
 
 # Bad

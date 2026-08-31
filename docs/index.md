@@ -96,6 +96,7 @@ uv add dotenvmodel
 ```python
 from dotenvmodel import DotEnvConfig, Field
 
+
 class AppConfig(DotEnvConfig):
     # Required fields (Pydantic-style)
     database_url: str = Field(...)
@@ -109,13 +110,14 @@ class AppConfig(DotEnvConfig):
     # Collection types
     allowed_hosts: list[str] = Field(default_factory=list)
 
+
 # Load configuration from cascading .env files
 config = AppConfig.load(env="dev")
 
 # Access configuration with full type safety and IntelliSense
 print(f"Connecting to {config.database_url}")  # config.database_url: str
-print(f"Running on port {config.port}")        # config.port: int
-print(f"Debug mode: {config.debug}")           # config.debug: bool
+print(f"Running on port {config.port}")  # config.port: int
+print(f"Debug mode: {config.debug}")  # config.debug: bool
 
 # Generate documentation for your configuration
 print(AppConfig.describe())
