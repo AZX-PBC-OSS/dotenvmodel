@@ -71,7 +71,9 @@ def resolve_env_name(env: str | None) -> str:
           directly only if you need the same resolution without loading
 
     Args:
-        env: Environment name, or None to read `ENV` (default "dev").
+        env: Environment name, or None to read `ENV` (default "dev"; an
+            empty `ENV` value is treated as unset — the same policy
+            `DOTENV_DIR` applies to an empty value).
 
     Returns:
         The resolved environment name.
@@ -82,7 +84,7 @@ def resolve_env_name(env: str | None) -> str:
             that prevents path traversal via `env="../etc"`.
     """
     if env is None:
-        env = os.getenv("ENV", "dev")
+        env = os.getenv("ENV") or "dev"
 
     if not env or not all(c.isalnum() or c in ("-", "_") for c in env):
         raise ValueError(
@@ -95,6 +97,14 @@ def resolve_env_name(env: str | None) -> str:
 def resolve_env_dir(env_dir: Path | None) -> Path:
     """Resolve the `.env` base directory: explicit argument > `DOTENV_DIR` > cwd.
 
+    The result is always absolute: a relative argument or `DOTENV_DIR`
+    value is joined onto the current working directory. The join is
+    lexical — no `resolve()`, no symlink following, no `..` normalization
+    — so the recorded directory is exactly the path as spelled from the
+    cwd at load time. Recording the absolute path is what keeps a bare
+    `reload()` cwd-stable and `cached()`'s warm-path comparison from
+    misjudging a relative spelling of the same directory.
+
     No existence check happens here. `read_env_files()` raises
     `FileNotFoundError` when it is about to read from a missing directory;
     a `read_dotfiles=False` load must not raise for one.
@@ -104,12 +114,15 @@ def resolve_env_dir(env_dir: Path | None) -> Path:
             (an empty value is ignored) and then the current working directory.
 
     Returns:
-        The resolved base directory.
+        The resolved base directory — always absolute.
     """
     if env_dir is not None:
-        return env_dir
+        return env_dir if env_dir.is_absolute() else Path.cwd() / env_dir
     env_dir_str = os.getenv("DOTENV_DIR")
-    return Path(env_dir_str) if env_dir_str else Path.cwd()
+    if env_dir_str:
+        from_env_var = Path(env_dir_str)
+        return from_env_var if from_env_var.is_absolute() else Path.cwd() / from_env_var
+    return Path.cwd()
 
 
 def resolve_bool(value: bool | None, env_var: str, default: bool) -> bool:
@@ -127,17 +140,21 @@ def resolve_bool(value: bool | None, env_var: str, default: bool) -> bool:
         The resolved boolean.
 
     Note:
-        A stray env var never raises: unrecognized values are parsed
-        case-insensitively against `true/1/yes/on` and `false/0/no/off`,
-        and anything else logs a warning naming the variable and value,
-        then falls back to `default`.
+        A stray env var never raises: values are stripped, then parsed
+        case-insensitively against `true/1/yes/on` and `false/0/no/off`.
+        A whitespace-only value is treated as unset (returning `default`
+        silently — the same policy `DOTENV_DIR` applies to an empty value);
+        anything else logs a warning naming the variable and value, then
+        falls back to `default`.
     """
     if value is not None:
         return value
     raw = os.getenv(env_var)
     if raw is None:
         return default
-    lowered = raw.lower()
+    lowered = raw.strip().lower()
+    if not lowered:
+        return default
     if lowered in _TRUTHY:
         return True
     if lowered in _FALSY:

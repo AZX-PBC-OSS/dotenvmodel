@@ -17,6 +17,8 @@ from dotenvmodel.loading import (
     get_env_var,
     read_env_files,
     resolve_bool,
+    resolve_env_dir,
+    resolve_env_name,
     resolve_load_params,
 )
 
@@ -931,6 +933,171 @@ class TestReaderLoadLocalTier:
         assert any(f"Reading .env file: {tmp_path / '.env'}" in r.message for r in caplog.records)
 
 
+class TestWarmPathRobustness:
+    """A warm cached() never raises and never warns from unresolvable arguments."""
+
+    def test_warm_cached_survives_a_deleted_process_cwd(
+        self, tmp_path: Path, monkeypatch, caplog
+    ) -> None:
+        """Path.cwd() failing (deleted cwd) must not break a call whose arguments are ignored anyway.
+
+        The warm path resolves the caller's arguments only to compare them;
+        when resolution itself fails there is nothing to judge — the cached
+        instance is returned silently.
+        """
+        monkeypatch.chdir(tmp_path)
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        first = Config.cached(read_dotfiles=False)
+
+        tmp_path.rmdir()  # the process cwd is now unlinked; Path.cwd() raises
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            second = Config.cached(read_dotfiles=False)
+
+        assert second is first
+        assert list(caplog.records) == []
+
+    def test_warm_cached_survives_an_ambient_invalid_env(self, monkeypatch, caplog) -> None:
+        monkeypatch.setenv("ENV", "valid-env")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        first = Config.cached(read_dotfiles=False)
+
+        monkeypatch.setenv("ENV", "../etc")
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            second = Config.cached(read_dotfiles=False)
+
+        assert second is first
+        assert list(caplog.records) == []
+
+    def test_warm_cached_with_invalid_env_argument_returns_cached_silently(self, caplog) -> None:
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        first = Config.cached(read_dotfiles=False)
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            second = Config.cached(env="../etc", read_dotfiles=False)
+
+        assert second is first
+        assert list(caplog.records) == []
+
+
+class TestEnvDirAbsolutization:
+    """resolve_env_dir() returns absolute paths so recorded params stay cwd-stable."""
+
+    def test_explicit_relative_env_dir_is_joined_onto_cwd(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        assert resolve_env_dir(Path("rel")) == tmp_path / "rel"
+
+    def test_relative_dotenv_dir_is_joined_onto_cwd(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.chdir(tmp_path)
+        monkeypatch.setenv("DOTENV_DIR", "rel")
+        assert resolve_env_dir(None) == tmp_path / "rel"
+
+    def test_absolutization_is_lexical_not_normalized(self, tmp_path: Path, monkeypatch) -> None:
+        """No resolve(): .. segments and duplicate separators survive as written."""
+        monkeypatch.chdir(tmp_path)
+        assert resolve_env_dir(Path("rel/../rel2")) == tmp_path / "rel" / ".." / "rel2"
+
+    def test_bare_reload_reads_the_original_directory_after_chdir(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """A relative env_dir is recorded absolute, so a bare reload() is cwd-stable.
+
+        Recording "rel" unresolved would make the reload read the NEW cwd's
+        rel/ directory instead of the one the load actually used.
+        """
+        base = tmp_path / "a"
+        (base / "rel").mkdir(parents=True)
+        (base / "rel" / ".env").write_text("VALUE=original\n")
+        other = tmp_path / "b"
+        (other / "rel").mkdir(parents=True)
+        (other / "rel" / ".env").write_text("VALUE=moved\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="unset")
+
+        monkeypatch.chdir(base)
+        config = Config.load(env_dir=Path("rel"))
+        assert config.value == "original"
+
+        monkeypatch.chdir(other)
+        config.reload()
+        assert config.value == "original"
+
+    def test_bare_reload_reads_original_directory_with_relative_dotenv_dir(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        base = tmp_path / "a"
+        (base / "rel").mkdir(parents=True)
+        (base / "rel" / ".env").write_text("VALUE=original\n")
+        other = tmp_path / "b"
+        (other / "rel").mkdir(parents=True)
+        (other / "rel" / ".env").write_text("VALUE=moved\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="unset")
+
+        monkeypatch.chdir(base)
+        monkeypatch.setenv("DOTENV_DIR", "rel")
+        config = Config.load()
+        assert config.value == "original"
+
+        monkeypatch.chdir(other)
+        config.reload()
+        assert config.value == "original"
+
+    def test_warm_cached_with_a_relative_dir_stays_silent(
+        self, tmp_path: Path, monkeypatch, caplog
+    ) -> None:
+        """A relative env_dir spelling of the recorded directory must not warn as a disagreement."""
+        base = tmp_path / "a"
+        (base / "rel").mkdir(parents=True)
+        (base / "rel" / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="unset")
+
+        monkeypatch.chdir(base)
+        first = Config.cached(env_dir=base / "rel")
+        assert first.value == "from_file"
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            second = Config.cached(env_dir=Path("rel"))
+
+        assert second is first
+        assert list(caplog.records) == []
+
+
+class TestEnvNameResolution:
+    """resolve_env_name(): an empty ENV env var is treated as unset."""
+
+    def test_empty_env_env_var_is_treated_as_unset(self, monkeypatch) -> None:
+        monkeypatch.setenv("ENV", "")
+        assert resolve_env_name(None) == "dev"
+
+    def test_empty_env_env_var_resolves_to_dev_in_load(self, monkeypatch) -> None:
+        monkeypatch.setenv("ENV", "")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        assert Config.load(read_dotfiles=False).loaded_with().env == "dev"
+
+
 class TestGetEnvVarUnits:
     """get_env_var() keeps its os.getenv-only contract after the resolution rewrite.
 
@@ -993,3 +1160,27 @@ class TestResolveBool:
         assert any(
             "DOTENV_TEST_FLAG" in r.message and "banana" in r.message for r in caplog.records
         )
+
+    @pytest.mark.parametrize(
+        ("raw", "expected"),
+        [
+            (" true ", True),
+            ("\tfalse\n", False),
+            ("  YES  ", True),
+        ],
+    )
+    def test_strips_surrounding_whitespace(self, monkeypatch, raw: str, expected: bool) -> None:
+        monkeypatch.setenv("DOTENV_TEST_FLAG", raw)
+        assert resolve_bool(None, "DOTENV_TEST_FLAG", default=not expected) is expected
+
+    @pytest.mark.parametrize("raw", ["", "   "])
+    def test_whitespace_only_value_is_treated_as_unset_silently(
+        self, monkeypatch, caplog, raw: str
+    ) -> None:
+        """An empty value is ignored, not warned about — DOTENV_DIR's empty-value policy."""
+        monkeypatch.setenv("DOTENV_TEST_FLAG", raw)
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            assert resolve_bool(None, "DOTENV_TEST_FLAG", default=True) is True
+
+        assert list(caplog.records) == []

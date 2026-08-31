@@ -52,6 +52,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from dotenvmodel._constants import LOGGER_NAME
+
+# resolve_load_params deliberately lives in loading (not config): config.py
+# imports caching at runtime, so importing it from config here would be
+# circular.
 from dotenvmodel.loading import resolve_load_params
 
 if TYPE_CHECKING:
@@ -193,33 +197,42 @@ def acquire_cached(
             # `reload(env="prod")` updates them, so a later `cached()` is
             # judged against what the cached object actually holds now, not
             # against whatever populated it originally.
-            requested = resolve_load_params(
-                env,
-                override=override,
-                env_dir=env_dir,
-                read_dotfiles=read_dotfiles,
-                load_local=load_local,
-            )
-            loaded = cached.loaded_with()
-            if requested != loaded:
-                logger.warning(
-                    "cached() called on %s with arguments (env=%r, override=%r, "
-                    "env_dir=%r, read_dotfiles=%r, load_local=%r) that resolve "
-                    "differently from the parameters the cache holds (env=%r, "
-                    "override=%r, env_dir=%r, read_dotfiles=%r, load_local=%r); "
-                    "arguments were ignored.",
-                    cls.__name__,
-                    requested.env,
-                    requested.override,
-                    requested.env_dir,
-                    requested.read_dotfiles,
-                    requested.load_local,
-                    loaded.env,
-                    loaded.override,
-                    loaded.env_dir,
-                    loaded.read_dotfiles,
-                    loaded.load_local,
+            #
+            # Resolution failure is swallowed, not raised: the warm path
+            # ignores arguments by contract (see the docstring), so when
+            # they cannot even be resolved — the process cwd was deleted, a
+            # stray ambient ENV is invalid — there is nothing to judge and
+            # the cached instance is returned silently.
+            try:
+                requested = resolve_load_params(
+                    env,
+                    override=override,
+                    env_dir=env_dir,
+                    read_dotfiles=read_dotfiles,
+                    load_local=load_local,
                 )
+                loaded = cached.loaded_with()
+                if requested != loaded:
+                    logger.warning(
+                        "cached() called on %s with arguments (env=%r, override=%r, "
+                        "env_dir=%r, read_dotfiles=%r, load_local=%r) that resolve "
+                        "differently from the parameters the cache holds (env=%r, "
+                        "override=%r, env_dir=%r, read_dotfiles=%r, load_local=%r); "
+                        "arguments were ignored.",
+                        cls.__name__,
+                        requested.env,
+                        requested.override,
+                        requested.env_dir,
+                        requested.read_dotfiles,
+                        requested.load_local,
+                        loaded.env,
+                        loaded.override,
+                        loaded.env_dir,
+                        loaded.read_dotfiles,
+                        loaded.load_local,
+                    )
+            except (OSError, ValueError):
+                pass
         return cached
 
     loading = _get_loading_set()
