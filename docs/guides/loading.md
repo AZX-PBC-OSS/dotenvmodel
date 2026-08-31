@@ -77,6 +77,26 @@ config = AppConfig.load(env="dev")
     - **Commit**: `.env.{env}` files (e.g., `.env.dev`, `.env.prod`) — shared defaults
     - **Gitignore**: `.env`, `.env.local`, `.env.{env}.local` — contain secrets and local overrides
 
+### Variable Interpolation
+
+`${VAR}` references inside `.env` values are resolved once, after the whole cascade is merged. The lookup base is:
+
+1. **Merged dotfile cascade** — a reference sees values from every file in the cascade, so a later file can build on an earlier file's value (`.env` defines `HOST`, `.env.local` uses `${HOST}`)
+2. **Process environment** — the fallback for names no file defines
+3. Unresolved references become `""` (python-dotenv semantics: `${VAR}` and `${VAR:-default}` are supported; `$VAR` shorthand is not interpolated)
+
+```bash
+# .env
+HOST=db.internal
+
+# .env.local
+DATABASE_URL=postgres://${HOST}/app   # resolves to postgres://db.internal/app
+```
+
+Interpolation is independent of `override`: references resolve while the file layer is built, before the per-field precedence policy is applied — so `URL=http://${HOST}` from a file always interpolates against the file layer's `HOST`, even when the process environment wins the `HOST` field lookup itself.
+
+Bare keys (a line with just `KEY`, no `=`) are left unset — python-dotenv's `load_dotenv()` skips them too, so a bare key never satisfies a field with an empty string.
+
 ## The `env` Parameter
 
 The `env` parameter selects which environment-specific files to load. If not provided, it reads from the `ENV` environment variable, defaulting to `"dev"`.

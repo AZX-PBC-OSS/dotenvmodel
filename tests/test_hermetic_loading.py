@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from dotenvmodel import DotEnvConfig, Field, LoadParams
+from dotenvmodel import DotEnvConfig, Field, LoadParams, MissingFieldError
 from dotenvmodel.loading import get_env_var, read_env_files, resolve_bool
 
 
@@ -667,12 +667,18 @@ class TestReadEnvFilesUnits:
         assert layer.base_dir == tmp_path
         assert layer.files == (tmp_path / ".env", tmp_path / ".env.local")
 
-    def test_bare_keys_are_normalized_to_empty_strings(self, tmp_path: Path) -> None:
-        """python-dotenv returns None for a bare `KEY`; the layer normalizes it to ""."""
+    def test_bare_keys_are_left_unset(self, tmp_path: Path) -> None:
+        """python-dotenv returns None for a bare `KEY`, and its load_dotenv() skips
+        such keys entirely — the merged layer leaves them unset rather than "".
+
+        Normalizing them to "" would silently satisfy required fields with an
+        empty value python-dotenv itself would never set.
+        """
         (tmp_path / ".env").write_text("BARE\nSET=x\n")
 
         layer = read_env_files(env="dev", env_dir=tmp_path)
-        assert layer.values == {"BARE": "", "SET": "x"}
+        assert layer.values == {"SET": "x"}
+        assert "BARE" not in layer.values
 
     def test_missing_base_dir_raises_file_not_found(self) -> None:
         with pytest.raises(FileNotFoundError, match="does not exist"):
@@ -722,6 +728,95 @@ class TestReadEnvFilesUnits:
     def test_invalid_env_name_raises_value_error(self) -> None:
         with pytest.raises(ValueError, match="Invalid environment name"):
             read_env_files(env="../etc", env_dir=Path("."))
+
+
+class TestInterpolation:
+    """${VAR} references resolve once against the merged layer, then os.environ."""
+
+    def test_single_file_self_reference(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("HOST=localhost\nURL=http://${HOST}:5432\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+        assert layer.values["URL"] == "http://localhost:5432"
+
+    def test_cross_file_reference_reads_earlier_files_values(self, tmp_path: Path) -> None:
+        """The regression: later cascade files used to interpolate against earlier files.
+
+        The old sequential load_dotenv() loop had injected .env's HOST into
+        os.environ before .env.local was read, so its ${HOST} resolved; the
+        pure per-file read had lost that cross-file base.
+        """
+        (tmp_path / ".env").write_text("HOST=db.internal\n")
+        (tmp_path / ".env.local").write_text("URL=postgres://${HOST}/app\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+        assert layer.values["URL"] == "postgres://db.internal/app"
+
+    def test_merged_layer_beats_process_env_in_the_interpolation_base(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("HOST", "from_env")
+        (tmp_path / ".env").write_text("HOST=from_file\nURL=http://${HOST}\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+        assert layer.values["URL"] == "http://from_file"
+
+    def test_os_environ_is_the_fallback_base(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("EXTRA", "from_env")
+        (tmp_path / ".env").write_text("X=prefixed-${EXTRA}\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+        assert layer.values["X"] == "prefixed-from_env"
+
+    def test_unresolved_reference_becomes_empty_string(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.delenv("MISSING", raising=False)
+        (tmp_path / ".env").write_text("X=${MISSING}-suffix\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+        assert layer.values["X"] == "-suffix"
+
+    def test_interpolation_is_independent_of_override(self, tmp_path: Path, monkeypatch) -> None:
+        """override flips per-field precedence, not the interpolation base.
+
+        HOST resolves from the process env for the field lookup when
+        override=False, but URL — read from the file — still interpolates
+        against the file layer's HOST in both modes.
+        """
+        monkeypatch.setenv("HOST", "from_env")
+        (tmp_path / ".env").write_text("HOST=from_file\nURL=http://${HOST}\n")
+
+        class Config(DotEnvConfig):
+            host: str = Field(default="unset")
+            url: str = Field(default="unset")
+
+        default_mode = Config.load(env_dir=tmp_path)
+        assert default_mode.host == "from_env"
+        assert default_mode.url == "http://from_file"
+
+        override_mode = Config.load(env_dir=tmp_path, override=True)
+        assert override_mode.host == "from_file"
+        assert override_mode.url == "http://from_file"
+
+
+class TestBareKeyParity:
+    """A bare `KEY` line is unset in every layer, matching python-dotenv's load_dotenv()."""
+
+    def test_required_field_with_a_bare_key_line_still_raises(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("REQUIRED\n")
+
+        class Config(DotEnvConfig):
+            required: str = Field()
+
+        with pytest.raises(MissingFieldError, match="REQUIRED"):
+            Config.load(env_dir=tmp_path)
+
+    def test_defaulted_field_with_a_bare_key_line_uses_its_default(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("FLAG\n")
+
+        class Config(DotEnvConfig):
+            flag: str = Field(default="fallback")
+
+        assert Config.load(env_dir=tmp_path).flag == "fallback"
 
 
 class TestGetEnvVarUnits:

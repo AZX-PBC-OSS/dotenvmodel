@@ -4,8 +4,10 @@ import logging
 import os
 from dataclasses import dataclass
 from pathlib import Path
+from typing import cast
 
 from dotenv import dotenv_values
+from dotenv.main import resolve_variables
 
 # Module-level logger
 logger = logging.getLogger("dotenvmodel")
@@ -49,7 +51,9 @@ class DotenvLayer:
 
     Attributes:
         values: Merged key/value pairs; a later (more specific) file wins,
-            and bare keys (`KEY` with no `=`) are normalized to `""`.
+            and bare keys (`KEY` with no `=`) are left unset — python-dotenv's
+            `load_dotenv()` skips them too, so a bare key never satisfies a
+            field with `""`.
         base_dir: The directory the cascade was read from.
         files: The files that existed and were read, in cascade order.
     """
@@ -214,6 +218,15 @@ def read_env_files(
     policy — the override policy is applied later, once, against the whole
     merged layer (see `DotEnvConfig.load()`).
 
+    Interpolation happens once, after the merge: a `${VAR}` reference in
+    any file resolves against the merged cascade first, then `os.environ`
+    — the base the old sequential `load_dotenv(override=True)` cascade
+    effectively used — and is independent of the `override` knob, which
+    only governs per-field precedence afterwards. python-dotenv's own
+    semantics apply (`${VAR}` / `${VAR:-default}`; no `$VAR` shorthand;
+    an unresolved reference becomes `""`). Bare keys (`KEY` with no `=`)
+    are left unset, matching `load_dotenv()`, which skips them.
+
     Probing order:
         1. `.env` (base configuration)
         2. `.env.local` (local base overrides — only when `load_local`)
@@ -280,13 +293,29 @@ def read_env_files(
     for file_path in env_files:
         if file_path.exists():
             logger.info(f"Loading environment variables from {file_path}")
-            # dotenv_values() is pure (no os.environ writes). A bare key
-            # (`KEY` with no `=`) comes back as None and is normalized to "".
-            file_values = dotenv_values(file_path)
-            values.update({k: v if v is not None else "" for k, v in file_values.items()})
+            # dotenv_values() is pure (no os.environ writes). Reading with
+            # interpolate=False defers ${VAR} resolution to one pass over
+            # the whole merged layer below, so a later file's references
+            # can see an earlier file's values without any injection.
+            file_values = dotenv_values(file_path, interpolate=False)
+            # A bare key (`KEY` with no `=`) comes back as None and is
+            # dropped, matching load_dotenv(), which never sets such keys.
+            values.update({k: v for k, v in file_values.items() if v is not None})
             loaded_files.append(file_path)
         else:
             logger.debug(f"{file_path} not found (skipping)")
+
+    # Interpolate once, against the whole merged layer: a ${VAR} reference
+    # resolves against the merged cascade first, then os.environ — the base
+    # the old sequential load_dotenv(override=True) cascade effectively used
+    # (earlier files' values were already in os.environ when later files were
+    # interpolated). That base is deliberately independent of load()'s
+    # override knob, which only governs per-field precedence afterwards.
+    # resolve_variables' own override=True selects exactly that base order,
+    # and unresolved references become "" (python-dotenv semantics: ${VAR} /
+    # ${VAR:-default} only; $VAR shorthand is not interpolated). No None
+    # values entered, so none leave — every output is a str.
+    values = cast("dict[str, str]", dict(resolve_variables(values.items(), override=True)))
 
     if loaded_files:
         logger.info(
