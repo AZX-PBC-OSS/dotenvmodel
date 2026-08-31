@@ -178,16 +178,30 @@ def _validate_string(
         )
 
 
+def _unwrap_secret(value: Any) -> Any:
+    """Return the plaintext of a ``SecretStr``, or the value unchanged."""
+    return value.get_secret_value() if isinstance(value, SecretStr) else value
+
+
 def _validate_choices(
     field_name: str, value: Any, field_info: FieldInfo, env_var_name: str
 ) -> None:
-    """Validate that value is in allowed choices."""
-    if field_info.choices is not None and value not in field_info.choices:
+    """Validate that value is in allowed choices.
+
+    Comparison unwraps secrets on both sides: a ``SecretStr`` never compares
+    equal to a plain string, so the value and each choice are reduced to
+    their plaintext before comparing. The error reports the original value,
+    whose ``repr`` masks any secret, so no plaintext reaches the message.
+    """
+    choices = field_info.choices
+    if choices is not None and _unwrap_secret(value) not in [
+        _unwrap_secret(choice) for choice in choices
+    ]:
         raise ConstraintViolationError(
             field_name=field_name,
             value=value,
-            constraint=f"choices={field_info.choices!r}",
-            error_msg=f"Value must be one of: {field_info.choices}",
+            constraint=f"choices={choices!r}",
+            error_msg=f"Value must be one of: {choices}",
             env_var_name=env_var_name,
         )
 
