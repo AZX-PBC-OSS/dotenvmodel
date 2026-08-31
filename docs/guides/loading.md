@@ -94,11 +94,13 @@ config = AppConfig.load(env="dev")
 
 ### Variable Interpolation
 
-`${VAR}` references inside `.env` values are resolved once, after the whole cascade is merged. The lookup base is:
+`${VAR}` references inside `.env` values — and inside string field defaults — resolve through one implementation and one reference syntax; the two paths differ in what a reference can see:
 
-1. **Merged dotfile cascade** — a reference sees values from every file in the cascade, so a later file can build on an earlier file's value (`.env` defines `HOST`, `.env.local` uses `${HOST}`)
-2. **Process environment** — the fallback for names no file defines
+1. **File values resolve progressively, in merged-key order** — a reference in a file value sees the keys defined earlier in the merged cascade, with their already-resolved values, over the process environment; a forward or self reference — to a key defined later in the merged order, or after it in the same file — sees only the process environment (python-dotenv semantics). Merged-key order follows first definition across the cascade, so a later file can still build on an earlier file's value (`.env` defines `HOST`, `.env.local` uses `${HOST}`)
+2. **String defaults resolve against the fully merged cascade** — every key in the merged dotfile layer is visible to every reference in a default, over the process environment as the fallback
 3. Unresolved references become `""` (python-dotenv semantics: `${VAR}` and `${VAR:-default}` are supported; `$VAR` shorthand is not interpolated)
+
+File values resolve once, after the whole cascade is merged:
 
 ```bash
 # .env
@@ -109,6 +111,22 @@ DATABASE_URL=postgres://${HOST}/app   # resolves to postgres://db.internal/app
 ```
 
 Interpolation is independent of `override`: references resolve while the file layer is built, before the per-field precedence policy is applied — so `URL=http://${HOST}` from a file always interpolates against the file layer's `HOST`, even when the process environment wins the `HOST` field lookup itself.
+
+#### String Defaults Are Templates
+
+A literal string default — `Field(default="${BASE_URL}/api")` or a bare class attribute (`api_url: str = "${BASE_URL}/api"`) — is a template too. When no layer provides the field's value, the default's references resolve at load time against the fully merged dotfile cascade over the process environment — every merged key is visible to every reference, with no merged-key ordering restriction (unlike file values, which resolve progressively) — and against the process environment alone when no dotfiles are read (`read_dotfiles=False`, or a `load_from_dict()` call). References resolve against dotfile values and environment variables, never against other fields' values or defaults. A reference names an absolute environment variable: `env_prefix` and `alias` govern the field's own lookup, never a reference inside the default — `${HOST}` on a class with `env_prefix = "APP_"` resolves `HOST`, while `${APP_HOST}` resolves `APP_HOST`. A `default_factory` result is built programmatically and is never interpolated.
+
+```python
+class AppConfig(DotEnvConfig):
+    api_url: str = Field(default="${BASE_URL}/api")
+
+
+# With BASE_URL=https://api.example.com in .env or the environment:
+config = AppConfig.load(env="dev")
+config.api_url  # "https://api.example.com/api"
+```
+
+Resolution re-runs on every `load()` / `reload()`, so a default picks up a changed environment. The resolved value then flows through the normal default machinery unchanged — a `str` default for a non-`str` field type is still coerced and validated (e.g. `"a,${REGION}"` for a `list[str]` field interpolates, then splits), and a `SecretStr` default stays masked in `repr` and errors.
 
 Bare keys (a line with just `KEY`, no `=`) are left unset — python-dotenv's `load_dotenv()` skips them too, so a bare key never satisfies a field with an empty string.
 

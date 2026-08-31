@@ -649,6 +649,8 @@ config = AppConfig.load(env="dev")
 # Final ENABLE_PROFILING: true (from .env.dev.local)
 ```
 
+`${VAR}` references in `.env` values — and in string field defaults — resolve against the merged files, then the process environment; see [Variable Interpolation](docs/guides/loading.md#variable-interpolation) in the loading guide.
+
 ### From Dictionary (Testing)
 
 ```python

@@ -273,6 +273,57 @@ def _resolve_reference(match: re.Match[str], base: Mapping[str, str]) -> str:
     return base.get(match["name"], default if default is not None else "")
 
 
+def interpolate_value(text: str, base: Mapping[str, str]) -> str:
+    """Resolve the ``${VAR}`` / ``${VAR:-default}`` references in one string.
+
+    The single interpolation entry point: ``.env`` file values (via
+    `read_env_files`) and literal string field defaults (via
+    `DotEnvConfig.load`) both resolve through this function, so every
+    template-bearing value shares one reference syntax and one semantics
+    table. ``base`` supplies the names in lookup order (e.g. merged dotfile
+    values over ``os.environ``); a name absent from it resolves to the
+    ``:-`` default when one is given, else ``""`` — a present-but-empty
+    value beats the ``:-`` default, plain ``dict.get`` semantics. Nothing
+    else is a reference: a bare ``$``, ``$VAR`` shorthand, and an unclosed
+    ``${`` stay literal.
+
+    When to use:
+        - Resolving a template-bearing string against the same base
+          ``load()`` resolves string field defaults against (the merged
+          dotfile values over ``os.environ``)
+
+    Args:
+        text: The string to resolve.
+        base: Names to resolve references against, in lookup order.
+
+    Returns:
+        The resolved string — *text* itself, the same object, when it
+        contains no ``${``, so template-free values never enter the regex
+        path.
+
+    Example:
+        ```python
+        interpolate_value("postgres://${HOST}/app", {"HOST": "db.internal"})
+        # 'postgres://db.internal/app'
+        ```
+    """
+    # The membership guard keeps ordinary values off the regex path: most
+    # strings — and nearly every field default — contain no "${" at all.
+    if "${" not in text:
+        return text
+    parts: list[str] = []
+    cursor = 0
+    for match in _POSIX_VARIABLE.finditer(text):
+        start, end = match.span()
+        if start > cursor:
+            parts.append(text[cursor:start])
+        parts.append(_resolve_reference(match, base))
+        cursor = end
+    if cursor < len(text):
+        parts.append(text[cursor:])
+    return "".join(parts)
+
+
 def _interpolate(values: dict[str, str]) -> dict[str, str]:
     """Resolve ${VAR} / ${VAR:-default} references, python-dotenv 1.2.3 semantics.
 
@@ -282,22 +333,13 @@ def _interpolate(values: dict[str, str]) -> dict[str, str]:
     for later references, while a later or self reference sees only
     os.environ. Unresolved references become "". Nothing between ${ and its
     closing } other than the two supported forms is a reference at all, so
-    it stays literal.
+    it stays literal. Each value resolves through `interpolate_value`, the
+    same single-string entry point the field-default path uses.
     """
     resolved: dict[str, str] = {}
     base: dict[str, str] = dict(os.environ)
     for name, value in values.items():
-        parts: list[str] = []
-        cursor = 0
-        for match in _POSIX_VARIABLE.finditer(value):
-            start, end = match.span()
-            if start > cursor:
-                parts.append(value[cursor:start])
-            parts.append(_resolve_reference(match, base))
-            cursor = end
-        if cursor < len(value):
-            parts.append(value[cursor:])
-        resolved[name] = "".join(parts)
+        resolved[name] = interpolate_value(value, base)
         base[name] = resolved[name]
     return resolved
 
@@ -316,16 +358,21 @@ def read_env_files(
     policy — the override policy is applied later, once, against the whole
     merged layer (see `DotEnvConfig.load()`).
 
-    Interpolation happens once, after the merge: a `${VAR}` reference in
-    any file resolves against the merged cascade first, then `os.environ`
-    as the fallback base — a reference to a variable defined only in the
-    process environment still resolves — and is independent of the
-    `override` knob, which only governs per-field precedence afterwards. python-dotenv 1.2.3's
-    semantics apply, replicated locally (`${VAR}` / `${VAR:-default}`; no
-    `$VAR` shorthand; an unresolved reference becomes `""`; the `:-`
-    default applies only when the name is absent from the base — a
-    present-but-empty value wins over it). Bare keys (`KEY` with no `=`)
-    are left unset, matching `load_dotenv()`, which skips them.
+    Interpolation happens once, after the merge, and progressively in
+    merged-key order: a `${VAR}` reference in a file value sees the keys
+    defined earlier in the merged cascade — with their already-resolved
+    values — over `os.environ`, so a later file can build on an earlier
+    file's value, while a forward or self reference (to a key defined
+    later in the merged order, or after it in the same file) sees only
+    `os.environ`. A reference to a variable defined only in the process
+    environment still resolves, and interpolation is independent of the
+    `override` knob, which only governs per-field precedence afterwards.
+    python-dotenv 1.2.3's semantics apply, replicated locally (`${VAR}`
+    / `${VAR:-default}`; no `$VAR` shorthand; an unresolved reference
+    becomes `""`; the `:-` default applies only when the name is absent
+    from the base — a present-but-empty value wins over it). Bare keys
+    (`KEY` with no `=`) are left unset, matching `load_dotenv()`, which
+    skips them.
 
     Probing order:
         1. `.env` (base configuration)
@@ -438,12 +485,13 @@ def read_env_files(
         else:
             logger.debug(f"{file_path} not found (skipping)")
 
-    # Interpolate once, against the whole merged layer: a ${VAR} reference
-    # resolves against the merged cascade first, then os.environ as the
-    # fallback base, so a reference to a variable defined only in the
-    # process environment still resolves. That base is deliberately
-    # independent of load()'s override knob, which only governs per-field
-    # precedence afterwards.
+    # Interpolate in one pass over the merged layer, progressively in
+    # merged-key order: a ${VAR} reference sees the keys defined earlier
+    # in the merge (with their already-resolved values) over os.environ,
+    # so a later file can build on an earlier file's value, while a
+    # forward or self reference sees only os.environ. That base is
+    # deliberately independent of load()'s override knob, which only
+    # governs per-field precedence afterwards.
     # Unresolved references become "" (python-dotenv 1.2.3 semantics: ${VAR}
     # / ${VAR:-default} only; $VAR shorthand is not interpolated), and no
     # None values entered the merge, so none leave — every output is a str.
