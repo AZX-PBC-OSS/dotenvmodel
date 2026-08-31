@@ -102,7 +102,44 @@ jobs:
           name: release-dist
           path: dist/
 
+      - name: Check whether the version is already on PyPI
+        # A release tag triggers this workflow directly while
+        # release-please also calls it as a reusable workflow, so two
+        # publish jobs race per release; probing PyPI first lets the
+        # loser skip the upload instead of failing on duplicate files.
+        id: pypi_probe
+        env:
+          TAG_NAME: ${{ inputs.tag_name || github.ref_name }}
+        run: |
+          set -euo pipefail
+          version="${TAG_NAME#v}"
+          echo "Version from tag ${TAG_NAME}: ${version}"
+          # The build job verified the checked-out tag matches this
+          # version; still validate the shape before it reaches a URL.
+          if ! printf '%s' "${version}" | grep -Eq '^[0-9]+(\.[0-9]+)+$'; then
+            echo "::error::Unexpected version shape from tag '${TAG_NAME}': '${version}'"
+            exit 1
+          fi
+          url="https://pypi.org/pypi/dotenvmodel/${version}/json"
+          status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' "${url}")"
+          case "${status}" in
+            200)
+              echo "dotenvmodel ${version} is already published on PyPI; skipping the upload"
+              echo "already_published=true" >> "${GITHUB_OUTPUT}"
+              exit 0
+              ;;
+            404)
+              echo "dotenvmodel ${version} is not published on PyPI yet; publishing"
+              echo "already_published=false" >> "${GITHUB_OUTPUT}"
+              ;;
+            *)
+              echo "::error::PyPI returned HTTP ${status} for dotenvmodel ${version}; a human needs to investigate"
+              exit 1
+              ;;
+          esac
+
       - name: Publish to PyPI
+        if: steps.pypi_probe.outputs.already_published != 'true'
         # "always" requires the PyPI trusted publisher to succeed: uv must
         # mint the job's OIDC token and never fall back to credentials, so
         # a broken trusted-publisher setup fails loudly instead of hanging
