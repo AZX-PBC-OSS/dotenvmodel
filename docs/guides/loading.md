@@ -126,12 +126,14 @@ Use `load_from_dict()` for testing or when you have config values from a non-env
 
 ```python
 # Load from dictionary for testing
-config = AppConfig.load_from_dict({
-    "DATABASE_URL": "postgresql://localhost/test",
-    "API_KEY": "test-key",
-    "DEBUG": "true",
-    "PORT": "8000",
-})
+config = AppConfig.load_from_dict(
+    {
+        "DATABASE_URL": "postgresql://localhost/test",
+        "API_KEY": "test-key",
+        "DEBUG": "true",
+        "PORT": "8000",
+    }
+)
 
 # Skip validation if needed
 config = AppConfig.load_from_dict(data, validate=False)
@@ -209,6 +211,7 @@ Application code often needs a single shared config instance that is loaded once
 class AppConfig(DotEnvConfig):
     database_url: str = Field()
     port: int = Field(default=8000)
+
 
 # First call loads from the environment.
 config = AppConfig.cached()

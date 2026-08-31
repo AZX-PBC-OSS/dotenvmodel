@@ -28,6 +28,7 @@ Numeric constraints apply to `int`, `float`, and `Decimal` fields.
 from decimal import Decimal
 from dotenvmodel import DotEnvConfig, Field
 
+
 class Config(DotEnvConfig):
     # Greater than or equal (>=)
     min_connections: int = Field(ge=1)
@@ -46,7 +47,7 @@ class Config(DotEnvConfig):
     pool_size: int = Field(default=10, ge=1, le=100)
 
     # Works with Decimal too
-    tax_rate: Decimal = Field(ge=Decimal('0'), le=Decimal('1'))
+    tax_rate: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
 ```
 
 !!! example "Valid vs Invalid"
@@ -107,6 +108,7 @@ String constraints apply to `str` and `SecretStr` fields.
 from dotenvmodel import DotEnvConfig, Field
 from dotenvmodel.types import SecretStr
 
+
 class Config(DotEnvConfig):
     # Minimum length
     api_key: str = Field(min_length=32)
@@ -115,18 +117,14 @@ class Config(DotEnvConfig):
     username: str = Field(max_length=20)
 
     # Regex pattern
-    email: str = Field(regex=r'^[\w\.-]+@[\w\.-]+\.\w+$')
+    email: str = Field(regex=r"^[\w\.-]+@[\w\.-]+\.\w+$")
 
     # Required prefix / suffix
     client_key: str = Field(starts_with="sk-")
     signed_token: str = Field(ends_with=".sig")
 
     # Combined constraints
-    password: str = Field(
-        min_length=8,
-        max_length=128,
-        regex=r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).+$'
-    )
+    password: str = Field(min_length=8, max_length=128, regex=r"^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).+$")
 
     # SecretStr supports the same constraints
     secret: SecretStr = Field(min_length=32)
@@ -233,6 +231,7 @@ For logic the built-in constraints can't express, attach a `validator` hook. It 
 ```python
 from dotenvmodel import DotEnvConfig, Field, SecretStr, ValidatorContext
 
+
 def check_api_key(value: SecretStr, ctx: ValidatorContext) -> SecretStr:
     # The hook receives the coerced value: a SecretStr stays wrapped,
     # so call get_secret_value() to inspect the plaintext.
@@ -241,6 +240,7 @@ def check_api_key(value: SecretStr, ctx: ValidatorContext) -> SecretStr:
         # aggregate into MultipleValidationErrors like any other failure
         raise ValueError(f"{ctx.env_var_name} must start with 'sk-'")
     return value
+
 
 class Config(DotEnvConfig):
     api_key: SecretStr = Field(validator=check_api_key)
@@ -271,11 +271,12 @@ Constraints and per-field `validator` hooks see one value at a time. For invaria
 ```python
 from dotenvmodel import DotEnvConfig, Field, ValidationError
 
+
 class WorkerConfig(DotEnvConfig):
     primary_dsn: str = Field(default="postgresql://localhost/primary")
     replica_dsn: str | None = Field(default=None)
     heartbeat_interval: int = Field(default=5, ge=1)  # seconds
-    lock_lease: int = Field(default=30, ge=1)         # seconds
+    lock_lease: int = Field(default=30, ge=1)  # seconds
 
     def post_load(self) -> list[ValidationError] | None:
         # Fix / transform: derived value — fall back to the primary DSN.
@@ -413,6 +414,7 @@ The `uuid_version` parameter requires a `UUID` field to be a specific version (`
 from uuid import UUID
 from dotenvmodel import DotEnvConfig, Field
 
+
 class Config(DotEnvConfig):
     # Must be a version 4 UUID
     tenant_id: UUID = Field(uuid_version=4)
@@ -491,9 +493,11 @@ from dotenvmodel import (
     MultipleValidationErrors,
 )
 
+
 class Config(DotEnvConfig):
     port: int = Field(ge=1, le=65535)
     host: str = Field(min_length=3)
+
 
 try:
     config = Config.load_from_dict({"PORT": "99999", "HOST": "ab"})

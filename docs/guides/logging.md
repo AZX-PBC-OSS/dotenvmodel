@@ -12,8 +12,10 @@ from dotenvmodel import configure_logging, DotEnvConfig, Field
 # Enable INFO level logging
 configure_logging("INFO")
 
+
 class Config(DotEnvConfig):
     database_url: str = Field()
+
 
 config = Config.load()
 ```
@@ -85,20 +87,14 @@ Customize the log message format with `format_string`:
 from dotenvmodel import configure_logging
 
 # Compact format
-configure_logging(
-    "INFO",
-    format_string="[%(levelname)s] %(message)s"
-)
+configure_logging("INFO", format_string="[%(levelname)s] %(message)s")
 
 # Output: [INFO] Loading Config configuration
 ```
 
 ```python
 # Include logger name only
-configure_logging(
-    "DEBUG",
-    format_string="%(name)s :: %(levelname)s :: %(message)s"
-)
+configure_logging("DEBUG", format_string="%(name)s :: %(levelname)s :: %(message)s")
 
 # Output: dotenvmodel :: DEBUG :: .env.local not found (skipping)
 ```
@@ -182,13 +178,17 @@ import logging
 import json
 from dotenvmodel import LOGGER_NAME
 
+
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        return json.dumps({
-            "logger": record.name,
-            "level": record.levelname,
-            "message": record.getMessage(),
-        })
+        return json.dumps(
+            {
+                "logger": record.name,
+                "level": record.levelname,
+                "message": record.getMessage(),
+            }
+        )
+
 
 handler = logging.StreamHandler()
 handler.setFormatter(JsonFormatter())

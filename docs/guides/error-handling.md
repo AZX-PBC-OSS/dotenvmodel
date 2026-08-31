@@ -29,9 +29,11 @@ Raised when a required field has no value in any source (environment variables, 
 ```python
 from dotenvmodel import DotEnvConfig, Field, MissingFieldError
 
+
 class AppConfig(DotEnvConfig):
     api_key: str = Field()
     database_url: str = Field()
+
 
 try:
     config = AppConfig.load()
@@ -64,8 +66,10 @@ Raised when a string value from the environment cannot be converted to the field
 ```python
 from dotenvmodel import DotEnvConfig, Field, TypeCoercionError
 
+
 class AppConfig(DotEnvConfig):
     port: int = Field(default=8000)
+
 
 try:
     config = AppConfig.load_from_dict({"PORT": "abc"})
@@ -101,8 +105,10 @@ Raised when a value passes type coercion but fails a validation constraint (e.g.
 ```python
 from dotenvmodel import DotEnvConfig, Field, ConstraintViolationError
 
+
 class AppConfig(DotEnvConfig):
     port: int = Field(default=8000, ge=1, le=65535)
+
 
 try:
     config = AppConfig.load_from_dict({"PORT": "99999"})
@@ -138,17 +144,21 @@ When multiple fields fail validation, all errors are collected and raised togeth
 ```python
 from dotenvmodel import DotEnvConfig, Field, MultipleValidationErrors
 
+
 class AppConfig(DotEnvConfig):
     api_key: str = Field(min_length=32)
     port: int = Field(default=8000, ge=1, le=65535)
     workers: int = Field(default=4, ge=1, le=16)
 
+
 try:
-    config = AppConfig.load_from_dict({
-        "API_KEY": "too-short",
-        "PORT": "99999",
-        "WORKERS": "0",
-    })
+    config = AppConfig.load_from_dict(
+        {
+            "API_KEY": "too-short",
+            "PORT": "99999",
+            "WORKERS": "0",
+        }
+    )
 except MultipleValidationErrors as e:
     for error in e.errors:
         print(f"  - {error.field_name}: {error.error_msg}")
@@ -192,8 +202,11 @@ Catch individual exception types when you want different handling for different 
 
 ```python
 from dotenvmodel import (
-    DotEnvConfig, Field,
-    MissingFieldError, TypeCoercionError, ConstraintViolationError,
+    DotEnvConfig,
+    Field,
+    MissingFieldError,
+    TypeCoercionError,
+    ConstraintViolationError,
 )
 
 try:
