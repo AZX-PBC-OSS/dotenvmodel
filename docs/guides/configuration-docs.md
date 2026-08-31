@@ -214,8 +214,8 @@ APP_API_KEY=
 
 # Allowed hostnames for CORS
 # Type: list[str] | Constraints: min_items=1, max_items=10, separator=';'
-# Example: APP_ALLOWED_HOSTS=[]
-# APP_ALLOWED_HOSTS=[]
+# Example: APP_ALLOWED_HOSTS=value1,value2,value3
+# APP_ALLOWED_HOSTS=
 ```
 
 The `.env.example` file includes:
@@ -226,6 +226,16 @@ The `.env.example` file includes:
 - **Examples** — Shows example values for required fields
 - **Commented defaults** — Optional fields are commented out with their default values
 - **Secret handling** — `SecretStr` fields are masked appropriately
+
+### How default values are rendered
+
+Defaults render in the format dotenvmodel itself parses, so uncommenting a default line round-trips:
+
+- `list`, `set`, and `tuple` defaults are joined with the field's `separator` (e.g. `a,b` or `a;b`); an empty collection renders as an empty value, not `[]` (which would parse back as `["[]"]`)
+- `dict` defaults render as `key=value` pairs, e.g. `cpu=4,mem=2`
+- `Json[...]` fields render as JSON, e.g. `{"beta": true}`
+- A `default_factory` is invoked once at generation time and its result is rendered with the same rules — you never see a `<<lambda()>>` callable repr
+- A factory that raises during generation logs a warning and renders a placeholder comment, e.g. `# KEY=<<set per environment>>` (never as an example value)
 
 ## Documenting Multiple Configurations
 

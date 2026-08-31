@@ -1368,10 +1368,10 @@ See the [Caching guide](docs/guides/loading.md#caching-a-singleton-instance) for
    postgres_dsn: str = Field(alias="DATABASE_URL")
    ```
 
-4. **Use Default Factories**: For mutable defaults like lists and dicts
+4. **Prefer Default Factories for Mutable Defaults**: Literal mutable defaults are safe (each `load()` deep-copies them), but a factory skips that per-load copy cost
    ```python
-   hosts: list[str] = Field(default_factory=list)  # ✓ Good
-   hosts: list[str] = Field(default=[])             # ✗ Bad - mutable default
+   hosts: list[str] = Field(default_factory=list)   # ✓ Best - fresh list per load
+   hosts: list[str] = Field(default=["localhost"])  # ✓ Safe - deep-copied per load
    ```
 
 5. **Document Fields**: Use descriptions for complex configurations

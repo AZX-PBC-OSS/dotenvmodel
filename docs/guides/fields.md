@@ -106,7 +106,7 @@ There are three equivalent ways to mark a field as required. All produce identic
 
 === "`default` — Immutable values"
 
-    Use `default` for immutable values like `str`, `int`, `float`, `bool`, and `None`.
+    Use `default` for immutable values like `str`, `int`, `float`, `bool`, and `None`. Literal mutable defaults (`list`, `dict`, `set`) are safe too — each `load()` deep-copies them, so instances never share the same object.
 
     ```python
     class Config(DotEnvConfig):
@@ -114,25 +114,22 @@ There are three equivalent ways to mark a field as required. All produce identic
         debug: bool = Field(default=False)
         host: str = Field(default="0.0.0.0")
         timeout: float | None = Field(default=None)
+        hosts: list[str] = Field(default=["localhost"])  # deep-copied per load
     ```
 
-=== "`default_factory` — Mutable values"
+=== "`default_factory` — Mutable values, no copy cost"
 
-    Use `default_factory` for mutable defaults like `list`, `dict`, and `set`. This avoids shared mutable state between config instances.
+    Prefer `default_factory` for mutable defaults: the factory result is already fresh on every load, so there is no per-load deep-copy cost. `Field()` raises a `ValueError` if you specify both `default` and `default_factory`.
 
     ```python
     class Config(DotEnvConfig):
-        # Correct — uses a factory to create a fresh list each time
         hosts: list[str] = Field(default_factory=list)
         tags: dict[str, str] = Field(default_factory=dict)
         roles: set[str] = Field(default_factory=set)
-
-        # Wrong — mutable default, do NOT do this
-        # bad_hosts: list[str] = Field(default=[])
     ```
 
-!!! warning "Never use mutable defaults"
-    Using `default=[]` or `default={}` shares the same object across all instances. Always use `default_factory=list` or `default_factory=dict` instead. `Field()` raises a `ValueError` if you specify both `default` and `default_factory`.
+!!! note "Mutable literal defaults are copied, not shared"
+    `Field(default=[...])` hands every `load()` an independent deep copy (pydantic-style `smart_deepcopy`), so mutating one instance's value cannot leak into other instances or future loads. Immutable defaults are returned as-is at zero cost. `default_factory` remains the idiomatic choice for mutable defaults because it skips the copy entirely.
 
 !!! note "`str` defaults are coerced and validated for non-`str` field types"
     A `str` default for a non-`str` field type is coerced to the declared type and run through validation at load — e.g. a `bool` default of `'false'` becomes `False`, a `SecretStr` default becomes a masked `SecretStr`, and a `PostgresDsn` default is validated (a bad scheme raises at load) with its password redacted in `repr`. Non-`str` defaults (e.g. `int 8000`, `default_factory=list`) and `str` defaults for `str`-typed fields are left untouched.
