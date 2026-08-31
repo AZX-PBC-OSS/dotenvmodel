@@ -626,9 +626,11 @@ class DotEnvConfig(metaclass=ConfigMeta):
             load_local: If False, `.env.local` and `.env.{env}.local` are not
                 read in any environment. If None, `DOTENV_LOAD_LOCAL` applies,
                 else the default: skip `.local` files only when the resolved
-                env is "test" (Next.js/dotenv-flow convention — tests should
-                produce the same results for everyone); `.env.{env}` itself,
-                e.g. `.env.test`, is still read
+                env is "test" (case-insensitive) — extending the
+                Next.js/dotenv-flow rule, which skips only `.env.local` in
+                test, to all `.local` files, because a gitignored
+                `.env.test.local` must not decide test outcomes either;
+                `.env.{env}` itself, e.g. `.env.test`, is still read
 
         Returns:
             Instance of the config class with all fields populated and validated

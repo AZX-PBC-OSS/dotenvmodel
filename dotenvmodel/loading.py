@@ -205,8 +205,10 @@ def resolve_load_params(
     | Include `.local` files | `load_local` | `DOTENV_LOAD_LOCAL` | `False` iff resolved env is `"test"` (case-insensitive) |
 
     The `load_local` default skips `.env.local` / `.env.{env}.local` when
-    the resolved environment is `"test"` (the Next.js / dotenv-flow
-    convention: tests should produce the same results for everyone);
+    the resolved environment is `"test"` (case-insensitive). This extends
+    the Next.js / dotenv-flow rule — which skips only `.env.local` in test
+    and still loads `.env.{env}.local` — to all `.local` files, because a
+    gitignored `.env.test.local` must not decide test outcomes either;
     `.env.{env}` itself is still read in every environment.
 
     Args:

@@ -10,7 +10,7 @@
 - **Type Safety**: Full type hint support with automatic type coercion
 - **Rich Type Support**: UUID, Decimal, datetime, timedelta, SecretStr, HttpUrl, PostgresDsn, RedisDsn, Json[T], and more
 - **Developer Experience**: Intuitive Pydantic-style API
-- **Smart .env Loading**: Automatic cascading of `.env`, `.env.{env}`, `.env.{env}.local` files
+- **Smart .env Loading**: Automatic cascading of `.env`, `.env.local`, `.env.{env}`, `.env.{env}.local` files
 - **Configuration Reload**: Reload configuration at runtime without creating new instances
 - **Configuration Documentation**: Generate docs in multiple formats (table, markdown, JSON, HTML, dotenv) with `describe()`
 - **.env.example Generation**: Automatically generate `.env.example` files with type hints, constraints, and examples
@@ -576,6 +576,22 @@ The pattern follows pydantic's `model_validator(mode="after")` (run after all fi
 
 ## Loading Configuration
 
+> **Upgrading from 0.6.x — three behavior changes**
+>
+> 1. **Precedence flipped: real environment variables now win over `.env` files by default.** 0.6.x injected dotfile values into `os.environ`, so files beat real env vars. Restore the old order with `override=True` or `DOTENV_OVERRIDE=true`.
+> 2. **`load()` no longer mutates `os.environ`.** The injection side effect is gone; see the [migration note in the loading guide](docs/guides/loading.md) for one-line replacements (`read_env_files()` or python-dotenv `load_dotenv()`).
+> 3. **`.local` files (`.env.local`, `.env.test.local`) are skipped when the resolved environment is `test`** — a gitignored local file must not decide test outcomes. Opt back in with `load_local=True` or `DOTENV_LOAD_LOCAL=true`.
+>
+> Every load behavior knob now resolves through argument > environment variable > default:
+>
+> | Parameter | Env var | Default |
+> |---|---|---|
+> | `env` | `ENV` | `"dev"` |
+> | `env_dir` | `DOTENV_DIR` | current working directory |
+> | `override` | `DOTENV_OVERRIDE` | `False` |
+> | `read_dotfiles` | `DOTENV_READ_DOTFILES` | `True` |
+> | `load_local` | `DOTENV_LOAD_LOCAL` | `True`, except `False` when env is `test` |
+
 ### From Environment Variables
 
 ```python
@@ -810,7 +826,7 @@ config.reload(env="prod")  # Switch to production environment
 The `reload()` method:
 
 - Reloads all fields from environment variables and .env files
-- By default, reuses the same `env`, `override`, and `env_dir` parameters from the original `load()` call
+- By default, reuses the same five recorded parameters (`env`, `override`, `env_dir`, `read_dotfiles`, `load_local`) from the original `load()` call
 - Allows overriding any parameter by passing new values
 - Validates all fields and raises errors if validation fails
 - Returns the same instance (useful for method chaining)

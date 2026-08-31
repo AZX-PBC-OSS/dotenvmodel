@@ -29,6 +29,11 @@ The `.env` cascade is merged once per load (later, more specific files win withi
     load_dotenv("/app/config/.env", override=True)  # explicit injection, your policy
     ```
 
+    Two more changes from the same release:
+
+    - **`load_env_files()` was removed.** Use `read_env_files()` — the pure reader that returns the merged cascade as a `DotenvLayer` — or python-dotenv's `load_dotenv()`. For the full old injection behavior: `os.environ.update(read_env_files(env="dev").values)`. Note the real environment still wins under the new default precedence; add `override=True` (or `DOTENV_OVERRIDE=true`) if the injected values must beat it.
+    - **`loaded_with()` returns a `LoadParams`.** Unpack with `p.env, p.override, p.env_dir, p.read_dotfiles, p.load_local`, or use attribute access (`p.override`, `p.load_local`, ...).
+
 ## .env File Cascading
 
 When you call `load()`, dotenvmodel automatically reads `.env` files in a cascading order. Later files override earlier ones, giving you layered configuration from shared base values to local overrides.
@@ -196,7 +201,7 @@ The `DOTENV_READ_DOTFILES=false` environment variable has the same effect; an ex
 Controls whether the gitignored `.local` files (`.env.local` and `.env.{env}.local`) are read:
 
 - `load_local=False` excludes them in **every** environment.
-- The default includes them — **except** when the resolved environment is `test`, where they are skipped automatically. `.env.test` itself is still read. This matches the Next.js / dotenv-flow convention: tests should produce the same results for everyone, so a developer's gitignored `.env.test.local` must not decide test outcomes.
+- The default includes them — **except** when the resolved environment is `test` (matched case-insensitively), where they are skipped automatically. `.env.test` itself is still read. This extends the Next.js / dotenv-flow rule, which skips only `.env.local` in test and still loads `.env.{env}.local` — dotenvmodel skips both, because a gitignored `.env.test.local` must not decide test outcomes either: tests should produce the same results for everyone.
 
 ```python
 # Tests: .env.local and .env.test.local are skipped by default
@@ -212,7 +217,7 @@ config = AppConfig.load(env="test", load_local=True)
 
 ## Behavior Knobs: Argument > Environment Variable > Default
 
-Every `load()` / `reload()` / `cached()` behavior knob resolves through the same three tiers — an explicit (non-`None`) argument wins, then a well-known environment variable, then the documented default:
+A fresh `load()` — and the first, cache-cold `cached()` call — resolves every behavior knob through the same three tiers: an explicit (non-`None`) argument wins, then a well-known environment variable, then the documented default:
 
 | Behavior | Parameter | Env var | Default |
 |---|---|---|---|
@@ -225,6 +230,8 @@ Every `load()` / `reload()` / `cached()` behavior knob resolves through the same
 Boolean env vars parse case-insensitively (`true/1/yes/on` vs `false/0/no/off`). Any other value logs a warning naming the variable and falls back to the default — a stray env var never crashes a load.
 
 The resolved values are recorded on the instance as a `LoadParams` (returned by `loaded_with()`), and they are exactly what a bare `reload()` repeats.
+
+Two paths deliberately deviate from the full tier walk: `reload()` on an instance that has recorded parameters substitutes the recorded values for the env-var tier (see [Reusing Original Parameters](#reusing-original-parameters)), and a warm `cached()` ignores its arguments entirely — it only warns when they resolve differently from the recorded `LoadParams`.
 
 ## Loading from a Dictionary
 

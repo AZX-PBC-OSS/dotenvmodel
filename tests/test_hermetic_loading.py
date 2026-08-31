@@ -328,7 +328,12 @@ class TestEnvVarTier:
 
 
 class TestLoadLocalRule:
-    """.local files are skipped by default when env is "test" (Next.js/dotenv-flow convention)."""
+    """.local files are skipped by default when env is "test".
+
+    Extends the Next.js/dotenv-flow rule (which skips only .env.local in
+    test) to all .local files — a gitignored .env.test.local must not
+    decide test outcomes either.
+    """
 
     @staticmethod
     def _write_test_cascade(tmp_path: Path) -> None:
