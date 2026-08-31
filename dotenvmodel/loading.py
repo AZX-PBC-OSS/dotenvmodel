@@ -288,9 +288,9 @@ def interpolate_value(text: str, base: Mapping[str, str]) -> str:
     ``${`` stay literal.
 
     When to use:
-        - Resolving a template-bearing string against the same base a load
-          already interpolates against (``os.environ`` overlaid with the
-          merged dotfile values)
+        - Resolving a template-bearing string against the same base
+          ``load()`` resolves string field defaults against (the merged
+          dotfile values over ``os.environ``)
 
     Args:
         text: The string to resolve.

@@ -456,9 +456,11 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 # A literal str default is a template: its ${VAR} /
                 # ${VAR:-default} references resolve at load time through
                 # interpolate_value, the same entry point the .env file
-                # layer uses, against the same base — the merged dotfile
-                # layer over os.environ (os.environ alone when no layer was
-                # read, e.g. read_dotfiles=False), independent of the
+                # layer uses, against the fully merged dotfile layer over
+                # os.environ — every merged key visible to every reference,
+                # unlike the file layer's progressive merged-key order
+                # (os.environ alone when no layer was read, e.g.
+                # read_dotfiles=False), independent of the
                 # override knob. default_factory results are built
                 # programmatically and stay verbatim. The "${" membership
                 # check keeps ordinary defaults off the interpolation path
