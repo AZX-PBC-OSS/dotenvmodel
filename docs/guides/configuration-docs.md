@@ -220,7 +220,7 @@ The `.env.example` file includes:
 - **Constraints** — Documents validation rules (min/max length, numeric ranges, etc.)
 - **Examples** — Shows example values for required fields and empty collection defaults (a field with a real default shows it on its own commented line instead)
 - **Commented defaults** — Optional fields are commented out with their default values
-- **Secret handling** — `SecretStr` fields are masked appropriately
+- **Secret handling** — `SecretStr` and DSN values are masked, including inside collections and `Enum` members
 
 ### How default values are rendered
 
@@ -229,7 +229,8 @@ Defaults render in the format dotenvmodel itself parses, so uncommenting a defau
 - `list`, `set`, and `tuple` defaults are joined with the field's `separator` (e.g. `a,b` or `a;b`); `set` items are sorted so generated files are deterministic; an empty collection renders as an empty value, not `[]` (which would parse back as `["[]"]`)
 - `dict` defaults render as `key=value` pairs, e.g. `cpu=4,mem=2`
 - `Json[...]` fields render as JSON, e.g. `{"beta": true}`
-- `Enum` members render as their values, including members inside collections
+- `Enum` members render as their values, including members inside collections; members wrapping `SecretStr` or DSN values render masked/redacted like their scalar counterparts
+- Collections holding sensitive members (`list[SecretStr]`, `set[PostgresDsn]`, `dict[str, SecretStr]`, …) render `<secret>` — the whole default is masked, never the elements; an empty collection still renders as an empty value
 - A `default_factory` is invoked once per render and its result is rendered with the same rules — you never see a `<<lambda()>>` callable repr. Generation and `describe()` therefore **execute** the factory: side-effecting or expensive factories run at generation time
 - A factory that raises during generation — or a default that cannot be rendered (e.g. a non-serializable `Json[...]` value) — logs a warning and renders a placeholder comment, e.g. `# KEY=<<set per environment>>` (never as an example value). The JSON output format emits the `"<<set per environment>>"` string as its documented sentinel for unrenderable defaults
 

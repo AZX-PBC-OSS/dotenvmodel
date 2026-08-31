@@ -20,7 +20,7 @@ from dotenvmodel._constants import LOGGER_NAME
 from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.coercion import is_string_like_type
 from dotenvmodel.fields import _MISSING, FieldInfo, _validator_name
-from dotenvmodel.types import BaseDsn, SecretStr
+from dotenvmodel.types import BaseDsn, SecretStr, is_sensitive_type
 
 if TYPE_CHECKING:
     from dotenvmodel.config import DotEnvConfig
@@ -121,7 +121,7 @@ def format_type_name(field_type: TypeForm[Any]) -> str:
 
     enum_type = _extract_enum_from_type(field_type)
     if enum_type is not None and field_type is enum_type:
-        values = [str(m.value) for m in enum_type]
+        values = [_format_enum_member_value(m.value) for m in enum_type]
         return f"{enum_type.__name__} ({', '.join(values)})"
 
     origin = get_origin(field_type)
@@ -292,7 +292,7 @@ def format_constraints(
 
     enum_type = _extract_enum_from_type(field_type) if field_type is not None else None
     if enum_type is not None:
-        values = [str(m.value) for m in enum_type]
+        values = [_format_enum_member_value(m.value) for m in enum_type]
         choices_str = ", ".join(values)
         if truncate and len(choices_str) > TRUNCATE_THRESHOLD_MEDIUM:
             choices_str = choices_str[: TRUNCATE_THRESHOLD_MEDIUM - 3] + "..."
@@ -392,6 +392,38 @@ def _is_json_typed(field_type: TypeForm[Any] | types.UnionType) -> bool:
     )
 
 
+def _is_sensitive_collection(field_type: TypeForm[Any] | types.UnionType) -> bool:
+    """True when a list/set/tuple/dict annotation holds sensitive members.
+
+    ``Optional``/``Union`` is unwrapped first so ``list[SecretStr] | None``
+    is caught. Any sensitive member argument (``SecretStr`` or a ``BaseDsn``
+    subclass — for dicts, keys and values both) masks the whole collection:
+    element-wise rendering would leak each secret.
+    """
+    for member in _union_members(field_type):
+        origin = get_origin(member)
+        if origin in (list, set, tuple, dict) and any(
+            is_sensitive_type(arg) for arg in get_args(member)
+        ):
+            return True
+    return False
+
+
+def _format_enum_member_value(value: object) -> str:
+    """Render an Enum member's value for display, masking sensitive values.
+
+    ``str(member.value)`` on a ``SecretStr`` shows asterisks (not the
+    ``<secret>`` sentinel) and on a ``BaseDsn`` shows the raw connection
+    string with its password, so sensitive member values are handled here
+    once, shared by the type-name, constraints, and default renderers.
+    """
+    if isinstance(value, SecretStr):
+        return "<secret>"
+    if isinstance(value, BaseDsn):
+        return redact_url_password(str.__str__(value))
+    return str(value)
+
+
 def _render_collection_item(item: Any) -> str:
     """Render a collection item, unwrapping ``Enum`` members to their values.
 
@@ -429,7 +461,15 @@ def _render_default_value(
         return "None"
 
     if isinstance(value, Enum):
-        return str(value.value)
+        member_value = value.value
+        # An Enum wrapping a SecretStr/DSN bypasses the scalar redaction
+        # checks below (str(member.value) prints the raw secret); mask it here.
+        if isinstance(member_value, SecretStr):
+            return "<secret>"
+        if isinstance(member_value, BaseDsn):
+            # Match the scalar DSN default render: quoted, password redacted.
+            return f'"{_format_enum_member_value(member_value)}"'
+        return str(member_value)
 
     # Recognise DSN/SecretStr even inside an Optional/multi-member Union
     # (e.g. `PostgresDsn | RedisDsn | None`) so nested defaults are redacted.
@@ -442,6 +482,18 @@ def _render_default_value(
 
     if _is_json_typed(field_type) and isinstance(value, (list, dict)):
         return _bounded(json.dumps(value), truncate)
+
+    # Empty collections reveal nothing; "" (which parses back as an empty
+    # collection) must win over the sensitive-collection mask below. This
+    # sits after the Json branch so an empty Json default keeps its "[]".
+    if isinstance(value, (list, set, tuple, dict)) and not value:
+        return ""
+
+    # Sensitive collections (list[SecretStr], set[BaseDsn],
+    # dict[str, SecretStr], Optional[...]) mask wholesale: element-wise
+    # rendering would leak each secret.
+    if _is_sensitive_collection(field_type):
+        return "<secret>"
 
     if isinstance(value, str):
         if is_string_like_type(field_type):
