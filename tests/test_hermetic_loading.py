@@ -13,7 +13,12 @@ from pathlib import Path
 import pytest
 
 from dotenvmodel import DotEnvConfig, Field, LoadParams, MissingFieldError
-from dotenvmodel.loading import get_env_var, read_env_files, resolve_bool
+from dotenvmodel.loading import (
+    get_env_var,
+    read_env_files,
+    resolve_bool,
+    resolve_load_params,
+)
 
 
 class TestEnvironIsolationFixture:
@@ -817,6 +822,113 @@ class TestBareKeyParity:
             flag: str = Field(default="fallback")
 
         assert Config.load(env_dir=tmp_path).flag == "fallback"
+
+
+class TestLocalRuleCaseInsensitivity:
+    """The test-env .local skip matches TEST/Test too, not just lowercase "test"."""
+
+    @staticmethod
+    def _write_cascade(tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("X=base\n")
+        (tmp_path / ".env.local").write_text("X=local_base\n")
+        (tmp_path / ".env.TEST").write_text("X=test\n")
+        (tmp_path / ".env.TEST.local").write_text("X=test_local\n")
+
+    def test_uppercase_test_env_skips_local_files_in_load(self, tmp_path: Path) -> None:
+        self._write_cascade(tmp_path)
+
+        class Config(DotEnvConfig):
+            x: str = Field(default="unset")
+
+        assert Config.load(env="TEST", env_dir=tmp_path).x == "test"
+
+    def test_ambient_uppercase_env_env_var_skips_local_files_in_load(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("ENV", "TEST")
+        self._write_cascade(tmp_path)
+
+        class Config(DotEnvConfig):
+            x: str = Field(default="unset")
+
+        assert Config.load(env_dir=tmp_path).x == "test"
+
+    def test_reader_skips_local_files_for_uppercase_test_env(self, tmp_path: Path) -> None:
+        self._write_cascade(tmp_path)
+
+        layer = read_env_files(env="TEST", env_dir=tmp_path)
+        assert layer.values == {"X": "test"}
+        assert layer.files == (tmp_path / ".env", tmp_path / ".env.TEST")
+
+    def test_resolve_load_params_auto_rule_is_case_insensitive(self) -> None:
+        assert resolve_load_params("Test").load_local is False
+        assert resolve_load_params("dev").load_local is True
+
+
+class TestReaderLoadLocalTier:
+    """read_env_files() resolves load_local through the same tiers as load()."""
+
+    @staticmethod
+    def _write_test_cascade(tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("X=base\n")
+        (tmp_path / ".env.local").write_text("X=local_base\n")
+        (tmp_path / ".env.test").write_text("X=test\n")
+        (tmp_path / ".env.test.local").write_text("X=test_local\n")
+
+    def test_reader_default_matches_load_for_test_env(self, tmp_path: Path) -> None:
+        """The previously-confirmed divergence: the reader included .local in test envs."""
+        self._write_test_cascade(tmp_path)
+
+        layer = read_env_files(env="test", env_dir=tmp_path)
+        assert layer.values == {"X": "test"}
+        assert layer.files == (tmp_path / ".env", tmp_path / ".env.test")
+
+        class Config(DotEnvConfig):
+            x: str = Field(default="unset")
+
+        assert Config.load(env="test", env_dir=tmp_path).x == "test"
+
+    def test_dotenv_load_local_env_var_steers_the_reader(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("DOTENV_LOAD_LOCAL", "true")
+        self._write_test_cascade(tmp_path)
+
+        layer = read_env_files(env="test", env_dir=tmp_path)
+        assert layer.values["X"] == "test_local"
+        assert tmp_path / ".env.test.local" in layer.files
+
+    def test_skipped_local_files_are_logged_with_restore_knobs(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        """A present-but-skipped .local file is named, with both ways to restore it."""
+        self._write_test_cascade(tmp_path)
+
+        with caplog.at_level("INFO", logger="dotenvmodel"):
+            read_env_files(env="test", env_dir=tmp_path)
+
+        skip_messages = [r.message for r in caplog.records if "Skipping" in r.message]
+        assert len(skip_messages) == 2
+        assert any(str(tmp_path / ".env.local") in m for m in skip_messages)
+        assert any(str(tmp_path / ".env.test.local") in m for m in skip_messages)
+        for message in skip_messages:
+            assert "load_local=True" in message
+            assert "DOTENV_LOAD_LOCAL=true" in message
+
+    def test_no_skip_log_when_no_local_file_exists(self, tmp_path: Path, caplog) -> None:
+        (tmp_path / ".env").write_text("X=base\n")
+
+        with caplog.at_level("INFO", logger="dotenvmodel"):
+            read_env_files(env="test", env_dir=tmp_path)
+
+        assert not any("load_local=True" in r.message for r in caplog.records)
+
+    def test_reading_a_file_logs_the_reading_wording(self, tmp_path: Path, caplog) -> None:
+        """Nothing is injected into the environment anymore — the log says "Reading"."""
+        (tmp_path / ".env").write_text("A=1\n")
+
+        with caplog.at_level("INFO", logger="dotenvmodel"):
+            read_env_files(env="dev", env_dir=tmp_path)
+
+        assert any(f"Reading .env file: {tmp_path / '.env'}" in r.message for r in caplog.records)
 
 
 class TestGetEnvVarUnits:

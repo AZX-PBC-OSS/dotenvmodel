@@ -675,8 +675,8 @@ config = Config.load()
 ```
 2025-12-05 00:33:40 - dotenvmodel - INFO - Loading Config configuration
 2025-12-05 00:33:40 - dotenvmodel - INFO - Loading configuration for environment: dev
-2025-12-05 00:33:40 - dotenvmodel - INFO - Loading environment variables from .env
-2025-12-05 00:33:40 - dotenvmodel - INFO - Loading environment variables from .env.dev
+2025-12-05 00:33:40 - dotenvmodel - INFO - Reading .env file: .env
+2025-12-05 00:33:40 - dotenvmodel - INFO - Reading .env file: .env.dev
 2025-12-05 00:33:40 - dotenvmodel - INFO - Successfully loaded 2 file(s): .env, .env.dev
 2025-12-05 00:33:40 - dotenvmodel - INFO - Config configuration loaded successfully
 ```

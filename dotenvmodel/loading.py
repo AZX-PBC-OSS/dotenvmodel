@@ -168,7 +168,7 @@ def resolve_load_params(
     | Base directory | `env_dir` | `DOTENV_DIR` | cwd |
     | Dotfiles beat process env | `override` | `DOTENV_OVERRIDE` | `False` |
     | Read dotfiles at all | `read_dotfiles` | `DOTENV_READ_DOTFILES` | `True` |
-    | Include `.local` files | `load_local` | `DOTENV_LOAD_LOCAL` | `False` iff resolved env is `"test"` |
+    | Include `.local` files | `load_local` | `DOTENV_LOAD_LOCAL` | `False` iff resolved env is `"test"` (case-insensitive) |
 
     The `load_local` default skips `.env.local` / `.env.{env}.local` when
     the resolved environment is `"test"` (the Next.js / dotenv-flow
@@ -199,7 +199,9 @@ def resolve_load_params(
         override=resolve_bool(override, "DOTENV_OVERRIDE", default=False),
         env_dir=resolve_env_dir(env_dir),
         read_dotfiles=resolve_bool(read_dotfiles, "DOTENV_READ_DOTFILES", default=True),
-        load_local=resolve_bool(load_local, "DOTENV_LOAD_LOCAL", default=resolved_env != "test"),
+        load_local=resolve_bool(
+            load_local, "DOTENV_LOAD_LOCAL", default=resolved_env.lower() != "test"
+        ),
     )
 
 
@@ -207,7 +209,7 @@ def read_env_files(
     env: str | None = None,
     *,
     env_dir: Path | None = None,
-    load_local: bool = True,
+    load_local: bool | None = None,
 ) -> DotenvLayer:
     """Read the cascading .env files and merge them — purely, without touching os.environ.
 
@@ -242,9 +244,13 @@ def read_env_files(
             the `ENV` environment variable, defaults to "dev"
         env_dir: Custom base directory for .env files. If None, uses
             the `DOTENV_DIR` environment variable or current working directory
-        load_local: If False, `.env.local` and `.env.{env}.local` are not
-            probed at all (default True — `DotEnvConfig.load()` passes the
-            resolved auto rule, which skips them in the "test" environment)
+        load_local: Whether to include `.local` files. If None (the
+            default), resolves through `DOTENV_LOAD_LOCAL` with the same
+            auto rule as `load()`: skip `.local` files when the resolved
+            environment is `"test"` (case-insensitive), else include them.
+            When False, a present-but-skipped `.local` file is logged at
+            INFO with the two restore knobs (`load_local=True` /
+            `DOTENV_LOAD_LOCAL=true`)
 
     Returns:
         A `DotenvLayer` with the merged values, the base directory, and
@@ -279,12 +285,29 @@ def read_env_files(
         logger.error(f"Environment file directory does not exist: {base_dir}")
         raise FileNotFoundError(f"Environment file directory does not exist: {base_dir}")
 
+    # Same tier resolution as load(): explicit argument > DOTENV_LOAD_LOCAL
+    # > the auto rule (skip .local files when the resolved env is "test",
+    # matched case-insensitively).
+    resolved_load_local = resolve_bool(
+        load_local, "DOTENV_LOAD_LOCAL", default=resolved_env.lower() != "test"
+    )
+
     env_files = [base_dir / ".env"]  # Base shared configuration
-    if load_local:
+    if resolved_load_local:
         env_files.append(base_dir / ".env.local")  # Local base overrides
     env_files.append(base_dir / f".env.{resolved_env}")  # Environment-specific config
-    if load_local:
+    if resolved_load_local:
         env_files.append(base_dir / f".env.{resolved_env}.local")  # Local environment overrides
+    else:
+        # Make the skip observable: a present-but-skipped .local file is
+        # exactly what a developer debugging "why isn't my local override
+        # picked up in test?" needs to see, with both ways to restore it.
+        for local_file in (base_dir / ".env.local", base_dir / f".env.{resolved_env}.local"):
+            if local_file.exists():
+                logger.info(
+                    f"Skipping {local_file}: local files are excluded for this load. "
+                    "Pass load_local=True or set DOTENV_LOAD_LOCAL=true to include them."
+                )
 
     logger.debug(f"Searching for .env files in order: {[str(f) for f in env_files]}")
 
@@ -292,7 +315,7 @@ def read_env_files(
     loaded_files: list[Path] = []
     for file_path in env_files:
         if file_path.exists():
-            logger.info(f"Loading environment variables from {file_path}")
+            logger.info(f"Reading .env file: {file_path}")
             # dotenv_values() is pure (no os.environ writes). Reading with
             # interpolate=False defers ${VAR} resolution to one pass over
             # the whole merged layer below, so a later file's references
