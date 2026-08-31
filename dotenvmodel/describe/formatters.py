@@ -390,6 +390,15 @@ def _is_json_typed(field_type: TypeForm[Any] | types.UnionType) -> bool:
     )
 
 
+def _render_collection_item(item: Any) -> str:
+    """Render a collection item, unwrapping ``Enum`` members to their values.
+
+    ``str(Color.RED)`` is ``"Color.RED"``, which fails coercion when the
+    rendered example is uncommented; the member's value round-trips.
+    """
+    return str(item.value if isinstance(item, Enum) else item)
+
+
 def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: bool = True) -> str:
     """Format a field's default value for display.
 
@@ -457,12 +466,21 @@ def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: b
 
     # Collections render exactly as _coerce_list/_coerce_dict parse them
     # back; empty collections render as an empty value (not "[]", which
-    # would parse back as a list containing the string "[]").
-    if isinstance(value, (list, set, tuple)):
-        return field_info.separator.join(str(item) for item in value)
+    # would parse back as a list containing the string "[]"). Enum items
+    # unwrap to their values so the joined output parses back.
+    if isinstance(value, (list, tuple)):
+        return field_info.separator.join(_render_collection_item(item) for item in value)
+
+    if isinstance(value, set):
+        # Hash order varies with PYTHONHASHSEED; sort the rendered strings
+        # so .env.example output is deterministic (no diff churn).
+        items = sorted(_render_collection_item(item) for item in value)
+        return field_info.separator.join(items)
 
     if isinstance(value, dict):
-        return field_info.separator.join(f"{k}={v}" for k, v in value.items())
+        return field_info.separator.join(
+            f"{k}={_render_collection_item(v)}" for k, v in value.items()
+        )
 
     repr_str = repr(value)
     if truncate and len(repr_str) > TRUNCATE_THRESHOLD_MEDIUM:

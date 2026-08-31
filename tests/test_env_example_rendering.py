@@ -10,6 +10,10 @@ pairs, and ``Json`` fields as JSON.
 
 import json
 import logging
+import os
+import subprocess
+import sys
+from enum import Enum
 
 from dotenvmodel import DotEnvConfig, Field
 from dotenvmodel.types import Json
@@ -17,6 +21,11 @@ from dotenvmodel.types import Json
 
 def _raising_factory() -> list[str]:
     raise RuntimeError("no defaults available")
+
+
+class Color(Enum):
+    RED = "red"
+    GREEN = "green"
 
 
 class TestFactoryExampleRendering:
@@ -122,3 +131,73 @@ class TestParseableRendering:
 
         example = Config.generate_env_example()
         assert '# FLAGS={"beta": true}' in example
+
+
+class TestEnumCollectionRendering:
+    """Enum members inside collections render as their values so examples parse.
+
+    ``str(Color.RED)`` is ``"Color.RED"``, which fails coercion when the
+    example line is uncommented; the member's value round-trips.
+    """
+
+    def test_list_enum_default_renders_values_and_round_trips(self) -> None:
+        class Config(DotEnvConfig):
+            colors: list[Color] = Field(default=[Color.RED, Color.GREEN])
+
+        example = Config.generate_env_example()
+        assert "# COLORS=red,green" in example
+        assert "Color.RED" not in example
+
+        config = Config.load_from_dict({"COLORS": "red,green"})
+        assert config.colors == [Color.RED, Color.GREEN]
+
+    def test_set_enum_default_renders_sorted_values(self) -> None:
+        class Config(DotEnvConfig):
+            colors: set[Color] = Field(default={Color.GREEN, Color.RED})
+
+        example = Config.generate_env_example()
+        assert "# COLORS=green,red" in example
+
+        config = Config.load_from_dict({"COLORS": "red,green"})
+        assert config.colors == {Color.RED, Color.GREEN}
+
+    def test_dict_enum_values_render_unwrapped(self) -> None:
+        class Config(DotEnvConfig):
+            palette: dict[str, Color] = Field(default={"alert": Color.RED, "ok": Color.GREEN})
+
+        example = Config.generate_env_example()
+        assert "# PALETTE=alert=red,ok=green" in example
+
+        config = Config.load_from_dict({"PALETTE": "alert=red,ok=green"})
+        assert config.palette == {"alert": Color.RED, "ok": Color.GREEN}
+
+
+class TestDeterministicSetRendering:
+    """Set defaults render sorted, so output does not churn with PYTHONHASHSEED."""
+
+    def test_multi_element_set_default_renders_sorted(self) -> None:
+        class Config(DotEnvConfig):
+            tags: set[str] = Field(default={"zulu", "alpha", "mike"})
+
+        example = Config.generate_env_example()
+        assert "# TAGS=alpha,mike,zulu" in example
+
+    def test_set_rendering_identical_across_hash_seeds(self) -> None:
+        program = (
+            "from dotenvmodel import DotEnvConfig, Field\n"
+            "class Config(DotEnvConfig):\n"
+            "    tags: set[str] = Field(default={'zulu', 'alpha', 'mike', 'sierra', 'tango'})\n"
+            "print(Config.generate_env_example())\n"
+        )
+        outputs = set()
+        for seed in ("0", "12345"):
+            result = subprocess.run(
+                [sys.executable, "-c", program],
+                timeout=60,
+                capture_output=True,
+                text=True,
+                env={**os.environ, "PYTHONHASHSEED": seed},
+            )
+            assert result.returncode == 0, f"child failed:\n{result.stderr}"
+            outputs.add(result.stdout)
+        assert len(outputs) == 1

@@ -8,6 +8,7 @@ load; ``default_factory`` results are already fresh per call and stay
 uncopied.
 """
 
+import threading
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
 from enum import Enum
@@ -85,7 +86,7 @@ class TestLiteralMutableDefaults:
 
 
 class TestImmutableDefaultsKeepIdentity:
-    """Immutable defaults are handed out as-is: zero copy cost (pydantic parity)."""
+    """Exact-type immutable defaults are handed out as-is: zero copy cost."""
 
     @pytest.mark.parametrize(
         "default",
@@ -99,22 +100,41 @@ class TestImmutableDefaultsKeepIdentity:
             "text",
             b"bytes",
             range(3),
-            Color.RED,
             datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
             date(2026, 1, 1),
             time(12, 0),
             timedelta(hours=1),
             Decimal("1.5"),
             UUID("12345678-1234-5678-1234-567812345678"),
-            Path("/data"),
             SecretStr("secret"),
             BaseDsn("postgres://user:pass@localhost:5432/db"),
-            HttpUrl("https://example.com"),
         ],
     )
-    def test_immutable_default_returned_as_is(self, default: object) -> None:
+    def test_exact_type_immutable_default_returned_as_is(self, default: object) -> None:
         field_info = FieldInfo(default=default)
         assert field_info.get_default() is default
+
+    @pytest.mark.parametrize(
+        "default",
+        [Path("/data"), HttpUrl("https://example.com")],
+        ids=["posix-path", "http-url"],
+    )
+    def test_subclass_instance_default_copied_not_shared(self, default: object) -> None:
+        """Subclasses (PosixPath, HttpUrl) can carry mutable state: deep-copied.
+
+        Exact-type membership means only the declared types themselves take
+        the zero-copy fast path; subclasses fall through to ``deepcopy`` and
+        come back equal but independent.
+        """
+        field_info = FieldInfo(default=default)
+        result = field_info.get_default()
+        assert result == default
+        assert result is not default
+
+    def test_enum_member_default_returns_same_member(self) -> None:
+        """Enum members are singletons: deepcopy hands back the identical member."""
+        field_info = FieldInfo(default=Color.RED)
+        assert field_info.get_default() is Color.RED
 
 
 class TestDefaultFactoryParity:
@@ -175,3 +195,70 @@ class TestSmartDeepcopy:
 
         value = ("a", "b")
         assert smart_deepcopy(value) == value
+
+    def test_str_subclass_with_mutable_state_isolated(self) -> None:
+        """A str subclass carrying mutable state is isolated per call.
+
+        ``isinstance`` checks would hand the SAME object to every load,
+        sharing the mutable attribute — the exact bug class this module
+        guards against. Exact-type membership routes subclasses to
+        ``deepcopy`` instead.
+        """
+
+        class TaggedStr(str):
+            metadata: list[str]
+
+        original = TaggedStr("label")
+        original.metadata = ["shared-state"]
+
+        first = smart_deepcopy(original)
+        second = smart_deepcopy(original)
+
+        assert first is not original
+        assert first.metadata is not original.metadata
+        first.metadata.append("corrupted")
+        assert second.metadata == ["shared-state"]
+        assert original.metadata == ["shared-state"]
+
+    def test_empty_list_subclass_keeps_its_type(self) -> None:
+        """An empty list subclass is deep-copied, preserving its type.
+
+        The old ``value.copy()`` fast path downgraded subclasses to plain
+        ``list``.
+        """
+
+        class MyList(list[int]):
+            pass
+
+        value = MyList()
+        result = smart_deepcopy(value)
+        assert result == value
+        assert result is not value
+        assert type(result) is MyList
+
+    def test_raising_bool_collection_does_not_crash(self) -> None:
+        """A collection subclass whose ``__bool__`` raises must not crash.
+
+        The old empty-container fast path evaluated ``not value``, which
+        invokes ``__bool__``; exact-type membership never calls it for
+        subclasses.
+        """
+
+        class WeirdBoolList(list[int]):
+            def __bool__(self) -> bool:
+                raise ValueError("truthiness is undefined")
+
+        result = smart_deepcopy(WeirdBoolList())
+        assert isinstance(result, WeirdBoolList)
+
+
+class TestDeepcopyableDefaultContract:
+    """Literal defaults must be deep-copyable; failure is loud, not silent sharing."""
+
+    def test_undeepcopyable_lock_default_raises_type_error_on_load(self) -> None:
+        class Config(DotEnvConfig):
+            name: str = Field(default="app")
+            lock: object = Field(default=threading.Lock())
+
+        with pytest.raises(TypeError):
+            Config.load_from_dict({})

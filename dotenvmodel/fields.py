@@ -6,8 +6,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from enum import Enum
-from pathlib import Path
 from typing import Any, TypeVar
 from uuid import UUID
 
@@ -102,53 +100,62 @@ def _validator_name(fn: Callable[..., Any]) -> str:
 
 
 # Immutable default types are handed out as-is: sharing them is safe.
-# Enum covers all enum members; BaseDsn covers its subclasses (HttpUrl,
-# PostgresDsn, RedisDsn); datetime subclasses date but is listed for clarity.
-_IMMUTABLE_DEFAULT_TYPES: tuple[type[Any], ...] = (
-    type(None),
-    bool,
-    int,
-    float,
-    complex,
-    str,
-    bytes,
-    range,
-    date,
-    datetime,
-    time,
-    timedelta,
-    Decimal,
-    UUID,
-    Path,
-    SecretStr,
-    BaseDsn,
-    Enum,
+# Membership is by EXACT type (pydantic's smart_deepcopy semantics) —
+# subclasses of str/int/bytes/etc. can carry mutable state, so they fall
+# through to copy.deepcopy. datetime subclasses date but is listed for
+# clarity. Path instances (PosixPath/WindowsPath), DSN subclasses
+# (HttpUrl, PostgresDsn, RedisDsn), and Enum members are not exact
+# members; deepcopy handles them (enum singletons come back identical).
+_IMMUTABLE_DEFAULT_TYPES: frozenset[type[Any]] = frozenset(
+    {
+        type(None),
+        bool,
+        int,
+        float,
+        complex,
+        str,
+        bytes,
+        range,
+        date,
+        datetime,
+        time,
+        timedelta,
+        Decimal,
+        UUID,
+        SecretStr,
+        BaseDsn,
+    }
 )
 
 
 def smart_deepcopy(value: Any) -> Any:
     """Return a value safe to hand out as a per-load default.
 
-    Immutable values (scalars, ``Enum`` members, dates, ``Decimal``, ``UUID``,
-    ``Path``, ``SecretStr``, DSN types) are returned as-is at zero cost. Empty
-    ``list``/``dict``/``set`` values get a shallow ``copy()`` — they hold
-    nothing that could be shared. Everything else (non-empty or possibly
-    nested containers, custom objects) is ``copy.deepcopy``-ed.
+    Values whose exact type is immutable (``None``, ``bool``, ``int``,
+    ``float``, ``complex``, ``str``, ``bytes``, ``range``, dates/times,
+    ``timedelta``, ``Decimal``, ``UUID``, ``SecretStr``, ``BaseDsn``) are
+    returned as-is at zero cost. Empty ``list``/``dict``/``set`` values get
+    a shallow ``copy()`` — they hold nothing that could be shared.
+    Everything else — non-empty or possibly nested containers, subclasses
+    (which can carry mutable state), custom objects — is
+    ``copy.deepcopy``-ed; singletons such as ``Enum`` members come back
+    from ``deepcopy`` as the same object.
 
-    This mirrors pydantic's ``smart_deepcopy`` so that a literal mutable
-    default such as ``Field(default=["localhost"])`` is isolated per
-    ``load()`` call instead of being shared — and mutated — across every
-    instance.
+    This mirrors pydantic's ``smart_deepcopy`` (exact-type membership) so
+    that a literal mutable default such as ``Field(default=["localhost"])``
+    is isolated per ``load()`` call instead of being shared — and mutated —
+    across every instance.
 
     Args:
         value: The literal default value to copy.
 
     Returns:
-        The same object for immutable values, otherwise an independent copy.
+        The same object for exact-type immutable values, otherwise an
+        independent copy.
     """
-    if isinstance(value, _IMMUTABLE_DEFAULT_TYPES):
+    if type(value) in _IMMUTABLE_DEFAULT_TYPES:
         return value
-    if isinstance(value, (list, dict, set)) and not value:
+    if type(value) in (list, dict, set) and not value:
         return value.copy()
     return copy.deepcopy(value)
 
