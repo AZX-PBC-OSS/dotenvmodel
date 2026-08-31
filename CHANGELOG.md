@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.0.0](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.6.3...v1.0.0) (2026-08-31)
+
+
+### ⚠ BREAKING CHANGES
+
+* a string default containing ${VAR} text resolves at load time instead of being taken literally; an unset reference yields "" where the raw ${...} text was kept before.
+* load()/reload()/cached() no longer mutate os.environ — call python-dotenv load_dotenv() yourself if you relied on injection. override default flipped True -> False; real env vars now beat .env files unless override=True or DOTENV_OVERRIDE=true. load_env_files() removed in favor of read_env_files(), a pure reader returning a DotenvLayer (later file wins, bare keys left unset like load_dotenv()). loaded_with() returns LoadParams instead of a 3-tuple and raises RuntimeError on instances never loaded from the environment. boolean load params are now bool | None with DOTENV_OVERRIDE/DOTENV_READ_DOTFILES/DOTENV_LOAD_LOCAL env-var overrides (unrecognized values warn and fall back to the default). .local files are skipped by default when env is test (case-insensitive) — extending the Next.js/dotenv-flow rule, which skips only .env.local in test, to all .local files, because a gitignored .env.test.local must not decide test outcomes either (load_local=True or DOTENV_LOAD_LOCAL=true restores them).
+
+### Features
+
+* field_validator decorator with before and after modes ([#65](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/65)) ([f50b97d](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/f50b97dd08521f07a50905e3f4ff000483be6bd5))
+* interpolate references in string defaults ([#62](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/62)) ([27ec71d](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/27ec71d074e5ce4baebfc51db5f7d9ac4911b362))
+* resolve config without mutating os.environ ([#60](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/60)) ([15b6386](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/15b6386fe93b3f6451f6f80c022b5d371aad73e4))
+
+
+### Bug Fixes
+
+* compare unwrapped secrets against choices ([#63](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/63)) ([c7abdeb](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/c7abdeb1fabeb2a7948b718de28ee9a2d0b7f672))
+
+
+### Continuous Integration
+
+* pin actions, gate publishing, trim permissions, lock the sdist ([#64](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/64)) ([1c382b3](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/1c382b3eff0e82f2b6c33140bb2753350076c24c))
+
 ## [0.6.3](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.6.2...v0.6.3) (2026-07-28)
 
 
