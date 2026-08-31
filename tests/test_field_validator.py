@@ -2,6 +2,7 @@
 
 import logging
 from typing import Any
+from uuid import UUID
 
 import pytest
 
@@ -9,6 +10,7 @@ from dotenvmodel import (
     ConstraintViolationError,
     DotEnvConfig,
     Field,
+    MultipleValidationErrors,
     SecretStr,
     TypeCoercionError,
     ValidatorContext,
@@ -154,26 +156,6 @@ class TestFieldValidatorOrdering:
 
         assert Config.load_from_dict({"PORT": "eight000"}).port == 8000
 
-    def test_before_hook_non_str_result_passed_to_coercion_as_is(self) -> None:
-        class Config(DotEnvConfig):
-            port: int = Field()
-
-            @field_validator("port", mode="before")
-            def parse_int(self, value: str, ctx: ValidatorContext) -> int:
-                return int(value) * 2
-
-        assert Config.load_from_dict({"PORT": "21"}).port == 42
-
-    def test_before_hook_non_str_result_skips_strip_on_string_like_field(self) -> None:
-        class Config(DotEnvConfig):
-            name: str = Field(strip=True)
-
-            @field_validator("name", mode="before")
-            def to_int(self, value: str, ctx: ValidatorContext) -> int:
-                return 42
-
-        assert Config.load_from_dict({"NAME": "abc"}).name == 42
-
     def test_before_hook_runs_on_empty_raw_value(self) -> None:
         class Config(DotEnvConfig):
             fallback: str | None = Field(default=None)
@@ -199,6 +181,142 @@ class TestFieldValidatorOrdering:
         config = Config.load_from_dict({"VALUE": "set"})
         assert config.value is None
         assert calls == []
+
+
+class TestFieldValidatorTypedBeforeResults:
+    """Non-str before-hook results: declared-type instances are used as-is."""
+
+    def test_int_result_skips_coercion(self) -> None:
+        """An int-subclass return survives with its type, proving the skip."""
+
+        class Port(int):
+            """Marker subclass: coercion to int would flatten it."""
+
+        class Config(DotEnvConfig):
+            port: int = Field()
+
+            @field_validator("port", mode="before")
+            def parse(self, value: str, ctx: ValidatorContext) -> int:
+                return Port(int(value))
+
+        config = Config.load_from_dict({"PORT": "8000"})
+        assert config.port == 8000
+        assert type(config.port) is Port
+
+    def test_bool_result_loads(self) -> None:
+        class Config(DotEnvConfig):
+            flag: bool = Field()
+
+            @field_validator("flag", mode="before")
+            def parse(self, value: str, ctx: ValidatorContext) -> bool:
+                return value == "on"
+
+        assert Config.load_from_dict({"FLAG": "on"}).flag is True
+        assert Config.load_from_dict({"FLAG": "off"}).flag is False
+
+    def test_list_result_loads_with_elements_untouched(self) -> None:
+        class Config(DotEnvConfig):
+            items: list[str] = Field()
+
+            @field_validator("items", mode="before")
+            def parse(self, value: str, ctx: ValidatorContext) -> list[str]:
+                return value.split("::")
+
+        # String coercion would strip each element; the typed list passes
+        # through with its whitespace intact.
+        assert Config.load_from_dict({"ITEMS": " a ::b"}).items == [" a ", "b"]
+
+    def test_uuid_result_loads_unchanged(self) -> None:
+        tenant = UUID("550e8400-e29b-41d4-a716-446655440000")
+
+        class Config(DotEnvConfig):
+            tenant_id: UUID = Field()
+
+            @field_validator("tenant_id", mode="before")
+            def parse(self, value: str, ctx: ValidatorContext) -> UUID:
+                return tenant
+
+        assert Config.load_from_dict({"TENANT_ID": "ignored"}).tenant_id is tenant
+
+    def test_secretstr_result_used_as_is(self) -> None:
+        """A SecretStr return skips both strip and wrapping — no nesting."""
+
+        class Config(DotEnvConfig):
+            api_key: SecretStr = Field(strip=True)
+
+            @field_validator("api_key", mode="before")
+            def wrap(self, value: str, ctx: ValidatorContext) -> SecretStr:
+                return SecretStr(value)
+
+        key = Config.load_from_dict({"API_KEY": " k "}).api_key
+        # The padded value survives untouched and get_secret_value() stays
+        # a str — the pre-fix pipeline nested SecretStr(SecretStr(...)).
+        assert isinstance(key.get_secret_value(), str)
+        assert key.get_secret_value() == " k "
+
+    def test_optional_declared_type_result_loads(self) -> None:
+        """The instance check runs against the Optional-unwrapped type."""
+
+        class Config(DotEnvConfig):
+            port: int | None = Field(default=None)
+
+            @field_validator("port", mode="before")
+            def parse(self, value: str, ctx: ValidatorContext) -> int:
+                return int(value) * 2
+
+        assert Config.load_from_dict({"PORT": "21"}).port == 42
+
+    def test_wrong_typed_result_raises_clean_type_coercion_error(self) -> None:
+        class Config(DotEnvConfig):
+            name: str = Field()
+
+            @field_validator("name", mode="before")
+            def to_int(self, value: str, ctx: ValidatorContext) -> int:
+                return 5
+
+        with pytest.raises(TypeCoercionError) as exc_info:
+            Config.load_from_dict({"NAME": "x"})
+
+        err = exc_info.value
+        assert err.field_name == "name"
+        assert err.env_var_name == "NAME"
+        assert "int" in err.error_msg
+        assert "str" in err.error_msg
+
+    def test_wrong_typed_result_aggregates_with_other_field_errors(self) -> None:
+        class Config(DotEnvConfig):
+            name: str = Field()
+            other: str = Field(min_length=10)
+
+            @field_validator("name", mode="before")
+            def to_int(self, value: str, ctx: ValidatorContext) -> int:
+                return 5
+
+        with pytest.raises(MultipleValidationErrors) as exc_info:
+            Config.load_from_dict({"NAME": "x", "OTHER": "short"})
+
+        assert [type(e) for e in exc_info.value.errors] == [
+            TypeCoercionError,
+            ConstraintViolationError,
+        ]
+
+    def test_sensitive_declared_type_masks_wrong_typed_result(self) -> None:
+        """The error for a sensitive-typed field cannot embed the hook's value."""
+
+        class Config(DotEnvConfig):
+            api_key: SecretStr = Field()
+
+            @field_validator("api_key", mode="before")
+            def to_bytes(self, value: str, ctx: ValidatorContext) -> bytes:
+                return value.encode()
+
+        with pytest.raises(TypeCoercionError) as exc_info:
+            Config.load_from_dict({"API_KEY": "pk-super-secret"})
+
+        err = exc_info.value
+        assert "bytes" in err.error_msg
+        assert "pk-super-secret" not in str(err)
+        assert "**********" in str(err)
 
 
 class TestFieldValidatorCallableForms:

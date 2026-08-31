@@ -150,14 +150,14 @@ def field_validator(
           after-mode hooks exist, the inline hook runs first, then decorator
           hooks in definition order.
         - `mode="before"`: runs on the raw external value (the environment
-          or `load_from_dict` string) before built-in `strip` and before
-          type coercion, and may replace it — strip and coercion see the
-          hook's return value, which may be a non-string (pre-typed `int`,
-          `float`, `Decimal`, `str`, and `Path` values round-trip through
-          coercion; other types expect their string form). Not applied to
-          field defaults (defaults are author-controlled values, not
-          external input needing normalization). Also runs with
-          `validate=False`.
+            or `load_from_dict` string) before built-in `strip` and before
+            type coercion, and may replace it — a `str` return re-enters the
+            built-in strip and coercion, while a non-str return already
+            typed as the field's declared type is used as-is (any other
+            non-str return raises `TypeCoercionError`). Not applied to
+            field defaults (defaults are author-controlled values, not
+            external input needing normalization). Also runs with
+            `validate=False`.
 
     Errors and secrets:
         A `ValueError`/`TypeError` raised by the hook is wrapped in

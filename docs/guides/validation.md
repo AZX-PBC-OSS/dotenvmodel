@@ -297,9 +297,9 @@ With `LOG_LEVEL= info` the before hook uppercases to ` INFO`, the built-in strip
 | Mode | Receives | Runs | May |
 |------|----------|------|-----|
 | `mode="after"` (default) | The coerced, built-in-constraint-validated value — identical semantics to `Field(validator=...)` | After coercion and built-in constraints; never on `None`; even with `validate=False` | Transform (built-ins are not re-run) |
-| `mode="before"` | The raw external string (environment or `load_from_dict()` value) | Before the built-in `strip` and before type coercion; even with `validate=False` | Replace the raw value — strip and coercion see the result |
+| `mode="before"` | The raw external string (environment or `load_from_dict()` value) | Before the built-in `strip` and before type coercion; even with `validate=False` | Replace the raw value — a `str` result feeds strip and coercion; a declared-type result is used as-is |
 
-A `before` hook may return a non-string; the value is passed to coercion as-is. Pre-typed `int`, `float`, `Decimal`, `str`, and `Path` values round-trip cleanly — for other types (`bool`, `UUID`, `datetime`, `SecretStr`, collections) coercion still expects the value's string form.
+A `before` hook may return a non-string: a value that is already an instance of the field's declared type (Optional-unwrapped — a `list` counts for `list[str]`, its elements pass through untouched) is used as-is, skipping strip and coercion, so constraints and later hooks see it directly. A `str` return always re-enters the normal strip/coercion path. Any other non-string return (e.g. `5` for a `str` field) raises `TypeCoercionError` naming the returned and declared types.
 
 !!! note "Before hooks never see defaults"
     `mode="before"` hooks run only on values sourced from the environment or a `load_from_dict()` dict. Defaults are author-controlled values that already have their final form — normalizing external input never applies to them — so they skip before hooks. After hooks, like the inline `validator=`, still run on defaults.
