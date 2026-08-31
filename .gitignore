@@ -153,6 +153,8 @@ venv.bak/
 
 # mkdocs documentation
 /site
+# Generated from CHANGELOG.md before every mkdocs build (make docs / Deploy Docs workflow)
+docs/changelog.md
 
 # Superpowers specs (internal planning docs)
 docs/superpowers/
