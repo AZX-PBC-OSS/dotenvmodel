@@ -2,6 +2,33 @@
 
 dotenvmodel provides flexible configuration loading from environment variables and `.env` files with Node.js-style cascading. This guide covers all loading methods and their parameters.
 
+## Resolution Order
+
+`load()` resolves each field across three layers, without ever mutating `os.environ`:
+
+1. **Process environment** — real environment variables
+2. **Merged dotfile cascade** — the `.env` files, merged with later files winning
+3. **Field default** — the `Field(default=...)` value
+
+By default (`override=False`), the process environment wins: a real `DATABASE_URL` beats whatever the `.env` files say. With `override=True` (or `DOTENV_OVERRIDE=true`), the merged dotfile layer wins instead — the pre-0.7 precedence, now explicit and opt-in.
+
+| Mode | Lookup order |
+|------|--------------|
+| `override=False` (default) | process env → dotfiles → field default |
+| `override=True` | dotfiles → process env → field default |
+
+The `.env` cascade is merged once per load (later, more specific files win within the file layer), and the override policy is applied once against the whole merged layer — the same model Vite and Next.js use.
+
+!!! warning "Breaking change: `load()` no longer mutates `os.environ`"
+
+    Through 0.6.3, `load()` injected every dotfile value into the process environment via python-dotenv's `load_dotenv()` — so dotfiles beat real env vars by default, `monkeypatch.setenv` was defeated in tests, and injected values leaked into everything else the process did. As of 0.7.0, loading is a pure read. If you relied on the side effect (for example, other libraries reading `os.environ` after your config load), call python-dotenv yourself:
+
+    ```python
+    from dotenv import load_dotenv
+
+    load_dotenv("/app/config/.env", override=True)  # explicit injection, your policy
+    ```
+
 ## .env File Cascading
 
 When you call `load()`, dotenvmodel automatically reads `.env` files in a cascading order. Later files override earlier ones, giving you layered configuration from shared base values to local overrides.
@@ -71,24 +98,35 @@ config = AppConfig.load(env="test")
 
 ## The `override` Parameter
 
-Controls whether `.env` file values override existing environment variables.
+Controls whether `.env` file values beat existing environment variables. The default is `False`: real environment variables take precedence over `.env` files — the convention used by pydantic-settings, dynaconf, django-environ, and the other settings libraries dotenvmodel surveyed.
 
 ```python
-# .env files override env vars (default)
-config = AppConfig.load(override=True)
-
-# Env vars take precedence over .env files
+# Env vars take precedence over .env files (default)
 config = AppConfig.load(override=False)
+
+# Opt in: .env files override env vars
+config = AppConfig.load(override=True)
 ```
 
 | `override` | Behavior |
 |------------|----------|
-| `True` (default) | `.env` file values override existing environment variables |
-| `False` | Existing environment variables take precedence over `.env` files |
+| `False` (default) | Existing environment variables take precedence over `.env` files |
+| `True` | `.env` file values override existing environment variables |
 
-!!! tip "When to use `override=False`"
+!!! tip "When to use `override=True`"
 
-    Use `override=False` in containerized environments where you inject config via environment variables and want them to take precedence over any `.env` files that might exist in the image.
+    Use `override=True` when the `.env` files are the intended source of truth and the ambient environment is untrusted — for example, a developer laptop with stray exported variables. Containerized deployments that inject config via environment variables (12-factor) should keep the default.
+
+### `DOTENV_OVERRIDE` Environment Variable
+
+Flip precedence without code changes — useful as a migration escape hatch for code that depended on the old default:
+
+```bash
+export DOTENV_OVERRIDE=true
+python your_app.py
+```
+
+An explicit `override=` argument always wins over `DOTENV_OVERRIDE`.
 
 ## The `env_dir` Parameter
 
@@ -119,6 +157,54 @@ config = AppConfig.load()
 !!! note "Precedence"
 
     The `env_dir` parameter takes precedence over the `DOTENV_DIR` environment variable, which takes precedence over the current working directory.
+
+## The `read_dotfiles` Parameter
+
+Set `read_dotfiles=False` to skip the `.env` cascade entirely: no files are probed, no "No .env files found" warning is logged, and a missing `env_dir` does not raise `FileNotFoundError`. Fields resolve from the process environment and field defaults only — and `override` has nothing to promote in this mode.
+
+```python
+# Resolve from real env vars and defaults only — no .env files touched
+config = AppConfig.load(read_dotfiles=False)
+```
+
+This is the right mode for processes whose configuration is fully injected via environment variables (12-factor platforms, CI runners) and for avoiding surprises from a stray `.env` file in the working directory.
+
+The `DOTENV_READ_DOTFILES=false` environment variable has the same effect; an explicit argument wins over the env var.
+
+## The `load_local` Parameter
+
+Controls whether the gitignored `.local` files (`.env.local` and `.env.{env}.local`) are read:
+
+- `load_local=False` excludes them in **every** environment.
+- The default includes them — **except** when the resolved environment is `test`, where they are skipped automatically. `.env.test` itself is still read. This matches the Next.js / dotenv-flow convention: tests should produce the same results for everyone, so a developer's gitignored `.env.test.local` must not decide test outcomes.
+
+```python
+# Tests: .env.local and .env.test.local are skipped by default
+config = AppConfig.load(env="test")
+
+# Opt back in (DOTENV_LOAD_LOCAL=true works too)
+config = AppConfig.load(env="test", load_local=True)
+```
+
+!!! note "Non-test environments are unaffected"
+
+    In `dev`, `prod`, `staging`, or any custom environment, `.local` files are read by default, exactly as before.
+
+## Behavior Knobs: Argument > Environment Variable > Default
+
+Every `load()` / `reload()` / `cached()` behavior knob resolves through the same three tiers — an explicit (non-`None`) argument wins, then a well-known environment variable, then the documented default:
+
+| Behavior | Parameter | Env var | Default |
+|---|---|---|---|
+| Environment name | `env` | `ENV` | `"dev"` |
+| Base directory | `env_dir` | `DOTENV_DIR` | current working directory |
+| Read dotfiles at all | `read_dotfiles` | `DOTENV_READ_DOTFILES` | `True` |
+| Dotfiles beat process env | `override` | `DOTENV_OVERRIDE` | `False` |
+| Include `.local` files | `load_local` | `DOTENV_LOAD_LOCAL` | `True`, except `False` when env is `test` |
+
+Boolean env vars parse case-insensitively (`true/1/yes/on` vs `false/0/no/off`). Any other value logs a warning naming the variable and falls back to the default — a stray env var never crashes a load.
+
+The resolved values are recorded on the instance as a `LoadParams` (returned by `loaded_with()`), and they are exactly what a bare `reload()` repeats.
 
 ## Loading from a Dictionary
 
@@ -168,12 +254,14 @@ print(config.port)  # 9000
 
 ### Reusing Original Parameters
 
-By default, `reload()` reuses the same `env`, `override`, and `env_dir` from the original `load()` call:
+By default, `reload()` reuses the same five resolved parameters (`env`, `override`, `env_dir`, `read_dotfiles`, `load_local`) recorded by the original `load()` call. Recorded values win over the `DOTENV_*` env-var tier, so a bare `reload()` never silently changes behavior — only the field *values* are re-read from the live environment and files:
 
 ```python
 config = AppConfig.load(env="dev", override=True)
-config.reload()  # Uses env="dev", override=True
+config.reload()  # Uses env="dev", override=True (and every other recorded parameter)
 ```
+
+An instance loaded via `load_from_dict()` has nothing recorded; its `reload()` resolves all five parameters from the tiers.
 
 ### Overriding Parameters During Reload
 
@@ -185,6 +273,9 @@ config.reload(env="prod")
 
 # Change override behavior
 config.reload(override=False)
+
+# Stop reading .env files from here on
+config.reload(read_dotfiles=False)
 ```
 
 !!! warning "A failed reload can leave the instance partially reloaded"
@@ -225,7 +316,7 @@ assert config is same_config
 
 `cached()` is lazy — the environment is only read on the very first call. It is also thread-safe: if multiple threads call `cached()` simultaneously before the first load completes, they race on a lock and only one thread calls `load()`; the rest block and receive the same instance. Once the cache is warm, all calls return immediately without acquiring the lock.
 
-Arguments (`env`, `override`, `env_dir`) are only used on the first call. Once the instance is cached, subsequent calls ignore any arguments and return the existing instance. A warning is logged when the arguments passed disagree with the ones the cached instance was loaded with — so an accessor that consistently passes the same non-default arguments (`override=False`, say) stays silent, while a caller asking for something the cache does not hold is told what it actually holds.
+Arguments (`env`, `override`, `env_dir`, `read_dotfiles`, `load_local`) are only used on the first call. Once the instance is cached, subsequent calls ignore any arguments and return the existing instance. A warning is logged when the caller's arguments *resolve* differently from the `LoadParams` the cached instance holds — so an accessor that consistently asks for what it already got (however it spells it) stays silent, while a caller asking for something the cache does not hold is told what it actually holds.
 
 Calling `.reload()` on the cached instance mutates it in place; since `cached()` always returns the same object, subsequent `cached()` calls see the reloaded values. A reload also updates what the instance reports as its load arguments, so `reload(env="prod")` is reflected by both `loaded_with()` and the comparison above.
 
@@ -298,7 +389,7 @@ def test_prod_config(monkeypatch):
 
 ## See Also
 
-- [Loading API Reference](../api-reference/loading.md) — `load_env_files()`, `get_env_var()`, `get_env_var_name()`
-- [DotEnvConfig API Reference](../api-reference/config.md) — `load()`, `reload()`, `load_from_dict()`, `cached()`, `reset_cached()`, `cached_override()`
+- [Loading API Reference](../api-reference/loading.md) — `read_env_files()`, `LoadParams`, `resolve_load_params()`, `get_env_var()`, `get_env_var_name()`
+- [DotEnvConfig API Reference](../api-reference/config.md) — `load()`, `reload()`, `load_from_dict()`, `cached()`, `loaded_with()`, `reset_cached()`, `cached_override()`
 - [Field Definitions](fields.md) — Defining config fields with `Field()`
 - [Validation](validation.md) — Constraint validation

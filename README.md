@@ -586,8 +586,8 @@ config = AppConfig.load()
 config = AppConfig.load(env="prod")
 
 # Override behavior
-config = AppConfig.load(override=True)  # .env files override env vars (default)
-config = AppConfig.load(override=False)  # Env vars take precedence
+config = AppConfig.load(override=False)  # Env vars take precedence (default)
+config = AppConfig.load(override=True)  # .env files override env vars (opt-in)
 
 # Custom .env file directory
 from pathlib import Path
@@ -801,7 +801,7 @@ print(config.port)  # 9000
 
 # Reload reuses the original parameters by default
 config = AppConfig.load(env="dev", override=True)
-config.reload()  # Uses env="dev", override=True
+config.reload()  # Reuses env="dev", override=True (and every other recorded parameter)
 
 # Override any parameter during reload
 config.reload(env="prod")  # Switch to production environment

@@ -14,6 +14,7 @@ The package exports the following public API:
 - [`PostgresDsn`][dotenvmodel.types.PostgresDsn]: PostgreSQL DSN type
 - [`RedisDsn`][dotenvmodel.types.RedisDsn]: Redis DSN type
 - [`Json`][dotenvmodel.types.Json]: JSON parsing type
+- [`LoadParams`][dotenvmodel.loading.LoadParams]: Resolved load parameters, as returned by `DotEnvConfig.loaded_with()`
 - [`describe_configs`][dotenvmodel.describe.describe_configs]: Document multiple configs
 - [`generate_env_example`][dotenvmodel.describe.generate_env_example]: Generate .env.example
 - [`configure_logging`][dotenvmodel.logging_config.configure_logging]: Enable logging
