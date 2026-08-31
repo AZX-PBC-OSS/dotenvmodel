@@ -16,7 +16,7 @@ _TRUTHY = frozenset(("true", "1", "yes", "on"))
 _FALSY = frozenset(("false", "0", "no", "off"))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, kw_only=True)
 class LoadParams:
     """Resolved load settings for one `load()` / `reload()` / `cached()` call.
 
@@ -27,6 +27,9 @@ class LoadParams:
     directory (explicit argument > `DOTENV_DIR` > cwd at load time) — so a
     bare `reload()` repeats exactly what the previous load did, even across
     cwd changes.
+
+    Construction is keyword-only: a future knob cannot silently break
+    positional constructions, because there are none.
 
     Attributes:
         env: Environment name selecting the `.env.{env}` files.
@@ -45,7 +48,7 @@ class LoadParams:
     load_local: bool
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, repr=False)
 class DotenvLayer:
     """The merged `.env` cascade for one load — read, never injected.
 
@@ -56,11 +59,25 @@ class DotenvLayer:
             field with `""`.
         base_dir: The directory the cascade was read from.
         files: The files that existed and were read, in cascade order.
+
+    Note:
+        `repr()` is masked by design: it shows key names and counts, never
+        values — merged values may be secrets, including process-env values
+        pulled in via `${VAR}` interpolation. Access `values` directly when
+        you need them.
     """
 
     values: dict[str, str]
     base_dir: Path
     files: tuple[Path, ...]
+
+    def __repr__(self) -> str:
+        """Key names and counts only — merged values may be secrets."""
+        keys = ", ".join(self.values)
+        return (
+            f"DotenvLayer(values=<{len(self.values)} keys: {keys}>, "
+            f"base_dir={self.base_dir!r}, files={self.files!r})"
+        )
 
 
 def resolve_env_name(env: str | None) -> str:

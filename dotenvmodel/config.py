@@ -248,6 +248,18 @@ def _raise_collected(errors: list[ValidationError] | None) -> None:
     raise MultipleValidationErrors(errors)
 
 
+def _layer_for(params: LoadParams) -> DotenvLayer | None:
+    """Read the merged dotfile layer for *params*, or ``None`` when dotfiles are skipped.
+
+    Shared by ``load()`` and ``reload()``: both resolve the same layer from
+    the same resolved parameters, differing only in their surrounding
+    logging and bookkeeping.
+    """
+    if not params.read_dotfiles:
+        return None
+    return read_env_files(env=params.env, env_dir=params.env_dir, load_local=params.load_local)
+
+
 def _resolve_raw_value(
     env_var_name: str,
     dotenv_layer: DotenvLayer | None,
@@ -663,11 +675,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
             read_dotfiles=read_dotfiles,
             load_local=load_local,
         )
-        dotenv_layer = (
-            read_env_files(env=params.env, env_dir=params.env_dir, load_local=params.load_local)
-            if params.read_dotfiles
-            else None
-        )
+        dotenv_layer = _layer_for(params)
 
         instance = cls()
         logger.debug(f"Processing {len(cls._fields)} field(s)")
@@ -795,11 +803,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
             read_dotfiles=read_dotfiles,
             load_local=load_local,
         )
-        dotenv_layer = (
-            read_env_files(env=params.env, env_dir=params.env_dir, load_local=params.load_local)
-            if params.read_dotfiles
-            else None
-        )
+        dotenv_layer = _layer_for(params)
 
         logger.debug(f"Reloading {len(self._fields)} field(s)")
         self._load_fields(None, dotenv_layer=dotenv_layer, override=params.override)

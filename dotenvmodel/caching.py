@@ -198,6 +198,12 @@ def acquire_cached(
             # judged against what the cached object actually holds now, not
             # against whatever populated it originally.
             #
+            # Both tuples in the message are tier-RESOLVED configuration —
+            # this call's resolved request vs. the cache's recorded
+            # LoadParams — never the caller's raw arguments, which are not
+            # observable here (the same resolved request can be spelled many
+            # ways: explicit argument, env var, or default).
+            #
             # Resolution failure is swallowed, not raised: the warm path
             # ignores arguments by contract (see the docstring), so when
             # they cannot even be resolved — the process cwd was deleted, a
@@ -214,11 +220,12 @@ def acquire_cached(
                 loaded = cached.loaded_with()
                 if requested != loaded:
                     logger.warning(
-                        "cached() called on %s with arguments (env=%r, override=%r, "
-                        "env_dir=%r, read_dotfiles=%r, load_local=%r) that resolve "
-                        "differently from the parameters the cache holds (env=%r, "
-                        "override=%r, env_dir=%r, read_dotfiles=%r, load_local=%r); "
-                        "arguments were ignored.",
+                        "cached() called on %s: this call's resolved configuration "
+                        "(env=%r, override=%r, env_dir=%r, read_dotfiles=%r, "
+                        "load_local=%r) differs from the LoadParams recorded on "
+                        "the cached instance (env=%r, override=%r, env_dir=%r, "
+                        "read_dotfiles=%r, load_local=%r); arguments were ignored "
+                        "and the cached instance was returned.",
                         cls.__name__,
                         requested.env,
                         requested.override,

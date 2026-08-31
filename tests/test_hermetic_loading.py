@@ -7,6 +7,7 @@ defaults, with no ``os.environ`` mutation — plus the suite-wide
 to use between tests.
 """
 
+import inspect
 import os
 from pathlib import Path
 
@@ -448,6 +449,16 @@ class TestLoadParamsRecording:
         with pytest.raises(RuntimeError, match=r"NeverLoaded instance was never loaded"):
             NeverLoaded().loaded_with()
 
+    def test_load_params_rejects_positional_construction(self) -> None:
+        """Every field is keyword-only, locked in before 0.7.0 ships.
+
+        Free while the API is unreleased: a future sixth knob cannot silently
+        break positional constructions, because there are none.
+        """
+        signature = inspect.signature(LoadParams)
+        kinds = {param.kind for param in signature.parameters.values()}
+        assert kinds == {inspect.Parameter.KEYWORD_ONLY}
+
 
 class TestNestedConfigLayer:
     """Nested DotEnvConfig fields resolve against the same dotfile layer as their parent."""
@@ -525,6 +536,27 @@ class TestCachedDisagreement:
             Config.cached(env="test", env_dir=tmp_path, load_local=True)
 
         assert any("arguments were ignored" in r.message for r in caplog.records)
+
+    def test_disagreement_warning_presents_resolved_vs_recorded(
+        self, tmp_path: Path, caplog
+    ) -> None:
+        """The warning compares the call's resolved configuration against the cache's
+        recorded LoadParams — neither tuple is the caller's raw arguments."""
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        Config.cached(env="test", env_dir=tmp_path)  # load_local auto-resolves to False
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            Config.cached(env="test", env_dir=tmp_path, load_local=True)
+
+        warnings = [r for r in caplog.records if "cached() called" in r.message]
+        assert len(warnings) == 1
+        message = warnings[0].message
+        assert "resolved configuration" in message
+        assert "LoadParams recorded on the cached instance" in message
+        assert "arguments were ignored" in message
 
     def test_matching_arguments_stay_silent(self, tmp_path: Path, caplog) -> None:
         class Config(DotEnvConfig):
@@ -1096,6 +1128,31 @@ class TestEnvNameResolution:
             value: str = Field(default="x")
 
         assert Config.load(read_dotfiles=False).loaded_with().env == "dev"
+
+
+class TestDotenvLayerRepr:
+    """DotenvLayer's repr shows key names and counts, never values — merged values may be secrets."""
+
+    def test_repr_masks_values_but_names_keys(self, tmp_path: Path) -> None:
+        """The auto-generated dataclass repr would print every merged value in cleartext,
+        including process-env values pulled in via ${VAR} interpolation."""
+        (tmp_path / ".env").write_text("SECRET=hunter2\nPLAIN=visible\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+        rendered = repr(layer)
+
+        assert "SECRET" in rendered
+        assert "PLAIN" in rendered
+        assert "hunter2" not in rendered
+        assert "visible" not in rendered
+        assert "values=<2 keys: SECRET, PLAIN>" in rendered
+        assert f"base_dir={tmp_path!r}" in rendered
+
+    def test_values_attribute_remains_fully_accessible(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("SECRET=hunter2\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+        assert layer.values["SECRET"] == "hunter2"
 
 
 class TestGetEnvVarUnits:
