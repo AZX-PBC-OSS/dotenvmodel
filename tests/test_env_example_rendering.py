@@ -1,11 +1,9 @@
 """Rendering of parseable example values for collections and factories.
 
-``format_default`` used to render ``default_factory`` fields as unusable
-callable reprs (``<<lambda()>>``) and ``default_factory=list`` as ``[]``,
-which parses back as ``["[]"]`` (issue #58, part 2). Example values now
-render in the format dotenvmodel itself parses: factories are invoked once,
-collections are joined with the field's separator, dicts as ``key=value``
-pairs, and ``Json`` fields as JSON.
+``format_default`` renders values in the format dotenvmodel itself parses:
+factories are invoked once, collections are joined with the field's separator,
+dicts as ``key=value`` pairs, and ``Json`` fields as JSON. An empty collection
+renders as an empty value; a callable repr like ``<<lambda()>>`` never appears.
 """
 
 import json

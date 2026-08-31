@@ -1,12 +1,10 @@
-"""Isolation of mutable defaults between loads (issue #58).
+"""Isolation of mutable defaults between loads.
 
-``FieldInfo.get_default()`` used to return the same literal object for
-``Field(default=[...])`` (and for bare mutable class attrs wrapped by the
-metaclass), so mutating one instance's value corrupted every other instance
-and all future ``load()`` calls. Literal defaults are now deep-copied per
-load. ``default_factory`` is invoked on every load and its result is handed
-out as-is (never copied); a factory returning a shared object keeps that
-object shared.
+A literal ``Field(default=[...])`` (or a bare mutable class attr wrapped by the
+metaclass) is deep-copied on every ``load()``, so instances never share default
+objects. ``default_factory`` is invoked on every load and its result is handed
+out as-is (never copied); a factory returning a shared object keeps that object
+shared.
 """
 
 import threading
@@ -224,8 +222,8 @@ class TestSmartDeepcopy:
     def test_empty_list_subclass_keeps_its_type(self) -> None:
         """An empty list subclass is deep-copied, preserving its type.
 
-        The old ``value.copy()`` fast path downgraded subclasses to plain
-        ``list``.
+        ``list.copy()`` would return a plain ``list``; ``deepcopy`` keeps
+        the subclass.
         """
 
         class MyList(list[int]):
@@ -240,9 +238,8 @@ class TestSmartDeepcopy:
     def test_raising_bool_collection_does_not_crash(self) -> None:
         """A collection subclass whose ``__bool__`` raises must not crash.
 
-        The old empty-container fast path evaluated ``not value``, which
-        invokes ``__bool__``; exact-type membership never calls it for
-        subclasses.
+        Truthiness tests like ``not value`` would invoke ``__bool__``;
+        exact-type membership never evaluates truthiness.
         """
 
         class WeirdBoolList(list[int]):
