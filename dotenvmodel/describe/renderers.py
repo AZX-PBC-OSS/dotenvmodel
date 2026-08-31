@@ -8,6 +8,7 @@ from typing import TYPE_CHECKING
 
 from dotenvmodel.describe.formatters import (
     MAX_WIDTHS,
+    SET_PER_ENVIRONMENT,
     FieldDescription,
 )
 
@@ -192,7 +193,18 @@ def render_dotenv(
         lines.append(type_info)
 
         if include_examples:
-            if field.default and field.default not in ("-", "None", "<secret>"):
+            # SET_PER_ENVIRONMENT means the default is unknowable (a raising
+            # factory): no Example line at all, not even a type-based one.
+            # The token also sits in the exclusion tuple below as a backstop
+            # so it can never be shown as a purported value.
+            if field.default == SET_PER_ENVIRONMENT:
+                pass
+            elif field.default and field.default not in (
+                "-",
+                "None",
+                "<secret>",
+                SET_PER_ENVIRONMENT,
+            ):
                 lines.append(f"# Example: {field.env_var}={field.default}")
             elif field.type_name.startswith("list["):
                 lines.append(f"# Example: {field.env_var}=value1,value2,value3")

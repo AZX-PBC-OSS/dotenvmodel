@@ -294,17 +294,17 @@ class TestFormatDefault:
     def test_factory_default_list(self) -> None:
         """Test list factory default formatting."""
         field_info = FieldInfo(default_factory=list)
-        assert format_default(field_info, list[str]) == "[]"
+        assert format_default(field_info, list[str]) == ""
 
     def test_factory_default_dict(self) -> None:
         """Test dict factory default formatting."""
         field_info = FieldInfo(default_factory=dict)
-        assert format_default(field_info, dict[str, str]) == "{}"
+        assert format_default(field_info, dict[str, str]) == ""
 
     def test_factory_default_set(self) -> None:
         """Test set factory default formatting."""
         field_info = FieldInfo(default_factory=set)
-        assert format_default(field_info, set[str]) == "set()"
+        assert format_default(field_info, set[str]) == ""
 
     def test_secret_str_default(self) -> None:
         """Test SecretStr default is hidden."""
@@ -347,9 +347,13 @@ class TestFormatDefault:
 
     def test_complex_default_truncation(self) -> None:
         """Test complex default value truncation."""
-        complex_default = {"key": "value" * 10}
-        field_info = FieldInfo(default=complex_default)
-        result = format_default(field_info, dict, truncate=True)
+
+        class Opaque:
+            def __repr__(self) -> str:
+                return f"Opaque({'x' * 40})"
+
+        field_info = FieldInfo(default=Opaque())
+        result = format_default(field_info, Opaque, truncate=True)
         assert "..." in result
 
     def test_complex_default_no_truncation(self) -> None:
@@ -357,18 +361,17 @@ class TestFormatDefault:
         complex_default = {"key": "short"}
         field_info = FieldInfo(default=complex_default)
         result = format_default(field_info, dict, truncate=False)
-        assert "..." not in result
-        assert "key" in result
+        assert result == "key=short"
 
     def test_custom_factory_default(self) -> None:
-        """Test custom factory default formatting."""
+        """Test custom factory default formatting: factory invoked, result joined."""
 
         def custom_factory() -> list[str]:
             return ["default"]
 
         field_info = FieldInfo(default_factory=custom_factory)
         result = format_default(field_info, list[str])
-        assert "<" in result and ">" in result  # Shows <factory_name()>
+        assert result == "default"
 
     def test_float_default(self) -> None:
         """Test float default formatting."""
@@ -643,7 +646,10 @@ class TestEdgeCases:
 
         output = Config.describe()
         assert "list[str]" in output
-        assert "[]" in output  # default_factory=list
+        # default_factory=list renders as an empty (parseable) default;
+        # "[]" would parse back as ["[]"]
+        _, _, fields = describe_class(Config, truncate=False)
+        assert fields[0].default == ""
 
     def test_description_truncation(self) -> None:
         """Test that long descriptions are truncated in table format."""
@@ -1704,7 +1710,7 @@ class TestComprehensiveIntegration:
 
         # Verify defaults
         assert "8000" in output
-        assert "[]" in output  # list default_factory
+        assert "[]" not in output  # default_factory=list renders as an empty default
         assert "development" in output
         assert "False" in output
 

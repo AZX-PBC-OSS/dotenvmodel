@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import collections.abc
 import inspect
+import json
+import logging
 import re
 import types
 from dataclasses import dataclass
@@ -14,6 +16,7 @@ from typing import TYPE_CHECKING, Any, Union, get_args, get_origin
 
 from typing_extensions import TypeForm
 
+from dotenvmodel._constants import LOGGER_NAME
 from dotenvmodel._redaction import redact_url_password
 from dotenvmodel.coercion import is_string_like_type
 from dotenvmodel.fields import _MISSING, FieldInfo, _validator_name
@@ -21,6 +24,8 @@ from dotenvmodel.types import BaseDsn, SecretStr
 
 if TYPE_CHECKING:
     from dotenvmodel.config import DotEnvConfig
+
+logger = logging.getLogger(LOGGER_NAME)
 
 # Maximum column widths to prevent unbounded table growth
 MAX_WIDTHS = {
@@ -36,6 +41,10 @@ MAX_WIDTHS = {
 TRUNCATE_THRESHOLD_SHORT = 20
 TRUNCATE_THRESHOLD_MEDIUM = 25
 TRUNCATE_THRESHOLD_LONG = 35
+
+# Rendered for fields whose default_factory raised while being invoked for
+# display; render_dotenv turns it into a commented placeholder line.
+SET_PER_ENVIRONMENT = "<<set per environment>>"
 
 # Type parsing hint mapping
 TYPE_PARSING_HINTS = {
@@ -369,28 +378,53 @@ def _is_type_in_union(field_type: TypeForm[Any] | types.UnionType, target: type)
     return any(isinstance(m, type) and issubclass(m, target) for m in _union_members(field_type))
 
 
+def _is_json_typed(field_type: TypeForm[Any] | types.UnionType) -> bool:
+    """True if any member of ``field_type`` is a runtime ``Json[...]`` type.
+
+    Mirrors the coercion-side detection (``__name__`` starts with
+    ``"Json["``) so example rendering matches what ``coerce_value`` parses.
+    """
+    return any(
+        isinstance(m, type) and getattr(m, "__name__", "").startswith("Json[")
+        for m in _union_members(field_type)
+    )
+
+
 def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: bool = True) -> str:
-    """Format default value for display."""
+    """Format a field's default value for display.
+
+    Renders values in the format dotenvmodel itself parses so generated
+    ``.env.example`` files round-trip: ``list``/``set``/``tuple`` defaults
+    are joined with the field's ``separator``, ``dict`` defaults as
+    ``key=value`` pairs, and ``Json[...]`` fields as JSON. A
+    ``default_factory`` is invoked once to render its result; if it raises,
+    a warning is logged and the ``SET_PER_ENVIRONMENT`` placeholder is
+    returned so generation never crashes and no callable repr is shown.
+    """
     if field_info.default is _MISSING and field_info.default_factory is None:
         return "-"
 
     if field_info.default_factory is not None:
         factory = field_info.default_factory
-        if factory is list:
-            return "[]"
-        if factory is dict:
-            return "{}"
-        if factory is set:
-            return "set()"
-        return f"<{getattr(factory, '__name__', 'factory')}()>"
+        try:
+            value = factory()
+        except Exception as exc:
+            logger.warning(
+                "default_factory %s raised while rendering an example value "
+                "(%s); rendering the '%s' placeholder instead",
+                _validator_name(factory),
+                exc,
+                SET_PER_ENVIRONMENT,
+            )
+            return SET_PER_ENVIRONMENT
+    else:
+        value = field_info.default
 
-    default = field_info.default
-
-    if default is None:
+    if value is None:
         return "None"
 
-    if isinstance(default, Enum):
-        return str(default.value)
+    if isinstance(value, Enum):
+        return str(value.value)
 
     # Recognise DSN/SecretStr even inside an Optional/multi-member Union
     # (e.g. `PostgresDsn | RedisDsn | None`) so nested defaults are redacted.
@@ -398,27 +432,39 @@ def format_default(field_info: FieldInfo, field_type: TypeForm[Any], truncate: b
         return "<secret>"
 
     # DSN defaults may embed credentials; redact the password before display.
-    if _is_type_in_union(field_type, BaseDsn) and isinstance(default, str):
-        return f'"{redact_url_password(str.__str__(default))}"'
+    if _is_type_in_union(field_type, BaseDsn) and isinstance(value, str):
+        return f'"{redact_url_password(str.__str__(value))}"'
 
-    if isinstance(default, str):
-        if truncate and len(default) > TRUNCATE_THRESHOLD_SHORT:
-            return f'"{default[: TRUNCATE_THRESHOLD_SHORT - 3]}..."'
-        return f'"{default}"'
+    if _is_json_typed(field_type) and isinstance(value, (list, dict)):
+        return json.dumps(value)
 
-    if isinstance(default, bool):
-        return str(default)
+    if isinstance(value, str):
+        if truncate and len(value) > TRUNCATE_THRESHOLD_SHORT:
+            return f'"{value[: TRUNCATE_THRESHOLD_SHORT - 3]}..."'
+        return f'"{value}"'
 
-    if isinstance(default, (int, float)):
-        return str(default)
+    if isinstance(value, bool):
+        return str(value)
 
-    if isinstance(default, timedelta):
-        return str(default)
+    if isinstance(value, (int, float)):
+        return str(value)
 
-    if isinstance(default, Path):
-        return f"Path({str(default)!r})"
+    if isinstance(value, timedelta):
+        return str(value)
 
-    repr_str = repr(default)
+    if isinstance(value, Path):
+        return f"Path({str(value)!r})"
+
+    # Collections render exactly as _coerce_list/_coerce_dict parse them
+    # back; empty collections render as an empty value (not "[]", which
+    # would parse back as a list containing the string "[]").
+    if isinstance(value, (list, set, tuple)):
+        return field_info.separator.join(str(item) for item in value)
+
+    if isinstance(value, dict):
+        return field_info.separator.join(f"{k}={v}" for k, v in value.items())
+
+    repr_str = repr(value)
     if truncate and len(repr_str) > TRUNCATE_THRESHOLD_MEDIUM:
         return repr_str[: TRUNCATE_THRESHOLD_MEDIUM - 3] + "..."
     return repr_str
