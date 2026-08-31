@@ -841,6 +841,125 @@ class TestInterpolation:
         assert override_mode.host == "from_file"
         assert override_mode.url == "http://from_file"
 
+    def test_colon_dash_default_used_when_the_variable_is_unset(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.delenv("MISSING", raising=False)
+        (tmp_path / ".env").write_text("X=${MISSING:-fallback}\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+
+        assert layer.values["X"] == "fallback"
+
+    def test_colon_dash_default_ignored_when_the_variable_is_set_empty(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """python-dotenv 1.2.3 applies the default only to a MISSING name.
+
+        `Variable.resolve` uses `env.get(name, default)` — plain dict.get —
+        so a present-but-empty value wins over the default. This is not the
+        POSIX "unset or empty" reading of `:-`; it is what 1.2.3 does.
+        """
+        monkeypatch.setenv("EMPTY", "")
+        (tmp_path / ".env").write_text("X=${EMPTY:-fallback}\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+
+        assert layer.values["X"] == ""
+
+    def test_colon_dash_default_ignored_when_the_variable_is_set(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("PRESENT", "real")
+        (tmp_path / ".env").write_text("X=${PRESENT:-fallback}\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+
+        assert layer.values["X"] == "real"
+
+    def test_colon_dash_default_ignored_when_an_earlier_file_sets_the_value_empty(
+        self, tmp_path: Path
+    ) -> None:
+        """The merged layer sits above os.environ in the base — and an empty
+        value there wins over the default too (the same dict.get rule).
+        """
+        (tmp_path / ".env").write_text("EMPTY=\n")
+        (tmp_path / ".env.local").write_text("X=${EMPTY:-fallback}\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+
+        assert layer.values["X"] == ""
+
+    def test_bare_dollar_and_shorthand_reference_stay_literal(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """No $VAR shorthand: only the ${...} form is interpolated."""
+        monkeypatch.delenv("HOST", raising=False)
+        (tmp_path / ".env").write_text("PRICE=costs $5\nSHORTHAND=$HOST not ${HOST}\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+
+        assert layer.values["PRICE"] == "costs $5"
+        assert layer.values["SHORTHAND"] == "$HOST not "
+
+    def test_unclosed_reference_stays_literal(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("A=unclosed ${VAR and ${VAR:-x\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+
+        assert layer.values["A"] == "unclosed ${VAR and ${VAR:-x"
+
+    def test_reference_to_a_later_key_resolves_against_the_environ_only(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The base is built sequentially, exactly like python-dotenv 1.2.3's
+        resolve_variables(override=True): each key's already-resolved value
+        is overlaid on os.environ as it is produced, so a reference sees
+        EARLIER keys (and os.environ) — never a later key's raw value.
+        """
+        monkeypatch.delenv("LATER", raising=False)
+        (tmp_path / ".env").write_text("A=a-${LATER}-b\nLATER=late\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+
+        assert layer.values["A"] == "a--b"
+        assert layer.values["LATER"] == "late"
+
+
+class TestNoDotenvInternals:
+    """The reader must use only python-dotenv's public API.
+
+    `resolve_variables` lives in `dotenv.main` — internal API, not in
+    `dotenv.__all__` — and `pyproject.toml` pins `python-dotenv>=1.2.3`
+    with no upper bound. Importing internals can break at module load time
+    on a future python-dotenv release, so the interpolation is implemented
+    locally instead.
+    """
+
+    def test_loading_imports_only_the_public_dotenv_api(self) -> None:
+        """Every dotenv import in loading.py is from the `dotenv` root, never
+        a `dotenv.*` submodule (main, variables, parser, ...).
+        """
+        import ast
+
+        import dotenvmodel.loading as loading_module
+
+        tree = ast.parse(Path(loading_module.__file__).read_text())
+        imported: set[str] = set()
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                imported.update(
+                    alias.name for alias in node.names if alias.name.split(".")[0] == "dotenv"
+                )
+            elif (
+                isinstance(node, ast.ImportFrom)
+                and node.module
+                and node.module.split(".")[0] == "dotenv"
+            ):
+                imported.add(node.module)
+
+        assert imported == {"dotenv"}
+
 
 class TestBareKeyParity:
     """A bare `KEY` line is unset in every layer, matching python-dotenv's load_dotenv()."""

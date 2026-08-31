@@ -2,12 +2,12 @@
 
 import logging
 import os
+import re
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import cast
 
 from dotenv import dotenv_values
-from dotenv.main import resolve_variables
 
 # Module-level logger
 logger = logging.getLogger("dotenvmodel")
@@ -241,6 +241,62 @@ def resolve_load_params(
     )
 
 
+# python-dotenv's ${VAR} resolver (dotenv.main.resolve_variables) is internal
+# API — not in dotenv.__all__ — and pyproject.toml pins python-dotenv>=1.2.3
+# with no upper bound, so importing it can break at module load time on a
+# future release. The helpers below replicate the 1.2.3 resolver's surface
+# locally: ${VAR} and ${VAR:-default} only (no $VAR shorthand; unclosed ${ and
+# a bare $ stay literal), with the default applying only when the name is
+# absent from the base — a present-but-empty value wins, matching 1.2.3's
+# dict.get lookup.
+_POSIX_VARIABLE = re.compile(
+    r"""
+    \$\{
+        (?P<name>[^\}:]*)
+        (?::-
+            (?P<default>[^\}]*)
+        )?
+    \}
+    """,
+    re.VERBOSE,
+)
+
+
+def _resolve_reference(match: re.Match[str], base: Mapping[str, str]) -> str:
+    """Resolve one ${VAR} / ${VAR:-default} match with python-dotenv 1.2.3 semantics."""
+    default = match["default"]
+    return base.get(match["name"], default if default is not None else "")
+
+
+def _interpolate(values: dict[str, str]) -> dict[str, str]:
+    """Resolve ${VAR} / ${VAR:-default} references, python-dotenv 1.2.3 semantics.
+
+    The base is built exactly like 1.2.3's resolve_variables(override=True):
+    the process environment overlaid, in key order, with each key's
+    already-resolved value — so an earlier key's value wins over os.environ
+    for later references, while a later or self reference sees only
+    os.environ. Unresolved references become "". Nothing between ${ and its
+    closing } other than the two supported forms is a reference at all, so
+    it stays literal.
+    """
+    resolved: dict[str, str] = {}
+    base: dict[str, str] = dict(os.environ)
+    for name, value in values.items():
+        parts: list[str] = []
+        cursor = 0
+        for match in _POSIX_VARIABLE.finditer(value):
+            start, end = match.span()
+            if start > cursor:
+                parts.append(value[cursor:start])
+            parts.append(_resolve_reference(match, base))
+            cursor = end
+        if cursor < len(value):
+            parts.append(value[cursor:])
+        resolved[name] = "".join(parts)
+        base[name] = resolved[name]
+    return resolved
+
+
 def read_env_files(
     env: str | None = None,
     *,
@@ -260,9 +316,11 @@ def read_env_files(
     any file resolves against the merged cascade first, then `os.environ`
     — the base the old sequential `load_dotenv(override=True)` cascade
     effectively used — and is independent of the `override` knob, which
-    only governs per-field precedence afterwards. python-dotenv's own
-    semantics apply (`${VAR}` / `${VAR:-default}`; no `$VAR` shorthand;
-    an unresolved reference becomes `""`). Bare keys (`KEY` with no `=`)
+    only governs per-field precedence afterwards. python-dotenv 1.2.3's
+    semantics apply, replicated locally (`${VAR}` / `${VAR:-default}`; no
+    `$VAR` shorthand; an unresolved reference becomes `""`; the `:-`
+    default applies only when the name is absent from the base — a
+    present-but-empty value wins over it). Bare keys (`KEY` with no `=`)
     are left unset, matching `load_dotenv()`, which skips them.
 
     Probing order:
@@ -370,11 +428,10 @@ def read_env_files(
     # (earlier files' values were already in os.environ when later files were
     # interpolated). That base is deliberately independent of load()'s
     # override knob, which only governs per-field precedence afterwards.
-    # resolve_variables' own override=True selects exactly that base order,
-    # and unresolved references become "" (python-dotenv semantics: ${VAR} /
-    # ${VAR:-default} only; $VAR shorthand is not interpolated). No None
-    # values entered, so none leave — every output is a str.
-    values = cast("dict[str, str]", dict(resolve_variables(values.items(), override=True)))
+    # Unresolved references become "" (python-dotenv 1.2.3 semantics: ${VAR}
+    # / ${VAR:-default} only; $VAR shorthand is not interpolated), and no
+    # None values entered the merge, so none leave — every output is a str.
+    values = _interpolate(values)
 
     if loaded_files:
         logger.info(
