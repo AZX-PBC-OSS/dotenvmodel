@@ -39,6 +39,7 @@ uv add dotenvmodel
 ```python
 from dotenvmodel import DotEnvConfig, Field
 
+
 class AppConfig(DotEnvConfig):
     # Required fields (Pydantic-style)
     database_url: str = Field(...)
@@ -52,13 +53,14 @@ class AppConfig(DotEnvConfig):
     # Collection types
     allowed_hosts: list[str] = Field(default_factory=list)
 
+
 # Load configuration from .env files
 config = AppConfig.load(env="dev")
 
 # Access configuration with full type safety and IntelliSense
 print(f"Connecting to {config.database_url}")  # config.database_url: str
-print(f"Running on port {config.port}")        # config.port: int
-print(f"Debug mode: {config.debug}")           # config.debug: bool
+print(f"Running on port {config.port}")  # config.port: int
+print(f"Debug mode: {config.debug}")  # config.debug: bool
 
 # Generate documentation for your configuration
 print(AppConfig.describe())
@@ -74,16 +76,17 @@ class AppConfig(DotEnvConfig):
     port: int = Field(default=8000)
     debug: bool = Field(default=False)
 
+
 config = AppConfig.load()
 
 # ✅ Type checkers know these types:
-db_url: str = config.database_url      # ✅ Correct: str = str
-port_num: int = config.port            # ✅ Correct: int = int
-is_debug: bool = config.debug          # ✅ Correct: bool = bool
+db_url: str = config.database_url  # ✅ Correct: str = str
+port_num: int = config.port  # ✅ Correct: int = int
+is_debug: bool = config.debug  # ✅ Correct: bool = bool
 
 # ❌ Type checker errors:
-wrong: int = config.database_url       # ❌ Error: str is not compatible with int
-wrong: str = config.debug              # ❌ Error: bool is not compatible with str
+wrong: int = config.database_url  # ❌ Error: str is not compatible with int
+wrong: str = config.debug  # ❌ Error: bool is not compatible with str
 ```
 
 Your IDE will provide:
@@ -129,6 +132,7 @@ Supports multiple formats for true/false values:
 class Config(DotEnvConfig):
     debug: bool = Field(default=False)
 
+
 # True values: "true", "1", "yes", "on", "t", "y" (case-insensitive)
 # False values: "false", "0", "no", "off", "f", "n", "" (case-insensitive)
 ```
@@ -136,6 +140,7 @@ class Config(DotEnvConfig):
 **Path**
 ```python
 from pathlib import Path
+
 
 class Config(DotEnvConfig):
     config_path: Path = Field(default=Path("/etc/app"))
@@ -200,6 +205,7 @@ class Config(DotEnvConfig):
 ```python
 from uuid import UUID
 
+
 class Config(DotEnvConfig):
     tenant_id: UUID = Field()
     # Environment: TENANT_ID=550e8400-e29b-41d4-a716-446655440000
@@ -210,9 +216,10 @@ class Config(DotEnvConfig):
 ```python
 from decimal import Decimal
 
+
 class Config(DotEnvConfig):
     price: Decimal = Field()
-    tax_rate: Decimal = Field(ge=Decimal('0'), le=Decimal('1'))
+    tax_rate: Decimal = Field(ge=Decimal("0"), le=Decimal("1"))
     # Environment: PRICE=19.99, TAX_RATE=0.0825
     # Result: config.price == Decimal('19.99')
 ```
@@ -220,6 +227,7 @@ class Config(DotEnvConfig):
 **Datetime and Timedelta**
 ```python
 from datetime import datetime, timedelta
+
 
 class Config(DotEnvConfig):
     created_at: datetime = Field()
@@ -236,10 +244,12 @@ class Config(DotEnvConfig):
 ```python
 from dotenvmodel.types import SecretStr
 
+
 class Config(DotEnvConfig):
     api_key: SecretStr = Field(min_length=32)
     password: SecretStr = Field()
     # Hides value in logs and repr
+
 
 config = Config.load()
 print(config.api_key)  # SecretStr('**********')
@@ -249,6 +259,7 @@ print(config.api_key.get_secret_value())  # 'actual-secret-key'
 **URL and DSN Types**
 ```python
 from dotenvmodel.types import HttpUrl, PostgresDsn, RedisDsn
+
 
 class Config(DotEnvConfig):
     api_url: HttpUrl = Field()
@@ -261,17 +272,19 @@ class Config(DotEnvConfig):
     redis_url: RedisDsn = Field()
     # Environment: REDIS_URL=redis://localhost:6379/0
 
+
 # URL types work like strings but provide properties:
 config = Config.load()
-print(config.api_url.host)      # 'api.example.com'
-print(config.api_url.port)      # 443
+print(config.api_url.host)  # 'api.example.com'
+print(config.api_url.port)  # 443
 print(config.database_url.database)  # 'db'
-print(config.redis_url.database)     # 0
+print(config.redis_url.database)  # 0
 ```
 
 **JSON Parsing**
 ```python
 from dotenvmodel.types import Json
+
 
 class Config(DotEnvConfig):
     feature_flags: Json[dict[str, bool]] = Field()
@@ -279,6 +292,7 @@ class Config(DotEnvConfig):
 
     allowed_roles: Json[list[str]] = Field()
     # Environment: ALLOWED_ROLES=["admin", "user", "guest"]
+
 
 config = Config.load()
 assert config.feature_flags == {"new_ui": True, "beta_api": False}
@@ -290,6 +304,7 @@ Optional types automatically default to `None` if no explicit default is provide
 
 ```python
 from typing import Optional
+
 
 class Config(DotEnvConfig):
     # These automatically default to None (no need for explicit default=None)
@@ -309,6 +324,7 @@ class Config(DotEnvConfig):
 
 ```python
 from dotenvmodel import DotEnvConfig, Field, Required
+
 
 class Config(DotEnvConfig):
     # Method 1: Pydantic-style Field(...) - Recommended
@@ -358,10 +374,7 @@ Document your fields for better maintainability:
 
 ```python
 class Config(DotEnvConfig):
-    timeout: float = Field(
-        default=30.0,
-        description="Request timeout in seconds"
-    )
+    timeout: float = Field(default=30.0, description="Request timeout in seconds")
 ```
 
 ### String Stripping
@@ -370,6 +383,7 @@ Raw environment values often come with stray whitespace or wrapping quotes. Use 
 
 ```python
 import re
+
 
 class Config(DotEnvConfig):
     # Whitespace strip: "  hello  " -> "hello"
@@ -388,7 +402,7 @@ Set `strip_strings = True` on the class to strip every string-like field by defa
 class Config(DotEnvConfig):
     strip_strings: bool = True
 
-    name: str = Field()                # stripped (inherits class setting)
+    name: str = Field()  # stripped (inherits class setting)
     literal: str = Field(strip=False)  # per-field override wins
 ```
 
@@ -434,18 +448,14 @@ class Config(DotEnvConfig):
     username: str = Field(max_length=20)
 
     # Regex pattern
-    email: str = Field(regex=r'^[\w\.-]+@[\w\.-]+\.\w+$')
+    email: str = Field(regex=r"^[\w\.-]+@[\w\.-]+\.\w+$")
 
     # Required prefix / suffix
     client_key: str = Field(starts_with="sk-")
     signed_token: str = Field(ends_with=".sig")
 
     # Combined constraints
-    password: str = Field(
-        min_length=8,
-        max_length=128,
-        regex=r'^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).+$'
-    )
+    password: str = Field(min_length=8, max_length=128, regex=r"^(?=.*[A-Z])(?=.*[a-z])(?=.*\d).+$")
 ```
 
 ### Choice Validation
@@ -453,14 +463,10 @@ class Config(DotEnvConfig):
 ```python
 class Config(DotEnvConfig):
     # Must be one of the specified values
-    environment: str = Field(
-        default="dev",
-        choices=["dev", "test", "staging", "prod"]
-    )
+    environment: str = Field(default="dev", choices=["dev", "test", "staging", "prod"])
 
     log_level: str = Field(
-        default="INFO",
-        choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
+        default="INFO", choices=["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     )
 ```
 
@@ -471,6 +477,7 @@ For logic that built-in constraints can't express, attach a `validator` hook. It
 ```python
 from dotenvmodel import DotEnvConfig, Field, SecretStr, ValidatorContext
 
+
 def check_api_key(value: SecretStr, ctx: ValidatorContext) -> SecretStr:
     # The hook receives the coerced value: a SecretStr stays wrapped,
     # so call get_secret_value() to inspect the plaintext.
@@ -479,6 +486,7 @@ def check_api_key(value: SecretStr, ctx: ValidatorContext) -> SecretStr:
         # and aggregate into MultipleValidationErrors like any other failure
         raise ValueError(f"{ctx.env_var_name} must start with 'sk-'")
     return value
+
 
 class Config(DotEnvConfig):
     api_key: SecretStr = Field(validator=check_api_key)
@@ -504,11 +512,12 @@ Per-field constraints and `validator` hooks see one value at a time. For invaria
 ```python
 from dotenvmodel import DotEnvConfig, Field, ValidationError
 
+
 class WorkerConfig(DotEnvConfig):
     primary_dsn: str = Field(default="postgresql://localhost/primary")
     replica_dsn: str | None = Field(default=None)
     heartbeat_interval: int = Field(default=5, ge=1)  # seconds
-    lock_lease: int = Field(default=30, ge=1)         # seconds
+    lock_lease: int = Field(default=30, ge=1)  # seconds
 
     def post_load(self) -> list[ValidationError] | None:
         # Fix/transform: derived value — fall back to the primary DSN.
@@ -525,6 +534,7 @@ class WorkerConfig(DotEnvConfig):
                 )
             ]
         return None
+
 
 config = WorkerConfig.load_from_dict({})
 print(config.replica_dsn)  # postgresql://localhost/primary (fallback applied)
@@ -576,11 +586,12 @@ config = AppConfig.load()
 config = AppConfig.load(env="prod")
 
 # Override behavior
-config = AppConfig.load(override=True)   # .env files override env vars (default)
+config = AppConfig.load(override=True)  # .env files override env vars (default)
 config = AppConfig.load(override=False)  # Env vars take precedence
 
 # Custom .env file directory
 from pathlib import Path
+
 config = AppConfig.load(env_dir=Path("/app/config"))
 ```
 
@@ -626,12 +637,14 @@ config = AppConfig.load(env="dev")
 
 ```python
 # Load from dictionary for testing
-config = AppConfig.load_from_dict({
-    "DATABASE_URL": "postgresql://localhost/test",
-    "API_KEY": "test-key",
-    "DEBUG": "true",
-    "PORT": "8000",
-})
+config = AppConfig.load_from_dict(
+    {
+        "DATABASE_URL": "postgresql://localhost/test",
+        "API_KEY": "test-key",
+        "DEBUG": "true",
+        "PORT": "8000",
+    }
+)
 
 # Skip validation if needed
 config = AppConfig.load_from_dict(data, validate=False)
@@ -649,8 +662,10 @@ from dotenvmodel import configure_logging, DotEnvConfig, Field
 # Enable INFO level logging
 configure_logging("INFO")
 
+
 class Config(DotEnvConfig):
     database_url: str = Field()
+
 
 config = Config.load()
 ```
@@ -705,16 +720,13 @@ import logging
 from dotenvmodel import configure_logging, LOGGER_NAME
 
 # Use custom format
-configure_logging(
-    "INFO",
-    format_string="[%(levelname)s] %(message)s"
-)
+configure_logging("INFO", format_string="[%(levelname)s] %(message)s")
 
 # Or configure directly with standard logging
 logger = logging.getLogger(LOGGER_NAME)
 logger.setLevel(logging.DEBUG)
 handler = logging.StreamHandler()
-handler.setFormatter(logging.Formatter('%(message)s'))
+handler.setFormatter(logging.Formatter("%(message)s"))
 logger.addHandler(handler)
 ```
 
@@ -726,15 +738,20 @@ dotenvmodel uses a named logger (`"dotenvmodel"`) that integrates with the stand
 import logging
 from dotenvmodel import LOGGER_NAME
 
+
 # Add a JSON formatter for log aggregation
 class JsonFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
         import json
-        return json.dumps({
-            "logger": record.name,
-            "level": record.levelname,
-            "message": record.getMessage(),
-        })
+
+        return json.dumps(
+            {
+                "logger": record.name,
+                "level": record.levelname,
+                "message": record.getMessage(),
+            }
+        )
+
 
 handler = logging.StreamHandler()
 handler.setFormatter(JsonFormatter())
@@ -755,7 +772,7 @@ config_dict = config.dict()
 
 ```python
 config = AppConfig.load()
-timeout = config.get('timeout', 30)  # Returns 30 if timeout not set
+timeout = config.get("timeout", 30)  # Returns 30 if timeout not set
 ```
 
 ### String Representation
@@ -812,11 +829,13 @@ Generate human-readable documentation for your configuration classes using the `
 ```python
 from dotenvmodel import DotEnvConfig, Field
 
+
 class AppConfig(DotEnvConfig):
     database_url: str = Field(description="PostgreSQL connection string")
     port: int = Field(default=8000, ge=1, le=65535, description="Server port")
     debug: bool = Field(default=False, description="Enable debug mode")
     workers: int = Field(default=4, ge=1, le=16, description="Number of worker processes")
+
 
 # Generate ASCII table (default)
 print(AppConfig.describe())
@@ -911,32 +930,25 @@ Automatically generate `.env.example` files for onboarding new developers:
 ```python
 from dotenvmodel import DotEnvConfig, Field, SecretStr
 
+
 class AppConfig(DotEnvConfig):
     env_prefix = "APP_"
 
-    api_key: str = Field(
-        min_length=32,
-        max_length=64,
-        description="API key for external service"
-    )
-    port: int = Field(
-        default=8000,
-        ge=1,
-        le=65535,
-        description="Server port number"
-    )
+    api_key: str = Field(min_length=32, max_length=64, description="API key for external service")
+    port: int = Field(default=8000, ge=1, le=65535, description="Server port number")
     database_password: SecretStr = Field(
         default=SecretStr("change_me_in_production"),
         min_length=8,
-        description="Database connection password"
+        description="Database connection password",
     )
     allowed_hosts: list[str] = Field(
         default_factory=list,
         separator=";",
         min_items=1,
         max_items=10,
-        description="Allowed hostnames for CORS"
+        description="Allowed hostnames for CORS",
     )
+
 
 # Generate and print .env.example
 print(AppConfig.generate_env_example())
@@ -987,15 +999,18 @@ Use `describe_configs()` to document multiple related configuration classes:
 ```python
 from dotenvmodel import DotEnvConfig, Field, describe_configs
 
+
 class DatabaseConfig(DotEnvConfig):
     env_prefix = "DB_"
     host: str = Field(description="Database host")
     port: int = Field(default=5432, description="Database port")
 
+
 class RedisConfig(DotEnvConfig):
     env_prefix = "REDIS_"
     host: str = Field(description="Redis host")
     port: int = Field(default=6379, description="Redis port")
+
 
 # Generate documentation for all configs
 all_docs = describe_configs([DatabaseConfig, RedisConfig], output_format="markdown")
@@ -1096,12 +1111,11 @@ class DatabaseConfig(DotEnvConfig):
     port: int = Field(default=5432)
     name: str = Field()
 
+
 # Reads DB_HOST, DB_PORT, DB_NAME from environment
-config = DatabaseConfig.load_from_dict({
-    "DB_HOST": "localhost",
-    "DB_PORT": "5433",
-    "DB_NAME": "myapp"
-})
+config = DatabaseConfig.load_from_dict(
+    {"DB_HOST": "localhost", "DB_PORT": "5433", "DB_NAME": "myapp"}
+)
 ```
 
 ### Prefix Behavior
@@ -1135,20 +1149,23 @@ class DatabaseConfig(DotEnvConfig):
     host: str = Field()
     port: int = Field(default=5432)
 
+
 class RedisConfig(DotEnvConfig):
     env_prefix = "REDIS_"
     host: str = Field()
     port: int = Field(default=6379)
+
 
 class AppConfig(DotEnvConfig):
     env_prefix = "APP_"
     name: str = Field()
     version: str = Field()
 
+
 # Each config reads its own prefixed variables
-db = DatabaseConfig.load()      # Reads DB_HOST, DB_PORT
-redis = RedisConfig.load()      # Reads REDIS_HOST, REDIS_PORT
-app = AppConfig.load()          # Reads APP_NAME, APP_VERSION
+db = DatabaseConfig.load()  # Reads DB_HOST, DB_PORT
+redis = RedisConfig.load()  # Reads REDIS_HOST, REDIS_PORT
+app = AppConfig.load()  # Reads APP_NAME, APP_VERSION
 ```
 
 ### Nested Configuration
@@ -1161,16 +1178,20 @@ class OIDCSettings(DotEnvConfig):
     issuer: str = Field(default="")
     session_max_age_seconds: int = Field(default=28800)
 
+
 class Settings(DotEnvConfig):
     env_prefix = "WARDEN_"
     service_name: str = Field(default="warden")
     oidc: OIDCSettings = Field(default_factory=OIDCSettings)
 
-settings = Settings.load_from_dict({
-    "WARDEN_OIDC_SESSION_MAX_AGE_SECONDS": "3600",
-})
+
+settings = Settings.load_from_dict(
+    {
+        "WARDEN_OIDC_SESSION_MAX_AGE_SECONDS": "3600",
+    }
+)
 settings.oidc.session_max_age_seconds  # 3600 (overridden)
-settings.oidc.issuer                   # "" (nested default, not the parent's prefix)
+settings.oidc.issuer  # "" (nested default, not the parent's prefix)
 ```
 
 Nested `env_prefix` values are **absolute, not concatenated** with the parent's — `OIDCSettings.env_prefix` above is `WARDEN_OIDC_` in full, not appended to `Settings.env_prefix`. `.load()`, `.load_from_dict()`, and `.reload()` all resolve nested fields the same way. See [Known Limitations](#known-limitations) for `Optional[NestedConfig]` and `describe()` caveats.
@@ -1229,6 +1250,7 @@ except ConstraintViolationError as e:
 from pathlib import Path
 from dotenvmodel import DotEnvConfig, Field, Required
 
+
 class DatabaseConfig(DotEnvConfig):
     env_prefix = "DB_"  # Namespace with DB_ prefix
     host: str = Field()
@@ -1238,6 +1260,7 @@ class DatabaseConfig(DotEnvConfig):
     pool_timeout: float = Field(default=30.0, gt=0)
     echo: bool = Field(default=False)
 
+
 class RedisConfig(DotEnvConfig):
     env_prefix = "REDIS_"  # Namespace with REDIS_ prefix
     host: str = Field()
@@ -1246,14 +1269,12 @@ class RedisConfig(DotEnvConfig):
     db: int = Field(default=0, ge=0, le=15)
     socket_keepalive: bool = Field(default=True)
 
+
 class AppConfig(DotEnvConfig):
     env_prefix = "APP_"  # Namespace with APP_ prefix
 
     # App settings
-    environment: str = Field(
-        default="dev",
-        choices=["dev", "test", "staging", "prod"]
-    )
+    environment: str = Field(default="dev", choices=["dev", "test", "staging", "prod"])
     debug: bool = Field(default=False)
     secret_key: str = Field(min_length=32)
 
@@ -1273,6 +1294,7 @@ class AppConfig(DotEnvConfig):
     # Lists and paths
     allowed_origins: list[str] = Field(default_factory=list)
     upload_dir: Path = Field(default=Path("/tmp/uploads"))
+
 
 # Load all configs with prefixes
 # DatabaseConfig reads: DB_HOST, DB_PORT, DB_NAME, etc.
@@ -1295,21 +1317,26 @@ app_config.reload()
 import pytest
 from dotenvmodel import DotEnvConfig, Field, Required, MissingFieldError
 
+
 class TestConfig(DotEnvConfig):
     database_url: str = Required
     api_key: str = Required
     debug: bool = Field(default=False)
 
+
 def test_load_from_dict():
-    config = TestConfig.load_from_dict({
-        "database_url": "sqlite:///:memory:",
-        "api_key": "test-key-123",
-        "debug": "true",
-    })
+    config = TestConfig.load_from_dict(
+        {
+            "database_url": "sqlite:///:memory:",
+            "api_key": "test-key-123",
+            "debug": "true",
+        }
+    )
 
     assert config.database_url == "sqlite:///:memory:"
     assert config.api_key == "test-key-123"
     assert config.debug is True
+
 
 def test_missing_required_field():
     with pytest.raises(MissingFieldError) as exc_info:
@@ -1317,13 +1344,17 @@ def test_missing_required_field():
 
     assert "database_url" in str(exc_info.value)
 
+
 @pytest.fixture
 def test_config():
     """Fixture providing test configuration."""
-    return TestConfig.load_from_dict({
-        "database_url": "sqlite:///:memory:",
-        "api_key": "test-key",
-    })
+    return TestConfig.load_from_dict(
+        {
+            "database_url": "sqlite:///:memory:",
+            "api_key": "test-key",
+        }
+    )
+
 
 def test_with_fixture(test_config):
     assert test_config.database_url == "sqlite:///:memory:"
@@ -1355,7 +1386,7 @@ See the [Caching guide](docs/guides/loading.md#caching-a-singleton-instance) for
 1. **Use Type Hints**: Always specify type hints for proper validation
    ```python
    port: int = Field(default=8000)  # ✓ Good
-   port = Field(default=8000)        # ✗ Bad - no type hint
+   port = Field(default=8000)  # ✗ Bad - no type hint
    ```
 
 2. **Use Validation**: Add constraints to catch configuration errors early
@@ -1370,17 +1401,13 @@ See the [Caching guide](docs/guides/loading.md#caching-a-singleton-instance) for
 
 4. **Prefer Default Factories for Mutable Defaults**: Literal mutable defaults are safe (each `load()` deep-copies them), but a factory skips that per-load copy cost
    ```python
-   hosts: list[str] = Field(default_factory=list)   # ✓ Best - fresh list per load
+   hosts: list[str] = Field(default_factory=list)  # ✓ Best - fresh list per load
    hosts: list[str] = Field(default=["localhost"])  # ✓ Safe - deep-copied per load
    ```
 
 5. **Document Fields**: Use descriptions for complex configurations
    ```python
-   timeout: float = Field(
-       default=30.0,
-       ge=0.1,
-       description="API request timeout in seconds"
-   )
+   timeout: float = Field(default=30.0, ge=0.1, description="API request timeout in seconds")
    ```
 
 ## Requirements
@@ -1409,6 +1436,7 @@ class Config(DotEnvConfig):
     value: str | None = Field()  # Works
     other: int | None = Field()  # Works
 
+
 # ❌ Not supported - Non-optional unions
 class Config(DotEnvConfig):
     value: str | int = Field()  # Not supported
@@ -1419,6 +1447,7 @@ class Config(DotEnvConfig):
 ```python
 class Config(DotEnvConfig):
     value: str = Field()
+
 
 config = Config.load()
 # Convert to int if needed in your code
@@ -1433,6 +1462,7 @@ value_as_int = int(config.value) if config.value.isdigit() else config.value
 class Config(DotEnvConfig):
     env_prefix = "APP_"
     nested: NestedConfig | None = Field(default=None)
+
 
 config = Config.load_from_dict({"APP_NESTED_PORT": "8080"})
 config.nested  # None — the override above is silently ignored

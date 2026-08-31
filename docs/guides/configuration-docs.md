@@ -9,11 +9,13 @@ The `describe()` class method generates human-readable documentation showing all
 ```python
 from dotenvmodel import DotEnvConfig, Field
 
+
 class AppConfig(DotEnvConfig):
     database_url: str = Field(description="PostgreSQL connection string")
     port: int = Field(default=8000, ge=1, le=65535, description="Server port")
     debug: bool = Field(default=False, description="Enable debug mode")
     workers: int = Field(default=4, ge=1, le=16, description="Number of worker processes")
+
 
 # Generate documentation
 print(AppConfig.describe())
@@ -69,7 +71,7 @@ print(AppConfig.describe())
     data = json.loads(config_spec)
 
     # Use for validation, code generation, etc.
-    print(data["class_name"])        # "AppConfig"
+    print(data["class_name"])  # "AppConfig"
     print(data["fields"][0]["env_var"])  # "DATABASE_URL"
 
     # Get required environment variables
@@ -158,32 +160,25 @@ The `generate_env_example()` method is a convenience wrapper that calls `describ
 ```python
 from dotenvmodel import DotEnvConfig, Field, SecretStr
 
+
 class AppConfig(DotEnvConfig):
     env_prefix = "APP_"
 
-    api_key: str = Field(
-        min_length=32,
-        max_length=64,
-        description="API key for external service"
-    )
-    port: int = Field(
-        default=8000,
-        ge=1,
-        le=65535,
-        description="Server port number"
-    )
+    api_key: str = Field(min_length=32, max_length=64, description="API key for external service")
+    port: int = Field(default=8000, ge=1, le=65535, description="Server port number")
     database_password: SecretStr = Field(
         default=SecretStr("change_me_in_production"),
         min_length=8,
-        description="Database connection password"
+        description="Database connection password",
     )
     allowed_hosts: list[str] = Field(
         default_factory=list,
         separator=";",
         min_items=1,
         max_items=10,
-        description="Allowed hostnames for CORS"
+        description="Allowed hostnames for CORS",
     )
+
 
 # Generate and print .env.example
 print(AppConfig.generate_env_example())
@@ -244,15 +239,18 @@ Use `describe_configs()` to document multiple config classes in a single output.
 ```python
 from dotenvmodel import DotEnvConfig, Field, describe_configs
 
+
 class DatabaseConfig(DotEnvConfig):
     env_prefix = "DB_"
     host: str = Field(description="Database host")
     port: int = Field(default=5432, description="Database port")
 
+
 class RedisConfig(DotEnvConfig):
     env_prefix = "REDIS_"
     host: str = Field(description="Redis host")
     port: int = Field(default=6379, description="Redis port")
+
 
 # Generate documentation for all configs
 all_docs = describe_configs([DatabaseConfig, RedisConfig], output_format="markdown")
@@ -262,7 +260,7 @@ print(all_docs)
 describe_configs(
     [DatabaseConfig, RedisConfig, AppConfig],
     output_format="markdown",
-    output="docs/configuration.md"
+    output="docs/configuration.md",
 )
 ```
 
