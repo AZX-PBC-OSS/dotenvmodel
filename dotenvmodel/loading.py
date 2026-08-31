@@ -358,16 +358,21 @@ def read_env_files(
     policy — the override policy is applied later, once, against the whole
     merged layer (see `DotEnvConfig.load()`).
 
-    Interpolation happens once, after the merge: a `${VAR}` reference in
-    any file resolves against the merged cascade first, then `os.environ`
-    as the fallback base — a reference to a variable defined only in the
-    process environment still resolves — and is independent of the
-    `override` knob, which only governs per-field precedence afterwards. python-dotenv 1.2.3's
-    semantics apply, replicated locally (`${VAR}` / `${VAR:-default}`; no
-    `$VAR` shorthand; an unresolved reference becomes `""`; the `:-`
-    default applies only when the name is absent from the base — a
-    present-but-empty value wins over it). Bare keys (`KEY` with no `=`)
-    are left unset, matching `load_dotenv()`, which skips them.
+    Interpolation happens once, after the merge, and progressively in
+    merged-key order: a `${VAR}` reference in a file value sees the keys
+    defined earlier in the merged cascade — with their already-resolved
+    values — over `os.environ`, so a later file can build on an earlier
+    file's value, while a forward or self reference (to a key defined
+    later in the merged order, or after it in the same file) sees only
+    `os.environ`. A reference to a variable defined only in the process
+    environment still resolves, and interpolation is independent of the
+    `override` knob, which only governs per-field precedence afterwards.
+    python-dotenv 1.2.3's semantics apply, replicated locally (`${VAR}`
+    / `${VAR:-default}`; no `$VAR` shorthand; an unresolved reference
+    becomes `""`; the `:-` default applies only when the name is absent
+    from the base — a present-but-empty value wins over it). Bare keys
+    (`KEY` with no `=`) are left unset, matching `load_dotenv()`, which
+    skips them.
 
     Probing order:
         1. `.env` (base configuration)
