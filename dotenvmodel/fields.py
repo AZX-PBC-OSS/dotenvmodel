@@ -1,10 +1,17 @@
 """Field descriptor and Required sentinel for dotenvmodel."""
 
+import copy
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import date, datetime, time, timedelta
 from decimal import Decimal
+from enum import Enum
+from pathlib import Path
 from typing import Any, TypeVar
+from uuid import UUID
+
+from dotenvmodel.types import BaseDsn, SecretStr
 
 # Type variable for generic field types
 T = TypeVar("T")
@@ -92,6 +99,58 @@ def _validator_name(fn: Callable[..., Any]) -> str:
     so rendering is consistent across ``FieldInfo.__repr__`` and error paths.
     """
     return getattr(fn, "__name__", type(fn).__name__)
+
+
+# Immutable default types are handed out as-is: sharing them is safe.
+# Enum covers all enum members; BaseDsn covers its subclasses (HttpUrl,
+# PostgresDsn, RedisDsn); datetime subclasses date but is listed for clarity.
+_IMMUTABLE_DEFAULT_TYPES: tuple[type[Any], ...] = (
+    type(None),
+    bool,
+    int,
+    float,
+    complex,
+    str,
+    bytes,
+    range,
+    date,
+    datetime,
+    time,
+    timedelta,
+    Decimal,
+    UUID,
+    Path,
+    SecretStr,
+    BaseDsn,
+    Enum,
+)
+
+
+def smart_deepcopy(value: Any) -> Any:
+    """Return a value safe to hand out as a per-load default.
+
+    Immutable values (scalars, ``Enum`` members, dates, ``Decimal``, ``UUID``,
+    ``Path``, ``SecretStr``, DSN types) are returned as-is at zero cost. Empty
+    ``list``/``dict``/``set`` values get a shallow ``copy()`` — they hold
+    nothing that could be shared. Everything else (non-empty or possibly
+    nested containers, custom objects) is ``copy.deepcopy``-ed.
+
+    This mirrors pydantic's ``smart_deepcopy`` so that a literal mutable
+    default such as ``Field(default=["localhost"])`` is isolated per
+    ``load()`` call instead of being shared — and mutated — across every
+    instance.
+
+    Args:
+        value: The literal default value to copy.
+
+    Returns:
+        The same object for immutable values, otherwise an independent copy.
+    """
+    if isinstance(value, _IMMUTABLE_DEFAULT_TYPES):
+        return value
+    if isinstance(value, (list, dict, set)) and not value:
+        return value.copy()
+    return copy.deepcopy(value)
 
 
 class FieldInfo:
@@ -322,12 +381,19 @@ class FieldInfo:
         self.required = default is _MISSING and default_factory is None
 
     def get_default(self) -> Any:
-        """Get the default value for this field."""
+        """Get the default value for this field.
+
+        Literal defaults pass through ``smart_deepcopy`` so every load
+        receives an independent value: mutating one instance's default
+        cannot leak into other instances or future loads (pydantic parity).
+        Immutable defaults are returned as-is and ``default_factory``
+        results are already fresh per call, so neither pays a copy cost.
+        """
         if self.default_factory is not None:
             return self.default_factory()
         if self.default is _MISSING:
             return _MISSING
-        return self.default
+        return smart_deepcopy(self.default)
 
     @property
     def has_default(self) -> bool:
@@ -418,14 +484,16 @@ def Field(
 
     When to use `default` vs `default_factory`:
         - Use `default` for immutable values (str, int, float, bool, None)
-        - Use `default_factory` for mutable values (list, dict, set) to avoid
-          shared mutable state between instances
+        - Mutable `default` values (list, dict, set) are safe — each load
+          deep-copies them — but `default_factory` avoids that per-load
+          copy cost
 
     Args:
         default: Default value if environment variable not set. Use `...` (ellipsis)
             or omit for required fields. Use a value for optional fields.
-        default_factory: Callable that returns a default value. Use this instead of
-            `default` for mutable defaults like `list` or `dict`.
+        default_factory: Callable that returns a default value. Prefer this over a
+            mutable `default` (e.g. a list or dict) to avoid the per-load deep-copy
+            cost; a fresh value is created on every load.
             Example: `default_factory=list`
         alias: Alternative environment variable name to read from. When set, the
             field name is not used for env var lookup, and `env_prefix` is NOT applied.
