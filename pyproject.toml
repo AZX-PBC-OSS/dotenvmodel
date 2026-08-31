@@ -41,9 +41,26 @@ Changelog = "https://github.com/AZX-PBC-OSS/dotenvmodel/blob/main/CHANGELOG.md"
 package = true
 exclude-newer = "48h"
 constraint-dependencies = ["pygments>=2.21.0"]
+# Single source for the uv version: uv enforces it on every local
+# invocation and astral-sh/setup-uv resolves it in CI. ~=0.12.8 means
+# >=0.12.8,<0.13, so patch releases are picked up automatically and a
+# minor bump is a deliberate change here.
+required-version = "~=0.12.8"
 
 [tool.hatch.build.targets.wheel]
 packages = ["dotenvmodel"]
+
+[tool.hatch.build.targets.sdist]
+# Ship exactly the package plus the metadata files consumers need;
+# tests, docs, examples, and CI stay out; hatchling force-includes
+# the project .gitignore, the sole dotfile shipped.
+only-include = [
+    "dotenvmodel",
+    "pyproject.toml",
+    "README.md",
+    "LICENSE",
+    "CHANGELOG.md",
+]
 
 [dependency-groups]
 dev = [
