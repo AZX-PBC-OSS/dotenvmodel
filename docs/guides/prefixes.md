@@ -9,18 +9,18 @@ Set `env_prefix` as a class attribute on your `DotEnvConfig` subclass. All field
 ```python
 from dotenvmodel import DotEnvConfig, Field
 
+
 class DatabaseConfig(DotEnvConfig):
     env_prefix = "DB_"  # All fields will be prefixed with DB_
     host: str = Field()
     port: int = Field(default=5432)
     name: str = Field()
 
+
 # Reads DB_HOST, DB_PORT, DB_NAME from environment
-config = DatabaseConfig.load_from_dict({
-    "DB_HOST": "localhost",
-    "DB_PORT": "5433",
-    "DB_NAME": "myapp"
-})
+config = DatabaseConfig.load_from_dict(
+    {"DB_HOST": "localhost", "DB_PORT": "5433", "DB_NAME": "myapp"}
+)
 ```
 
 ## Automatic Uppercasing
@@ -81,20 +81,23 @@ class DatabaseConfig(DotEnvConfig):
     host: str = Field()
     port: int = Field(default=5432)
 
+
 class RedisConfig(DotEnvConfig):
     env_prefix = "REDIS_"
     host: str = Field()
     port: int = Field(default=6379)
+
 
 class AppConfig(DotEnvConfig):
     env_prefix = "APP_"
     name: str = Field()
     version: str = Field()
 
+
 # Each config reads its own prefixed variables
-db = DatabaseConfig.load()      # Reads DB_HOST, DB_PORT
-redis = RedisConfig.load()      # Reads REDIS_HOST, REDIS_PORT
-app = AppConfig.load()          # Reads APP_NAME, APP_VERSION
+db = DatabaseConfig.load()  # Reads DB_HOST, DB_PORT
+redis = RedisConfig.load()  # Reads REDIS_HOST, REDIS_PORT
+app = AppConfig.load()  # Reads APP_NAME, APP_VERSION
 ```
 
 ### Complete Multi-Config Example
@@ -103,12 +106,14 @@ app = AppConfig.load()          # Reads APP_NAME, APP_VERSION
 from pathlib import Path
 from dotenvmodel import DotEnvConfig, Field
 
+
 class DatabaseConfig(DotEnvConfig):
     env_prefix = "DB_"
     host: str = Field()
     port: int = Field(default=5432)
     name: str = Field()
     pool_size: int = Field(default=10, ge=1, le=100)
+
 
 class RedisConfig(DotEnvConfig):
     env_prefix = "REDIS_"
@@ -117,12 +122,10 @@ class RedisConfig(DotEnvConfig):
     password: str | None = Field(default=None)
     db: int = Field(default=0, ge=0, le=15)
 
+
 class AppConfig(DotEnvConfig):
     env_prefix = "APP_"
-    environment: str = Field(
-        default="dev",
-        choices=["dev", "test", "staging", "prod"]
-    )
+    environment: str = Field(default="dev", choices=["dev", "test", "staging", "prod"])
     debug: bool = Field(default=False)
     secret_key: str = Field(min_length=32)
 
@@ -131,6 +134,7 @@ class AppConfig(DotEnvConfig):
 
     # Regular prefixed field
     port: int = Field(default=8000, ge=1, le=65535)
+
 
 # Load all configs
 # DatabaseConfig reads: DB_HOST, DB_PORT, DB_NAME, DB_POOL_SIZE
