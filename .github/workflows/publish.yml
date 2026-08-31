@@ -78,6 +78,8 @@ jobs:
       name: pypi
       url: https://pypi.org/project/dotenvmodel/
     permissions:
+      # Granted solely to mint this job's OIDC token for PyPI trusted
+      # publishing; no other permission is used in this job.
       id-token: write
     steps:
       - name: Install uv

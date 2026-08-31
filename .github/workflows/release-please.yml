@@ -6,14 +6,20 @@ on:
       - main
 
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
-  issues: write
+  contents: read
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      # The action's documented token requirements: cut the release and
+      # its tag (contents), open the release PR (pull-requests), and
+      # label that PR (issues, because PR labels go through the Issues
+      # API). Granted here instead of workflow-wide so the publishing
+      # job below cannot inherit them.
+      contents: write
+      pull-requests: write
+      issues: write
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -28,7 +34,17 @@ jobs:
   publish:
     needs: release-please
     if: needs.release-please.outputs.release_created
+    permissions:
+      # Ceiling for the reusable publish workflow: permissions cannot be
+      # elevated across a workflow_call boundary, so the caller must
+      # grant everything the called jobs use. Its build job checks out
+      # the release tag (contents) and its publish job mints the PyPI
+      # trusted-publisher OIDC token (id-token).
+      contents: read
+      id-token: write
+    # No secrets are inherited: publish.yml authenticates with its job's
+    # OIDC token and the automatically-provided github.token, so there is
+    # nothing for it to inherit.
     uses: ./.github/workflows/publish.yml
     with:
       tag_name: ${{ needs.release-please.outputs.tag_name }}
-    secrets: inherit

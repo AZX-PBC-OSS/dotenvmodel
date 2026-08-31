@@ -12,8 +12,6 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
 
 concurrency:
   group: "pages"
@@ -50,6 +48,14 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      # deploy-pages' documented minimum: pages creates the Pages
+      # deployment through the REST API and id-token mints the OIDC
+      # token that proves the deployment originates from this workflow.
+      # The build job needs neither, so they are scoped here instead of
+      # being granted workflow-wide.
+      pages: write
+      id-token: write
     steps:
       - name: Deploy to GitHub Pages
         id: deployment
