@@ -392,9 +392,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
             validate: Whether to perform validation (default: True)
             dotenv_layer: The merged dotfile layer passed to the enclosing
                 `_load_fields` call. Forwarded to nested `DotEnvConfig`
-                fields so they see the same file values as their parent —
-                without this, nested configs would lose dotfile values the
-                pre-0.7 os.environ injection used to give them.
+                fields so they resolve file values through the same layers
+                as their parent.
             override: The override policy of the enclosing load, forwarded
                 to nested `DotEnvConfig` fields alongside `dotenv_layer`.
 
@@ -579,9 +578,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
     ) -> Self:
         """Load configuration from environment variables and .env files.
 
-        Each field is resolved across three layers, with no `os.environ`
-        mutation (a breaking change from <= 0.6.3, which injected dotfile
-        values into the process environment):
+        Each field is resolved across three layers; the process environment
+        is never written:
 
         - default (`override=False`): process environment -> merged dotfile cascade -> field default
         - `override=True` (opt-in): merged dotfile cascade -> process environment -> field default

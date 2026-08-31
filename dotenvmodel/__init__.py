@@ -33,8 +33,7 @@ Public API:
       env_dir, read_dotfiles, load_local), as returned by
       `DotEnvConfig.loaded_with()`
     - `read_env_files`: Read the merged .env cascade without touching the
-      process environment — the migration landing spot for the removed
-      `load_env_files()`
+      process environment
     - `DotenvLayer`: The merged-cascade record (values, base_dir, files)
       returned by `read_env_files()`
     - `describe_configs`: Generate docs for multiple config classes

@@ -96,9 +96,8 @@ class TestNonMutation:
     def test_load_leaves_os_environ_untouched(self, tmp_path: Path, override: bool | None) -> None:
         """Populated .env files must not leak into the process environment.
 
-        The old load() called python-dotenv load_dotenv(), so every key in
-        every probed file (VALUE, OTHER — vars no test ever set) landed in
-        os.environ and outlived the call.
+        The probed keys (VALUE, OTHER) are ones no test ever sets, so any
+        value in os.environ after the load is an unambiguous leak.
         """
         (tmp_path / ".env").write_text("VALUE=from_file\nOTHER=also_file\n")
 
@@ -190,13 +189,12 @@ class TestPrecedence:
 
 
 class TestCascadeLayer:
-    """Inside the file layer, later (more specific) files win — the #59 inverted-cascade bug."""
+    """Inside the file layer, later (more specific) files win."""
 
     def test_env_specific_local_file_beats_base_file(self, tmp_path: Path) -> None:
-        """The regression: .env sets X=base, .env.dev.local sets X=local -> "local" wins.
-
-        The old per-file load_dotenv(override=False) loop made the FIRST
-        file to set a key win, so this resolved to "base".
+        """A value set in a later file beats the same key set in an earlier
+        one. The override policy applies once against the whole merged file
+        layer.
         """
         (tmp_path / ".env").write_text("X=base\n")
         (tmp_path / ".env.dev.local").write_text("X=local\n")
@@ -455,10 +453,8 @@ class TestLoadParamsRecording:
             NeverLoaded().loaded_with()
 
     def test_load_params_rejects_positional_construction(self) -> None:
-        """Every field is keyword-only, locked in before 0.7.0 ships.
-
-        Free while the API is unreleased: a future sixth knob cannot silently
-        break positional constructions, because there are none.
+        """Every field is keyword-only, so a future knob cannot silently
+        break positional constructions: there are none.
         """
         signature = inspect.signature(LoadParams)
         kinds = {param.kind for param in signature.parameters.values()}
@@ -700,7 +696,7 @@ class TestReloadReuse:
 
 
 class TestReadEnvFilesUnits:
-    """read_env_files(): the pure merged-cascade reader replacing load_env_files()."""
+    """Unit tests for `read_env_files()`, the pure merged-cascade reader."""
 
     def test_later_files_win_within_the_layer(self, tmp_path: Path) -> None:
         (tmp_path / ".env").write_text("A=1\nB=base\n")
@@ -784,11 +780,8 @@ class TestInterpolation:
         assert layer.values["URL"] == "http://localhost:5432"
 
     def test_cross_file_reference_reads_earlier_files_values(self, tmp_path: Path) -> None:
-        """The regression: later cascade files used to interpolate against earlier files.
-
-        The old sequential load_dotenv() loop had injected .env's HOST into
-        os.environ before .env.local was read, so its ${HOST} resolved; the
-        pure per-file read had lost that cross-file base.
+        """A reference in one file resolves against values from every file
+        in the cascade, whatever their order.
         """
         (tmp_path / ".env").write_text("HOST=db.internal\n")
         (tmp_path / ".env.local").write_text("URL=postgres://${HOST}/app\n")
@@ -962,9 +955,7 @@ class TestNoDotenvInternals:
 
 
 class TestPackageRootExports:
-    """`read_env_files` is the designated migration landing spot for the removed
-    `load_env_files()` — `from dotenvmodel import read_env_files` must work.
-    """
+    """`read_env_files` and `DotenvLayer` are importable from the package root."""
 
     def test_reader_and_its_layer_type_are_importable_from_the_package_root(self) -> None:
         import dotenvmodel
@@ -1052,7 +1043,7 @@ class TestReaderLoadLocalTier:
         (tmp_path / ".env.test.local").write_text("X=test_local\n")
 
     def test_reader_default_matches_load_for_test_env(self, tmp_path: Path) -> None:
-        """The previously-confirmed divergence: the reader included .local in test envs."""
+        """The reader resolves `load_local` exactly like `load()` does."""
         self._write_test_cascade(tmp_path)
 
         layer = read_env_files(env="test", env_dir=tmp_path)
@@ -1298,11 +1289,10 @@ class TestDotenvLayerRepr:
 
 
 class TestGetEnvVarUnits:
-    """get_env_var() keeps its os.getenv-only contract after the resolution rewrite.
+    """get_env_var() keeps its os.getenv-only contract.
 
-    It no longer has an internal caller (_load_fields resolves through the
-    layered lookup instead), but it is public API advertised for direct
-    use, so its behavior is pinned here.
+    The layered lookup in _load_fields resolves values without it, but it
+    is public API advertised for direct use, so its behavior is pinned here.
     """
 
     def test_reads_the_prefixed_upper_case_name(self, monkeypatch) -> None:

@@ -305,18 +305,17 @@ def read_env_files(
 ) -> DotenvLayer:
     """Read the cascading .env files and merge them — purely, without touching os.environ.
 
-    This is the pure replacement for the removed `load_env_files()`: it
-    never writes to the process environment, returning the merged values
-    instead. Files are probed in Node.js-style cascade order and merged
+    The process environment is never written; the merged values are
+    returned instead. Files are probed in Node.js-style cascade order and merged
     with later (more specific) files winning, regardless of any override
     policy — the override policy is applied later, once, against the whole
     merged layer (see `DotEnvConfig.load()`).
 
     Interpolation happens once, after the merge: a `${VAR}` reference in
     any file resolves against the merged cascade first, then `os.environ`
-    — the base the old sequential `load_dotenv(override=True)` cascade
-    effectively used — and is independent of the `override` knob, which
-    only governs per-field precedence afterwards. python-dotenv 1.2.3's
+    as the fallback base — a reference to a variable defined only in the
+    process environment still resolves — and is independent of the
+    `override` knob, which only governs per-field precedence afterwards. python-dotenv 1.2.3's
     semantics apply, replicated locally (`${VAR}` / `${VAR:-default}`; no
     `$VAR` shorthand; an unresolved reference becomes `""`; the `:-`
     default applies only when the name is absent from the base — a
@@ -423,11 +422,11 @@ def read_env_files(
             logger.debug(f"{file_path} not found (skipping)")
 
     # Interpolate once, against the whole merged layer: a ${VAR} reference
-    # resolves against the merged cascade first, then os.environ — the base
-    # the old sequential load_dotenv(override=True) cascade effectively used
-    # (earlier files' values were already in os.environ when later files were
-    # interpolated). That base is deliberately independent of load()'s
-    # override knob, which only governs per-field precedence afterwards.
+    # resolves against the merged cascade first, then os.environ as the
+    # fallback base, so a reference to a variable defined only in the
+    # process environment still resolves. That base is deliberately
+    # independent of load()'s override knob, which only governs per-field
+    # precedence afterwards.
     # Unresolved references become "" (python-dotenv 1.2.3 semantics: ${VAR}
     # / ${VAR:-default} only; $VAR shorthand is not interpolated), and no
     # None values entered the merge, so none leave — every output is a str.

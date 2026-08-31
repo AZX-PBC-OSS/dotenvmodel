@@ -9,6 +9,7 @@ The package exports the following public API:
 - [`DotEnvConfig`][dotenvmodel.config.DotEnvConfig]: Base class for configuration
 - [`Field`][dotenvmodel.fields.Field]: Define fields with validation and defaults
 - [`Required`][dotenvmodel.fields.Required]: Sentinel for required fields
+- [`ValidatorContext`][dotenvmodel.fields.ValidatorContext]: Context passed to `Field(validator=...)` hooks
 - [`SecretStr`][dotenvmodel.types.SecretStr]: String type that hides secrets in logs
 - [`HttpUrl`][dotenvmodel.types.HttpUrl]: HTTP/HTTPS URL type
 - [`PostgresDsn`][dotenvmodel.types.PostgresDsn]: PostgreSQL DSN type
