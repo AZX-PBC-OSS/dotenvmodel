@@ -572,7 +572,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         env: str | None = None,
         *,
         override: bool | None = None,
-        env_dir: Path | None = None,
+        env_dir: Path | str | None = None,
         read_dotfiles: bool | None = None,
         load_local: bool | None = None,
     ) -> Self:
@@ -615,7 +615,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 environment variables. If False or None-without-`DOTENV_OVERRIDE`
                 (the default), existing environment variables take precedence
                 over .env files
-            env_dir: Custom base directory for .env files. If None, uses
+            env_dir: Custom base directory for .env files — a `str` is
+                accepted and converted to a `Path`. If None, uses
                 the `DOTENV_DIR` environment variable or current working directory
             read_dotfiles: If False, skip the .env cascade entirely — no files
                 are probed, no "No .env files found" warning is logged, and a
@@ -723,7 +724,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         env: str | None = None,
         *,
         override: bool | None = None,
-        env_dir: Path | None = None,
+        env_dir: Path | str | None = None,
         read_dotfiles: bool | None = None,
         load_local: bool | None = None,
     ) -> Self:
@@ -752,7 +753,8 @@ class DotEnvConfig(metaclass=ConfigMeta):
             override: If True, .env file values take precedence over existing
                 environment variables. If None, uses the override value from
                 the original load() call
-            env_dir: Custom base directory for .env files. If None, uses the
+            env_dir: Custom base directory for .env files — a `str` is
+                accepted and converted to a `Path`. If None, uses the
                 env_dir from the original load() call
             read_dotfiles: If False, skip the .env cascade entirely (see
                 `load()`). If None, uses the value from the original load() call
@@ -874,7 +876,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         env: str | None = None,
         *,
         override: bool | None = None,
-        env_dir: Path | None = None,
+        env_dir: Path | str | None = None,
         read_dotfiles: bool | None = None,
         load_local: bool | None = None,
     ) -> Self:
@@ -929,8 +931,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 existing environment variables take precedence over .env
                 files. Only used on the first call; ignored once the cache
                 is warm.
-            env_dir: Custom base directory for .env files. If None, uses the
-                `DOTENV_DIR` environment variable or current working directory.
+            env_dir: Custom base directory for .env files — a `str` is
+                accepted and converted to a `Path`. If None, uses
+                the `DOTENV_DIR` environment variable or current working directory.
                 Only used on the first call; ignored once the cache is warm.
             read_dotfiles: If False, skip the .env cascade entirely (see
                 `load()`). Only used on the first call; ignored once the

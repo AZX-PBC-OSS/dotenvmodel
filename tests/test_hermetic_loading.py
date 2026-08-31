@@ -1247,6 +1247,79 @@ class TestEnvDirAbsolutization:
         assert list(caplog.records) == []
 
 
+class TestStrEnvDirAcceptance:
+    """A str env_dir is accepted everywhere, converted to Path once at the resolution boundary.
+
+    `load(env_dir="/app/config")` is the natural spelling for a caller who
+    got the directory as a string (`DOTENV_DIR`, argv, a platform variable);
+    it must behave exactly like the `Path` spelling, not die with
+    `AttributeError` deep in the reader.
+    """
+
+    def test_load_resolves_values_with_a_str_env_dir(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        assert Config.load(env_dir=str(tmp_path)).value == "from_file"
+
+    def test_reload_with_a_str_env_dir(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        config = Config.load(env_dir=str(tmp_path))
+        (tmp_path / ".env").write_text("VALUE=updated_file\n")
+        config.reload(env_dir=str(tmp_path))
+        assert config.value == "updated_file"
+
+    def test_cached_with_a_str_env_dir(self, tmp_path: Path) -> None:
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        assert Config.cached(env_dir=str(tmp_path)).value == "from_file"
+
+    def test_read_env_files_with_a_str_env_dir_returns_a_path_base_dir(
+        self, tmp_path: Path
+    ) -> None:
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        layer = read_env_files(env="dev", env_dir=str(tmp_path))
+
+        assert layer.values == {"VALUE": "from_file"}
+        assert layer.base_dir == tmp_path
+        assert isinstance(layer.base_dir, Path)
+
+    def test_resolve_env_dir_converts_a_str_to_a_path(self, tmp_path: Path) -> None:
+        resolved = resolve_env_dir(str(tmp_path))
+        assert resolved == tmp_path
+        assert isinstance(resolved, Path)
+
+    def test_a_relative_str_is_absolutized_like_a_relative_path(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.chdir(tmp_path)
+        assert resolve_env_dir("rel") == resolve_env_dir(Path("rel")) == tmp_path / "rel"
+
+    def test_load_params_env_dir_is_always_a_path(self, tmp_path: Path) -> None:
+        """The record holds the resolved Path however the argument was
+        spelled, so recorded params stay comparable and a bare reload()
+        stays cwd-stable.
+        """
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        config = Config.load(env_dir=str(tmp_path))
+        assert config.loaded_with().env_dir == tmp_path
+        assert isinstance(config.loaded_with().env_dir, Path)
+
+
 class TestEnvNameResolution:
     """resolve_env_name(): an empty ENV env var is treated as unset."""
 

@@ -140,7 +140,7 @@ def acquire_cached(
     cls: type[DotEnvConfig],
     env: str | None,
     override: bool | None,
-    env_dir: Path | None,
+    env_dir: Path | str | None,
     read_dotfiles: bool | None,
     load_local: bool | None,
 ) -> DotEnvConfig:

@@ -111,7 +111,7 @@ def resolve_env_name(env: str | None) -> str:
     return env
 
 
-def resolve_env_dir(env_dir: Path | None) -> Path:
+def resolve_env_dir(env_dir: Path | str | None) -> Path:
     """Resolve the `.env` base directory: explicit argument > `DOTENV_DIR` > cwd.
 
     The result is always absolute: a relative argument or `DOTENV_DIR`
@@ -127,12 +127,16 @@ def resolve_env_dir(env_dir: Path | None) -> Path:
     a `read_dotfiles=False` load must not raise for one.
 
     Args:
-        env_dir: Explicit base directory, or None to consult `DOTENV_DIR`
+        env_dir: Explicit base directory — a `str` is accepted and converted
+            to a `Path` here, the single conversion point for every
+            `env_dir` acceptance site — or None to consult `DOTENV_DIR`
             (an empty value is ignored) and then the current working directory.
 
     Returns:
         The resolved base directory — always absolute.
     """
+    if isinstance(env_dir, str):
+        env_dir = Path(env_dir)
     if env_dir is not None:
         return env_dir if env_dir.is_absolute() else Path.cwd() / env_dir
     env_dir_str = os.getenv("DOTENV_DIR")
@@ -187,7 +191,7 @@ def resolve_load_params(
     env: str | None = None,
     *,
     override: bool | None = None,
-    env_dir: Path | None = None,
+    env_dir: Path | str | None = None,
     read_dotfiles: bool | None = None,
     load_local: bool | None = None,
 ) -> LoadParams:
@@ -300,7 +304,7 @@ def _interpolate(values: dict[str, str]) -> dict[str, str]:
 def read_env_files(
     env: str | None = None,
     *,
-    env_dir: Path | None = None,
+    env_dir: Path | str | None = None,
     load_local: bool | None = None,
 ) -> DotenvLayer:
     """Read the cascading .env files and merge them — purely, without touching os.environ.
@@ -335,8 +339,9 @@ def read_env_files(
     Args:
         env: Environment name (e.g., "dev", "prod", "test"). If None, reads from
             the `ENV` environment variable, defaults to "dev"
-        env_dir: Custom base directory for .env files. If None, uses
-            the `DOTENV_DIR` environment variable or current working directory
+        env_dir: Custom base directory for .env files — a `str` is accepted
+            and converted to a `Path`. If None, uses the `DOTENV_DIR`
+            environment variable or current working directory
         load_local: Whether to include `.local` files. If None (the
             default), resolves through `DOTENV_LOAD_LOCAL` with the same
             auto rule as `load()`: skip `.local` files when the resolved
