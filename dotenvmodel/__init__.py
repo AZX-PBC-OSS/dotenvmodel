@@ -21,6 +21,8 @@ Public API:
     - `Field`: Define fields with defaults, validation, and aliases
     - `Required`: Sentinel for required fields (alternative to `Field()`)
     - `ValidatorContext`: Context passed to `Field(validator=...)` hooks
+    - `field_validator`: Decorator attaching custom validation/transformation
+      hooks to fields by name, before or after type coercion
     - `DotEnvConfig.post_load`: Model-level hook for cross-field validation
       and normalization after loading
     - `DotEnvConfig.cached` / `DotEnvConfig.reset_cached` / `DotEnvConfig.cached_override`:
@@ -61,7 +63,7 @@ from dotenvmodel.exceptions import (
     TypeCoercionError,
     ValidationError,
 )
-from dotenvmodel.fields import Field, Required, ValidatorContext
+from dotenvmodel.fields import Field, Required, ValidatorContext, field_validator
 from dotenvmodel.loading import DotenvLayer, LoadParams, read_env_files
 from dotenvmodel.logging_config import configure_logging, disable_logging
 from dotenvmodel.types import (
@@ -95,6 +97,7 @@ __all__ = [
     "configure_logging",
     "describe_configs",
     "disable_logging",
+    "field_validator",
     "generate_env_example",
     "read_env_files",
 ]

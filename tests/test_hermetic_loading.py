@@ -780,14 +780,80 @@ class TestInterpolation:
         assert layer.values["URL"] == "http://localhost:5432"
 
     def test_cross_file_reference_reads_earlier_files_values(self, tmp_path: Path) -> None:
-        """A reference in one file resolves against values from every file
-        in the cascade, whatever their order.
+        """A reference resolves against a value defined in an EARLIER cascade file.
+
+        Order matters: the reverse arrangement resolves to "" instead — see
+        ``test_cross_file_forward_reference_resolves_to_empty`` below.
         """
         (tmp_path / ".env").write_text("HOST=db.internal\n")
         (tmp_path / ".env.local").write_text("URL=postgres://${HOST}/app\n")
 
         layer = read_env_files(env="dev", env_dir=tmp_path)
         assert layer.values["URL"] == "postgres://db.internal/app"
+
+    def test_cross_file_forward_reference_resolves_to_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """The mirror image of the test above: a reference to a key defined
+        in a LATER cascade file does NOT see that file's value.
+
+        `_interpolate` walks the merged mapping in order, seeding its base
+        from os.environ and adding each key only once resolved, so a file
+        value's reference sees earlier keys only. Merge order and reference
+        order are the same ordering, which makes file layout semantically
+        load-bearing: swapping which file defines HOST and which consumes it
+        changes the result even though the merged key set is identical.
+
+        The forward reference falls through to os.environ, which is why HOST
+        is unset here — that fallthrough is the documented behavior, and ""
+        is what it produces when the name is absent there too. Note this is
+        the FILE-VALUE rule specifically: a `${VAR}` in a string field
+        default resolves against the fully merged cascade with no ordering
+        restriction (see the string-default interpolation tests).
+
+        Pinned because the failure is silent — `postgres://${HOST}/app`
+        becomes `postgres:///app` with no warning. A future refactor that
+        split merge and interpolate, or resolved file values in two passes,
+        would "fix" this into a behavior change that diverges from
+        python-dotenv without any test objecting.
+        """
+        monkeypatch.delenv("HOST", raising=False)
+        # Reversed against the test above: the consumer is now the earlier file.
+        (tmp_path / ".env").write_text("URL=postgres://${HOST}/app\n")
+        (tmp_path / ".env.local").write_text("HOST=db.internal\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+
+        assert layer.values["URL"] == "postgres:///app"
+        assert layer.values["HOST"] == "db.internal"
+
+    def test_loading_guide_documents_the_forward_reference_restriction(self) -> None:
+        """The loading guide must keep saying that file-value references look backwards.
+
+        A file value's `${VAR}` resolves progressively, so a forward or self
+        reference falls through to os.environ and becomes "" when it is not
+        there (see the two tests above). A guide that describes the file-value
+        base without that restriction reads as a promise that merge order does
+        not matter, and a reader who writes the forward case gets a silent
+        empty substitution.
+
+        A docs assertion rather than a prose review because the divergence is
+        invisible to every other test in the suite: the code is correct, so
+        nothing fails when the prose drifts away from it. Asserts on the
+        RESTRICTION being described, not on any particular sentence — the
+        guide may be reworded freely, but not have the caveat dropped.
+        """
+        guide = Path(__file__).parent.parent / "docs" / "guides" / "loading.md"
+        text = guide.read_text()
+
+        assert "### Variable Interpolation" in text, "interpolation section moved or was renamed"
+        assert "forward or self reference" in text, (
+            "docs/guides/loading.md no longer documents that a file value's ${VAR} "
+            "reference resolves only against keys defined EARLIER in the merged "
+            "order. Without that caveat the guide implies merge order is irrelevant, "
+            "while a forward reference silently falls through to os.environ and "
+            "becomes '' when unset."
+        )
 
     def test_merged_layer_beats_process_env_in_the_interpolation_base(
         self, tmp_path: Path, monkeypatch

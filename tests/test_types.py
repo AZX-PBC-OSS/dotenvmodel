@@ -345,6 +345,22 @@ class TestSecretStrType:
         secret_set = {secret}
         assert secret in secret_set
 
+    def test_secret_str_rejects_nested_secret_str(self) -> None:
+        """Constructing from another SecretStr raises instead of nesting."""
+        with pytest.raises(TypeError, match="SecretStr"):
+            SecretStr(SecretStr("inner"))  # type: ignore[arg-type]
+
+    def test_secret_str_rejects_non_str_input(self) -> None:
+        """Non-str construction input raises, naming the offending type."""
+        with pytest.raises(TypeError, match="int"):
+            SecretStr(123)  # type: ignore[arg-type]
+
+    def test_get_secret_value_always_returns_str(self) -> None:
+        """The construction guard keeps get_secret_value()'s return a str."""
+        unwrapped = SecretStr("round-trip").get_secret_value()
+        assert isinstance(unwrapped, str)
+        assert SecretStr(unwrapped).get_secret_value() == "round-trip"
+
     def test_secret_str_with_validation(self) -> None:
         """Test SecretStr with min_length validation."""
 

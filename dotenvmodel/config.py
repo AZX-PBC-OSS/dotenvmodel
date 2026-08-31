@@ -1,13 +1,14 @@
 """DotEnvConfig base class for configuration management."""
 
 import builtins
+import inspect
 import logging
 import os
 from collections import ChainMap
 from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any, ClassVar, Literal, Self, cast
+from typing import Any, ClassVar, Literal, Self, cast, get_origin
 
 from typing_extensions import TypeForm
 
@@ -80,6 +81,8 @@ def _run_sensitive_validator(
     is_optional: bool,
     name: str,
     context: ValidatorContext,
+    *,
+    rewrap_result: bool = True,
 ) -> Any:
     """Run a validator hook for a sensitive-typed field.
 
@@ -90,7 +93,9 @@ def _run_sensitive_validator(
     ``validator=<name>`` constraint and message. The masked error is raised
     outside the ``except`` block with ``__cause__``/``__context__`` cleared
     (an empty chain). A plain-``str`` return value is re-wrapped in the
-    declared type so the secret stays masked in ``repr``.
+    declared type so the secret stays masked in ``repr`` — unless
+    ``rewrap_result`` is False, for ``mode="before"`` decorator hooks whose
+    raw-string result must flow on to the strip/coerce pipeline.
 
     Note:
         Traceback frame locals across the load path still reference the live
@@ -107,7 +112,7 @@ def _run_sensitive_validator(
         # str subclass and an instance of the declared type (passes through).
         # Only a bare str gets (re-)constructed — a ValueError from DSN
         # construction is caught below and masked.
-        if isinstance(result, str) and not isinstance(result, unwrapped_type):
+        if rewrap_result and isinstance(result, str) and not isinstance(result, unwrapped_type):
             result = unwrapped_type(result)
     except Exception:
         # Carry nothing over from the hook exception — message, constraint, or
@@ -192,12 +197,18 @@ def _run_field_validator(
     field_type: TypeForm[Any],
     validator: Callable[[Any, ValidatorContext], Any],
     env_var_name: str,
+    *,
+    rewrap_result: bool = True,
 ) -> Any:
-    """Run a field's custom ``validator`` hook and return the final value.
+    """Run one field validator hook (inline or decorator-attached) and return its result.
 
-    The hook receives the coerced, built-in-constraint-validated value plus a
-    ``ValidatorContext``; its return value replaces the field value (built-in
-    constraints are not re-run on a transformed value).
+    The hook receives the value plus a ``ValidatorContext``; its return value
+    replaces the value for the next pipeline stage. For the inline
+    ``validator=`` hook and ``mode="after"`` decorator hooks the value is the
+    coerced, built-in-constraint-validated one and a bare-``str`` result is
+    re-wrapped in a declared sensitive type; ``mode="before"`` decorator hooks
+    pass the raw external string with ``rewrap_result=False`` so their result
+    stays raw for the strip/coerce pipeline.
 
     Masking is decided by the declared type (Optional-unwrapped), not by
     ``isinstance(value)``, so a default-path value that has not been wrapped
@@ -229,6 +240,7 @@ def _run_field_validator(
             is_optional,
             name,
             context,
+            rewrap_result=rewrap_result,
         )
     return _run_plain_validator(
         field_name,
@@ -239,6 +251,68 @@ def _run_field_validator(
         name,
         context,
         unwrapped_type,
+    )
+
+
+def _typed_before_hook_result(
+    field_name: str,
+    value: Any,
+    field_type: TypeForm[Any],
+    env_var_name: str,
+) -> Any:
+    """Adopt a non-``str`` raw value coming out of the before-hook pipeline.
+
+    ``None`` keeps its Optional meaning. A value already of the field's
+    Optional-unwrapped declared type — with parameterized generics such as
+    ``list[str]`` matched by their origin — is used as-is: re-coercing a
+    typed value would at best rebuild it and at worst die on a string-only
+    method (``bool`` has no ``lower``, ``list`` no ``split``, ``UUID`` no
+    ``replace``). ``Any`` names no concrete type to instance-check against,
+    so it adopts nothing either. Every other non-``str`` value is a
+    hook-contract violation and fails with the library's coercion error,
+    never a bare ``AttributeError`` from inside a coercer.
+
+    Raises:
+        TypeCoercionError: If the value is neither ``None`` nor an instance
+            of the declared type.
+    """
+    if value is None:
+        # None returns were already gated to Optional fields by the hook
+        # runner; coercion would only map None to None again.
+        return None
+    declared = unwrap_optional(field_type)
+    origin = get_origin(declared)
+    # str() keeps parameterized names (list[str]) readable in the error;
+    # GenericAlias.__name__ degrades them to the bare origin (list).
+    declared_name = (
+        str(declared) if origin is not None else getattr(declared, "__name__", str(declared))
+    )
+    if inspect.isclass(origin):
+        # list[str] and friends are not classes; an already-shaped
+        # collection is accepted by its origin, elements untouched.
+        declared = origin
+    if inspect.isclass(declared) and declared is not Any:
+        try:
+            if isinstance(value, declared):
+                return value
+        except TypeError:
+            # Special typing forms can pass inspect.isclass yet reject
+            # isinstance (Any does); a non-match must reach the coercion
+            # error below, never escape as a bare internal TypeError.
+            pass
+    raise TypeCoercionError(
+        field_name=field_name,
+        # Masking is decided by the declared type, like every other hook
+        # error path: a value returned for a sensitive field may itself
+        # carry a secret even though it is the wrong type.
+        value=_masked_report_value(value) if is_sensitive_type(field_type) else value,
+        error_msg=(
+            f"non-str value of type {type(value).__name__} for a field declared "
+            f"{declared_name}; a before-hook must return the raw str or a value "
+            f"already typed as the declared type"
+        ),
+        field_type=field_type,
+        env_var_name=env_var_name,
     )
 
 
@@ -542,17 +616,39 @@ class DotEnvConfig(metaclass=ConfigMeta):
                                 error_msg=_mask_template_resolution(err.error_msg, value),
                             ) from None
         else:
-            # Strip string-like raw values before coercion. This is value
-            # processing, not validation — it runs regardless of the
-            # validate flag, so min_length etc. see the final string.
-            if is_string_like_type(field_type):
-                strip_mode = field_info.strip
-                if strip_mode is None:
-                    strip_mode = type(self).strip_strings
-                raw_value = apply_strip(raw_value, strip_mode)
+            # Decorator before-hooks run on the raw external value, ahead of
+            # the built-in strip and coercion. A str result feeds the normal
+            # strip/coerce path below; a non-str result is adopted directly
+            # when it already matches the field's declared type (see
+            # _typed_before_hook_result). They never see field defaults —
+            # defaults are author-controlled values, not external input
+            # needing normalization — and they run regardless of the
+            # validate flag, like strip itself. Sensitive fields mask hook
+            # failures here too: a before-hook sees the raw plaintext string.
+            for hook in field_info.before_validators:
+                raw_value = _run_field_validator(
+                    field_name,
+                    raw_value,
+                    field_type,
+                    hook.resolve(self),
+                    env_var_name,
+                    rewrap_result=False,
+                )
 
-            # Coerce the string value to the target type
-            value = coerce_value(field_name, raw_value, field_type, env_var_name, field_info)
+            if isinstance(raw_value, str):
+                # Strip string-like raw values before coercion. This is value
+                # processing, not validation — it runs regardless of the
+                # validate flag, so min_length etc. see the final string.
+                if is_string_like_type(field_type):
+                    strip_mode = field_info.strip
+                    if strip_mode is None:
+                        strip_mode = type(self).strip_strings
+                    raw_value = apply_strip(raw_value, strip_mode)
+
+                # Coerce the string value to the target type
+                value = coerce_value(field_name, raw_value, field_type, env_var_name, field_info)
+            else:
+                value = _typed_before_hook_result(field_name, raw_value, field_type, env_var_name)
 
             # Check if coercion resulted in None for a required field
             if value is None and field_info.required:
@@ -585,12 +681,21 @@ class DotEnvConfig(metaclass=ConfigMeta):
                         error_msg=_mask_template_resolution(err.error_msg, str(value)),
                     ) from None
 
-        # Custom validator hook: runs even when validate=False (it may
+        # Custom validator hooks: runs even when validate=False (they may
         # transform the value — transformation is part of loading, not
-        # validation), but never on None values.
+        # validation), but never on None values. The inline
+        # Field(validator=...) hook runs first, then @field_validator
+        # decorator hooks in definition order; a hook returning None (valid
+        # only for Optional fields) ends the chain.
         if field_info.validator is not None and value is not None:
             value = _run_field_validator(
                 field_name, value, field_type, field_info.validator, env_var_name
+            )
+        for hook in field_info.after_validators:
+            if value is None:
+                break
+            value = _run_field_validator(
+                field_name, value, field_type, hook.resolve(self), env_var_name
             )
 
         return value

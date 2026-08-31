@@ -16,7 +16,7 @@
 - **.env.example Generation**: Automatically generate `.env.example` files with type hints, constraints, and examples
 - **File Export**: Save documentation directly to files for integration with build tools and wikis
 - **Environment Prefixes**: Class-level `env_prefix` to namespace environment variables
-- **Validation**: Numeric constraints (ge, le, gt, lt), string constraints (min_length, max_length, regex, starts_with, ends_with), choice validation, custom validator hooks, a model-level `post_load` hook for cross-field validation, and collection size constraints (min_items, max_items)
+- **Validation**: Numeric constraints (ge, le, gt, lt), string constraints (min_length, max_length, regex, starts_with, ends_with), choice validation, custom validator hooks — inline `Field(validator=...)` or the `@field_validator` decorator with before/after modes — a model-level `post_load` hook for cross-field validation, and collection size constraints (min_items, max_items)
 - **String Stripping**: Per-field and class-level whitespace/char-set/regex stripping of raw values before coercion
 - **Clear Error Messages**: Helpful validation errors that guide you to fixes
 - **Optional Logging**: Built-in logging support to debug configuration loading
@@ -504,6 +504,8 @@ Semantics to know:
 - Returning `None` on a non-`Optional` field raises `TypeCoercionError`.
 - For sensitive fields, **any** exception from the hook is masked to a generic `ConstraintViolationError` with no exception chaining — the hook's message is never embedded, so a carelessly written hook can't leak the secret. For non-sensitive fields, `str(e)` is embedded in the error message and the original exception is chained.
 - Raise `ConstraintViolationError` directly for a fully custom message on non-sensitive fields (it passes through untouched).
+
+Longer logic, several hooks per field, or normalization of the raw string before coercion? The `@field_validator("field_name")` decorator attaches hooks by name with `mode="before"`/`"after"` — see the [validation guide](docs/guides/validation.md#decorator-validators-field_validator) for modes, ordering, callable forms, and inheritance.
 
 ### Cross-Field Validation with `post_load`
 

@@ -1,18 +1,22 @@
 """Field descriptor and Required sentinel for dotenvmodel."""
 
 import copy
+import inspect
 import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
-from typing import Any, TypeVar
+from typing import Any, Literal, TypeVar
 from uuid import UUID
 
 from dotenvmodel.types import BaseDsn, SecretStr
 
 # Type variable for generic field types
 T = TypeVar("T")
+
+# Type of a callable decorated by @field_validator, preserved as-is
+_F = TypeVar("_F", bound=Callable[..., Any])
 
 
 class _MissingSentinel:
@@ -97,6 +101,229 @@ def _validator_name(fn: Callable[..., Any]) -> str:
     so rendering is consistent across ``FieldInfo.__repr__`` and error paths.
     """
     return getattr(fn, "__name__", type(fn).__name__)
+
+
+# Attribute the @field_validator decorator places on its target. The metaclass
+# reads it from the class namespace to wire hooks onto fields.
+_VALIDATOR_SPECS_ATTR = "__dotenvmodel_field_validator_specs__"
+
+
+@dataclass(frozen=True)
+class _ValidatorSpec:
+    """One ``@field_validator`` registration placed on a callable."""
+
+    field_name: str
+    mode: Literal["before", "after"]
+
+
+def field_validator(
+    field_name: str, /, *, mode: Literal["before", "after"] = "after"
+) -> Callable[[_F], _F]:
+    """Register a method as a custom validation/transformation hook for one field.
+
+    Apply inside a `DotEnvConfig` subclass; the metaclass attaches the
+    decorated callable to the named field. The hook receives
+    ``(value, ctx)`` — the same contract as `Field(validator=...)` — and its
+    return value feeds the next pipeline stage.
+
+    When to use:
+        - When the validation logic is too long to sit inline in `Field(...)`
+        - To attach several hooks to one field (stacking the decorator also
+          registers one method for several fields)
+        - To normalize the raw external string before built-in `strip` and
+          type coercion (`mode="before"`)
+
+    Supported callable forms (the receiver is detected from the first
+    positional parameter name):
+        - plain method: `def hook(self, value, ctx)` — bound to the instance
+        - `@classmethod`: `def hook(cls, value, ctx)` — bound to the class
+        - `@staticmethod` or module-level function: `def hook(value, ctx)` —
+          no receiver; a module-level function is decorated at module level
+          and assigned inside the class body
+
+    Modes:
+        - `mode="after"` (default): identical semantics to
+          `Field(validator=...)` — runs on the coerced,
+          built-in-constraint-validated value, may transform it (built-ins
+          are not re-run), never runs on `None`, and runs even with
+          `validate=False`. When both an inline `Field(validator=...)` and
+          after-mode hooks exist, the inline hook runs first, then decorator
+          hooks in definition order.
+        - `mode="before"`: runs on the raw external value (the environment
+            or `load_from_dict` string) before built-in `strip` and before
+            type coercion, and may replace it — a `str` return re-enters the
+            built-in strip and coercion, while a non-str return already
+            typed as the field's declared type is used as-is (any other
+            non-str return raises `TypeCoercionError`). Not applied to
+            field defaults (defaults are author-controlled values, not
+            external input needing normalization). Also runs with
+            `validate=False`.
+
+    Errors and secrets:
+        A `ValueError`/`TypeError` raised by the hook is wrapped in
+        `ConstraintViolationError` (`constraint="validator=<method name>"`)
+        in either mode; other exceptions propagate unchanged. For sensitive
+        fields (`SecretStr`, DSN types) any failure is masked generically —
+        including `mode="before"` hooks, which see the raw plaintext — so
+        the secret cannot leak through the hook's error text.
+
+    Inheritance:
+        Hooks are inherited. Redefining a same-named method in a subclass
+        replaces that hook (redefining it without the decorator removes it);
+        the parent class's hooks are never affected. Hooks survive a field
+        being redeclared with a fresh `Field(...)`.
+
+    Args:
+        field_name: Name of the field the hook attaches to. The field must
+            exist (on this class or a base) at class definition time, or
+            class creation raises `ValueError`.
+        mode: When the hook runs — `"before"` strip/coercion, or `"after"`
+            coercion and built-in constraints (default).
+
+    Raises:
+        TypeError: If `field_name` is not a `str`, or the decorated target is
+            not callable or does not support attribute assignment.
+        ValueError: If `mode` is not `"before"` or `"after"`, or the named
+            field does not exist on the class being defined.
+
+    Example:
+        ```python
+        import logging
+
+        from dotenvmodel import DotEnvConfig, Field, ValidatorContext, field_validator
+
+
+        class AppConfig(DotEnvConfig):
+            log_level: str = Field(default="ERROR", strip=True)
+
+            @field_validator("log_level", mode="before")
+            def uppercase_log_level(self, value: str, ctx: ValidatorContext) -> str:
+                return value.upper()
+
+            @field_validator("log_level")
+            def convert_to_logging_int(self, value: str, ctx: ValidatorContext) -> int:
+                return logging.getLevelNamesMapping().get(value, logging.ERROR)
+        ```
+
+    See Also:
+        - [`Field`][dotenvmodel.fields.Field]: The inline single-hook form
+          via `validator=`.
+        - [`ValidatorContext`][dotenvmodel.fields.ValidatorContext]: The
+          context argument every hook receives.
+    """
+    if not isinstance(field_name, str):
+        raise TypeError(f"field_name must be str, got {type(field_name).__name__}")
+    if mode not in ("before", "after"):
+        raise ValueError(f"mode must be 'before' or 'after', got {mode!r}")
+    spec = _ValidatorSpec(field_name=field_name, mode=mode)
+
+    def decorator(fn: _F) -> _F:
+        # The marker lives on the underlying function so the metaclass finds
+        # it whichever order @field_validator and @staticmethod/@classmethod
+        # were applied in. Callability is checked on the unwrapped target —
+        # a bare classmethod object is not callable on every supported
+        # Python version. The isinstance checks run against the Any-typed
+        # alias so the decorated value's own type flows through unchanged.
+        target: Any = fn
+        if isinstance(target, (staticmethod, classmethod)):
+            target = target.__func__
+        if not callable(target):
+            raise TypeError(f"@field_validator target must be callable, got {type(fn).__name__}")
+        specs = getattr(target, _VALIDATOR_SPECS_ATTR, None)
+        if specs is None:
+            specs = []
+            try:
+                setattr(target, _VALIDATOR_SPECS_ATTR, specs)
+            except AttributeError as e:
+                raise TypeError(
+                    "@field_validator target must support attribute assignment "
+                    "(plain functions, methods, staticmethod/classmethod, and "
+                    f"functools.partial do), got {type(fn).__name__}"
+                ) from e
+        specs.append(spec)
+        return fn
+
+    return decorator
+
+
+def _hook_bind(func: Callable[..., Any]) -> Literal["instance", "class", "none"]:
+    """Decide how a decorated hook callable receives its receiver.
+
+    The first positional parameter's name is the convention: ``self`` binds
+    the loading instance, ``cls`` binds the config class, and anything else
+    — including callables with no inspectable signature — is called with
+    just ``(value, ctx)``, the `@staticmethod`/module-function form.
+
+    Args:
+        func: The unwrapped callable the decorator marked
+
+    Returns:
+        The binding form for `DotEnvConfig` hook dispatch
+    """
+    try:
+        signature = inspect.signature(func)
+    except (TypeError, ValueError):
+        return "none"
+    positional = [
+        param
+        for param in signature.parameters.values()
+        if param.kind
+        in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+    ]
+    if not positional:
+        return "none"
+    first = positional[0].name
+    if first == "self":
+        return "instance"
+    if first == "cls":
+        return "class"
+    return "none"
+
+
+@dataclass(frozen=True)
+class _ValidatorHook:
+    """A `@field_validator` hook attached to a field, with its binding form.
+
+    Instances are built by the metaclass and live on
+    `FieldInfo.before_validators` / `FieldInfo.after_validators`.
+    """
+
+    method_name: str
+    func: Callable[..., Any]
+    bind: Literal["instance", "class", "none"]
+
+    def resolve(self, instance: Any) -> Callable[[Any, ValidatorContext], Any]:
+        """Return the hook as a plain ``(value, ctx) -> value`` callable.
+
+        The receiver is bound per the detected form: the loading instance
+        for ``self`` methods, the config class for ``cls`` methods, and
+        nothing for static/module-function forms.
+        """
+        receiver: Any = None
+        if self.bind == "instance":
+            receiver = instance
+        elif self.bind == "class":
+            receiver = type(instance)
+        return _BoundValidatorHook(self.func, receiver, self.method_name)
+
+
+class _BoundValidatorHook:
+    """Adapter calling a decorator-attached hook as ``(value, ctx) -> value``.
+
+    Carries the method name as ``__name__`` so error rendering shows
+    ``validator=<method name>``, exactly like the inline
+    `Field(validator=...)` path.
+    """
+
+    def __init__(self, func: Callable[..., Any], receiver: Any, name: str) -> None:
+        self._func = func
+        self._receiver = receiver
+        self.__name__ = name
+
+    def __call__(self, value: Any, context: ValidatorContext) -> Any:
+        if self._receiver is None:
+            return self._func(value, context)
+        return self._func(self._receiver, value, context)
 
 
 # Immutable default types are handed out as-is: sharing them is safe.
@@ -188,6 +415,10 @@ class FieldInfo:
         strip: Strip mode for string values (bool, char-set str, or re.Pattern)
         choices: List of allowed values
         validator: Custom validation/transformation hook
+        before_validators: `field_validator(mode="before")` hooks attached to
+            this field (wired by the metaclass, not settable via `Field()`)
+        after_validators: `field_validator(mode="after")` hooks attached to
+            this field (wired by the metaclass, not settable via `Field()`)
         min_items: Minimum items in a collection
         max_items: Maximum items in a collection
         uuid_version: Required UUID version (1, 3, 4, or 5)
@@ -217,6 +448,8 @@ class FieldInfo:
     strip: bool | str | re.Pattern[str] | None
     choices: list[Any] | None
     validator: Callable[[Any, ValidatorContext], Any] | None
+    before_validators: list[_ValidatorHook]
+    after_validators: list[_ValidatorHook]
     min_items: int | None
     max_items: int | None
     uuid_version: int | None
@@ -366,6 +599,11 @@ class FieldInfo:
 
         # Custom validation hook
         self.validator = validator
+
+        # Decorator (@field_validator) hooks; the metaclass fills these in.
+        # Inline Field(validator=...) stays the single hook settable here.
+        self.before_validators: list[_ValidatorHook] = []
+        self.after_validators: list[_ValidatorHook] = []
 
         # Collection constraints
         self.min_items = min_items
@@ -643,6 +881,8 @@ def Field(
     See Also:
         - [`Required`][dotenvmodel.fields.Required]: Sentinel for required fields.
         - [`FieldInfo`][dotenvmodel.fields.FieldInfo]: The class returned by `Field()`.
+        - [`field_validator`][dotenvmodel.fields.field_validator]: Decorator form
+          for attaching hooks by field name, with before/after modes.
     """
     return FieldInfo(
         default=default,

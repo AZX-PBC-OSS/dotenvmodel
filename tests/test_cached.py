@@ -217,6 +217,88 @@ class TestCached:
         assert third is first
         assert repeats_reported == []
 
+    def test_warm_cached_survives_an_unresolvable_ambient_env(self, monkeypatch, caplog) -> None:
+        """A stray ambient ENV must not break a warm cached() whose args are ignored anyway.
+
+        The warm path resolves the caller's arguments ONLY to compare them with the
+        recorded LoadParams for the disagreement warning. `resolve_env_name` rejects
+        `ENV="../etc"` with ValueError (the path-traversal guard), so without the
+        swallow a process that acquired a bad ambient ENV after the cache warmed would
+        start raising from a call the contract says ignores its arguments entirely.
+
+        This is the documented, correct half of the `except (OSError, ValueError)` at
+        caching.py:241 — pinned so a future narrowing of that handler keeps it.
+        """
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        warm = Config.cached()
+
+        monkeypatch.setenv("ENV", "../etc")
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            assert Config.cached() is warm
+            # Unresolvable means nothing to compare, so nothing to report either.
+            assert [r for r in caplog.records if "arguments were ignored" in r.message] == []
+
+    def test_warm_cached_records_the_swallowed_resolution_failure_at_debug(
+        self, monkeypatch, caplog
+    ) -> None:
+        """Swallowed does not mean invisible: the discarded error is logged at DEBUG.
+
+        Silence is right for callers — the warm path ignores its arguments by
+        contract — but a swallow with no trace at any level leaves someone debugging
+        a mysteriously quiet cached() with nothing to find. DEBUG keeps normal
+        operation silent while making the discarded exception recoverable on demand.
+        """
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        warm = Config.cached()
+
+        monkeypatch.setenv("ENV", "../etc")
+        with caplog.at_level("DEBUG", logger="dotenvmodel"):
+            caplog.clear()
+            assert Config.cached() is warm
+
+        swallowed = [r for r in caplog.records if "could not be resolved" in r.message]
+        assert len(swallowed) == 1
+        assert swallowed[0].levelname == "DEBUG"
+        # exc_info is what makes the discarded ValueError recoverable at all.
+        assert swallowed[0].exc_info is not None
+
+    def test_warm_cached_swallow_does_not_extend_over_the_warning_itself(self, monkeypatch) -> None:
+        """The swallow covers the resolution only, never the reporting.
+
+        The handler exists for a deleted cwd (OSError) and a stray ambient ENV
+        (ValueError) during `resolve_load_params` — see the test above. Extending it
+        over `logger.warning(...)` would also swallow a failure raised while REPORTING
+        a disagreement, erasing the diagnostic at the one moment it was about to be
+        emitted, and leaving a formatting bug in that 11-argument call site permanently
+        invisible.
+
+        Simulated by making the logging call itself raise, which is what such a bug
+        would do. The assertion is that it PROPAGATES: a broken warning is a real
+        defect and must be loud, unlike an unresolvable argument set the warm path
+        is contractually free to ignore.
+        """
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        Config.cached()
+
+        def _explode(*args: object, **kwargs: object) -> None:
+            raise ValueError("formatting bug in the disagreement warning")
+
+        monkeypatch.setattr("dotenvmodel.caching.logger.warning", _explode)
+
+        # Arguments that DO disagree, so the warning path is genuinely reached.
+        with pytest.raises(ValueError, match="formatting bug"):
+            Config.cached(env="prod", override=True, env_dir=Path("/tmp"))
+
     def test_a_bare_reload_keeps_the_precedence_the_cache_was_loaded_with(
         self, monkeypatch, caplog
     ) -> None:

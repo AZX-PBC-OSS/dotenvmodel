@@ -35,6 +35,9 @@ class SecretStr:
         - Name-mangled attribute to prevent accidental access
         - Prevents pickling to avoid serialization leaks
         - Immutable to prevent modification after creation
+        - Constructed only from `str` (anything else raises `TypeError`),
+          so a `SecretStr` can never nest inside another and
+          `get_secret_value()` always returns `str`
 
     Example:
         ```python
@@ -59,6 +62,11 @@ class SecretStr:
     __secret: str
 
     def __init__(self, value: str) -> None:
+        # Anything but str — most importantly another SecretStr — would nest
+        # silently: get_secret_value() would then return the inner object
+        # instead of a str, breaking every str-assuming consumer far away.
+        if not isinstance(value, str):
+            raise TypeError(f"SecretStr must be constructed with str, got {type(value).__name__}")
         object.__setattr__(self, "_SecretStr__secret", value)
 
     def get_secret_value(self) -> str:

@@ -209,6 +209,11 @@ def acquire_cached(
             # they cannot even be resolved — the process cwd was deleted, a
             # stray ambient ENV is invalid — there is nothing to judge and
             # the cached instance is returned silently.
+            #
+            # The handler wraps ONLY the resolution. Extending it over the
+            # comparison and the logger.warning() call below would swallow a
+            # failure in the reporting itself, erasing the diagnostic at the
+            # one moment it was about to be emitted.
             try:
                 requested = resolve_load_params(
                     env,
@@ -217,29 +222,36 @@ def acquire_cached(
                     read_dotfiles=read_dotfiles,
                     load_local=load_local,
                 )
-                loaded = cached.loaded_with()
-                if requested != loaded:
-                    logger.warning(
-                        "cached() called on %s: this call's resolved configuration "
-                        "(env=%r, override=%r, env_dir=%r, read_dotfiles=%r, "
-                        "load_local=%r) differs from the LoadParams recorded on "
-                        "the cached instance (env=%r, override=%r, env_dir=%r, "
-                        "read_dotfiles=%r, load_local=%r); arguments were ignored "
-                        "and the cached instance was returned.",
-                        cls.__name__,
-                        requested.env,
-                        requested.override,
-                        requested.env_dir,
-                        requested.read_dotfiles,
-                        requested.load_local,
-                        loaded.env,
-                        loaded.override,
-                        loaded.env_dir,
-                        loaded.read_dotfiles,
-                        loaded.load_local,
-                    )
             except (OSError, ValueError):
-                pass
+                logger.debug(
+                    "cached() called on %s: arguments could not be resolved for the "
+                    "disagreement check; they are ignored on the warm path either way.",
+                    cls.__name__,
+                    exc_info=True,
+                )
+                return cached
+
+            loaded = cached.loaded_with()
+            if requested != loaded:
+                logger.warning(
+                    "cached() called on %s: this call's resolved configuration "
+                    "(env=%r, override=%r, env_dir=%r, read_dotfiles=%r, "
+                    "load_local=%r) differs from the LoadParams recorded on "
+                    "the cached instance (env=%r, override=%r, env_dir=%r, "
+                    "read_dotfiles=%r, load_local=%r); arguments were ignored "
+                    "and the cached instance was returned.",
+                    cls.__name__,
+                    requested.env,
+                    requested.override,
+                    requested.env_dir,
+                    requested.read_dotfiles,
+                    requested.load_local,
+                    loaded.env,
+                    loaded.override,
+                    loaded.env_dir,
+                    loaded.read_dotfiles,
+                    loaded.load_local,
+                )
         return cached
 
     loading = _get_loading_set()
