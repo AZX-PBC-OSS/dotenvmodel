@@ -17,7 +17,33 @@ _KNOB_ENV_VARS = (
     "DOTENV_DIR",
     "DOTENV_OVERRIDE",
     "DOTENV_READ_DOTFILES",
+    "DOTENV_READ_ENVIRON",
     "DOTENV_LOAD_LOCAL",
+)
+
+# Env vars that tests use as field lookups but that distro profiles,
+# containers, or developer shells commonly set. NAME is derived from the
+# hostname by Debian/WSL profiles (verified: it broke the interpolation
+# suite on such a machine by beating a field's default template), PORT and
+# HOST come from container/PaaS conventions, and the rest are typical
+# local-dev exports. An ambient value here silently overrides the dotfile
+# value or default the test means to exercise, so they are scrubbed like
+# the knobs above.
+_AMBIENT_FIELD_ENV_VARS = (
+    "API_KEY",
+    "BASE_URL",
+    "DATABASE_URL",
+    "DEBUG",
+    "ENVIRONMENT",
+    "HOST",
+    "LOG_LEVEL",
+    "NAME",
+    "PASSWORD",
+    "PORT",
+    "REDIS_URL",
+    "TIMEOUT",
+    "TOKEN",
+    "WORKERS",
 )
 
 
@@ -47,20 +73,25 @@ def _all_dotenv_subclasses() -> Iterator[type[DotEnvConfig]]:
 
 @pytest.fixture(autouse=True)
 def _isolate_environ() -> Iterator[None]:
-    """Snapshot ``os.environ`` around every test and scrub the ``DOTENV_*`` knobs.
+    """Snapshot ``os.environ`` around every test and scrub ambient hazards.
 
-    The load() behavior channel (explicit argument > environment variable >
-    default) means a stray ``ENV`` / ``DOTENV_DIR`` / ``DOTENV_OVERRIDE`` /
-    ``DOTENV_READ_DOTFILES`` / ``DOTENV_LOAD_LOCAL`` in the ambient
-    environment — a developer's shell, a CI runner, or a previous test that
-    forgot to clean up — would silently flip precedence or file discovery
-    for every test after it. Popping the knobs at setup makes each test
-    start from the documented defaults; restoring the exact pre-test
-    snapshot at teardown keeps any mid-test mutation (raw ``os.environ``
-    writes, subprocess helpers) from leaking onward.
+    Two classes of ambient value are scrubbed at setup:
 
-    ``monkeypatch`` users are unaffected: its own undo runs against the
-    same snapshot semantics, and this fixture never re-adds anything the
+    - The load() behavior knobs (``ENV`` / ``DOTENV_*``): the documented
+      channel is explicit argument > environment variable > default, so a
+      stray knob in the ambient environment — a developer's shell, a CI
+      runner, or a previous test that forgot to clean up — would silently
+      flip precedence or file discovery for every test after it.
+    - Field-name collisions (``_AMBIENT_FIELD_ENV_VARS``): a distro profile
+      can export ``NAME`` (derived from the hostname), a container
+      ``PORT``/``HOST``, a dev shell ``DEBUG``/``DATABASE_URL`` — any of
+      which silently overrides the dotfile value or default a test means
+      to exercise.
+
+    Restoring the exact pre-test snapshot at teardown keeps any mid-test
+    mutation (raw ``os.environ`` writes, subprocess helpers) from leaking
+    onward. ``monkeypatch`` users are unaffected: its own undo runs against
+    the same snapshot semantics, and this fixture never re-adds anything the
     test did not leave behind.
     """
     yield from _snapshot_and_restore_environ()
@@ -79,7 +110,7 @@ def _snapshot_and_restore_environ() -> Iterator[None]:
     ``StopIteration``.
     """
     before = dict(os.environ)
-    for var in _KNOB_ENV_VARS:
+    for var in (*_KNOB_ENV_VARS, *_AMBIENT_FIELD_ENV_VARS):
         os.environ.pop(var, None)
     yield
     os.environ.clear()

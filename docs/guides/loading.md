@@ -10,31 +10,29 @@ dotenvmodel provides flexible configuration loading from environment variables a
 2. **Merged dotfile cascade** — the `.env` files, merged with later files winning
 3. **Field default** — the `Field(default=...)` value
 
-By default (`override=False`), the process environment wins: a real `DATABASE_URL` beats whatever the `.env` files say. With `override=True` (or `DOTENV_OVERRIDE=true`), the merged dotfile layer wins instead — the pre-0.7 precedence, now explicit and opt-in.
+By default (`override=False`), the process environment wins: a real `DATABASE_URL` beats whatever the `.env` files say. With `override=True` (or `DOTENV_OVERRIDE=true`), the merged dotfile layer wins instead. The first layer can also be turned off entirely — `read_environ=False` (or `DOTENV_READ_ENVIRON=false`) removes the process environment from the lookup (see [The `read_environ` Parameter](#the-read_environ-parameter)).
 
 | Mode | Lookup order |
 |------|--------------|
 | `override=False` (default) | process env → dotfiles → field default |
 | `override=True` | dotfiles → process env → field default |
+| `read_environ=False` | dotfiles → field default |
 
 The `.env` cascade is merged once per load (later, more specific files win within the file layer), and the override policy is applied once against the whole merged layer — the same model Vite and Next.js use.
 
-!!! warning "Breaking change: `load()` no longer mutates `os.environ`"
+!!! info "`load()` never mutates `os.environ`"
 
-    Through 0.6.3, `load()` injected every dotfile value into the process environment via python-dotenv's `load_dotenv()` — so dotfiles beat real env vars by default, `monkeypatch.setenv` was defeated in tests, and injected values leaked into everything else the process did. As of 0.7.0, loading is a pure read. If you relied on the side effect (for example, other libraries reading `os.environ` after your config load), call python-dotenv yourself:
+    Loading is a pure read: dotfile values resolve inside the config instance only and are never injected into the process environment. If another part of your process needs the values in `os.environ` (a library that reads the environment directly, for example), inject them yourself.
+
+    With python-dotenv, under your own precedence policy:
 
     ```python
     from dotenv import load_dotenv
 
-    load_dotenv("/app/config/.env", override=True)  # explicit injection, your policy
+    load_dotenv("/app/config/.env", override=True)
     ```
 
-    Two more changes from the same release:
-
-    - **`load_env_files()` was removed.** Use `read_env_files()` — the pure reader that returns the merged cascade as a `DotenvLayer` — or python-dotenv's `load_dotenv()`.
-    - **`loaded_with()` returns a `LoadParams`.** Unpack with `p.env, p.override, p.env_dir, p.read_dotfiles, p.load_local`, or use attribute access (`p.override`, `p.load_local`, ...).
-
-    To reproduce the full old injection behavior with the reader:
+    Or with `read_env_files()`, the pure reader that returns the merged cascade as a `DotenvLayer`:
 
     ```python
     from dotenvmodel import read_env_files
@@ -42,7 +40,7 @@ The `.env` cascade is merged once per load (later, more specific files win withi
     os.environ.update(read_env_files(env="dev").values)
     ```
 
-    Caution: `os.environ.update()` **overwrites** existing keys — the injected file values clobber the real environment, exactly the old 0.6.x default behavior. To inject while letting the real environment keep precedence, call python-dotenv's `load_dotenv()` without `override=True` instead.
+    Caution: `os.environ.update()` **overwrites** existing keys — the file values clobber the real environment. To inject while letting the real environment keep precedence, call python-dotenv's `load_dotenv()` without `override=True` instead.
 
 ## .env File Cascading
 
@@ -145,6 +143,27 @@ config = AppConfig.load(env="prod")
 config = AppConfig.load(env="test")
 ```
 
+!!! tip "Selecting the environment from your `.env` files"
+
+    `env=` can itself be computed from the base files — read `ENV` from `.env` then `.env.local` with python-dotenv's `dotenv_values()` and pass the result to `load()`:
+
+    ```python
+    from dotenv import dotenv_values
+
+
+    def env_from_base_files() -> str | None:
+        for name in (".env", ".env.local"):
+            value = dotenv_values(name).get("ENV")
+            if value:
+                return value
+        return None
+
+
+    config = AppConfig.load(env=env_from_base_files())
+    ```
+
+    `None` falls through to the `ENV` environment-variable tier, so a missing key behaves exactly like not passing `env=` at all. Precedence is the caller's choice in code: as written, the file wins; `os.getenv("ENV") or env_from_base_files()` flips it to process-wins. The selector runs before the load — in the knob channel, not the value channel — so it composes with `read_environ=False`, which excludes `os.environ` as a *value* source only. For per-directory environment exports without any code, [direnv](https://direnv.net/) is the ecosystem-standard tool.
+
 !!! warning "Valid environment names"
 
     Environment names must only contain alphanumeric characters, hyphens, and underscores. This prevents path traversal attacks. Invalid names raise `ValueError`.
@@ -224,6 +243,25 @@ This is the right mode for processes whose configuration is fully injected via e
 
 The `DOTENV_READ_DOTFILES=false` environment variable has the same effect; an explicit argument wins over the env var.
 
+## The `read_environ` Parameter
+
+Set `read_environ=False` to exclude the process environment as a *value* source: fields resolve from the `.env` cascade and field defaults only — in both override modes, since with no process-env layer `override` becomes moot (there is nothing for it to promote or demote). The exclusion covers `${VAR}` interpolation too: both the file-value base and the string-default base resolve against the merged dotfile values alone, so a variable defined only in `os.environ` resolves to `""` (or its `:-` default), and a string default with no dotfile behind it resolves against an empty base.
+
+```python
+# The .env cascade is the only external source — ambient env vars are ignored
+config = AppConfig.load(read_environ=False)
+```
+
+This is the mirror of `read_dotfiles=False` for the same problem from the other side: a developer laptop or CI runner with stray exported variables that silently beat the `.env` files. Use it when the `.env` files are the intended source of truth and the ambient environment is untrusted.
+
+!!! note "The knob channel is unaffected"
+
+    `read_environ=False` excludes `os.environ` as a *value* source only. The knobs themselves — `ENV`, `DOTENV_DIR`, `DOTENV_OVERRIDE`, `DOTENV_READ_DOTFILES`, `DOTENV_READ_ENVIRON`, `DOTENV_LOAD_LOCAL` — still resolve from the process environment, so the env-var tier keeps steering a `read_environ=False` load.
+
+Both knobs can be combined: `load(read_dotfiles=False, read_environ=False)` is allowed and is the hermetic defaults-only mode — fields resolve from `Field(default=...)` values, required fields still raise `MissingFieldError`, and a string default's `${VAR}` references resolve against an empty base. `load_from_dict()` deliberately does not offer this mode; its template defaults resolve against the process environment (see [Loading from a Dictionary](#loading-from-a-dictionary)).
+
+The `DOTENV_READ_ENVIRON=false` environment variable has the same effect; an explicit argument wins over the env var.
+
 ## The `load_local` Parameter
 
 Controls whether the gitignored `.local` files (`.env.local` and `.env.{env}.local`) are read:
@@ -252,6 +290,7 @@ A fresh `load()` — and the first, cache-cold `cached()` call — resolves ever
 | Environment name | `env` | `ENV` | `"dev"` |
 | Base directory | `env_dir` | `DOTENV_DIR` | current working directory |
 | Read dotfiles at all | `read_dotfiles` | `DOTENV_READ_DOTFILES` | `True` |
+| Read the process environment | `read_environ` | `DOTENV_READ_ENVIRON` | `True` |
 | Dotfiles beat process env | `override` | `DOTENV_OVERRIDE` | `False` |
 | Include `.local` files | `load_local` | `DOTENV_LOAD_LOCAL` | `True`, except `False` when env is `test` |
 
@@ -284,6 +323,10 @@ config = AppConfig.load_from_dict(data, validate=False)
 
     Dictionary keys can be either the env var name (e.g., `"DATABASE_URL"`) or the field name (e.g., `"database_url"`). Env var names take precedence.
 
+!!! note "No hermetic-template mode here"
+
+    `load_from_dict()` has no `read_dotfiles` / `read_environ` knobs: its values come from the dict, and a string default's `${VAR}` template resolves against the process environment — documented behavior, unchanged. Callers wanting a hermetic template load (no dotfiles, no process environment in the interpolation base) should use `load(read_dotfiles=False, read_environ=False)` instead.
+
 !!! warning "Use `load()` in production"
 
     `load_from_dict()` is designed for testing. In production, always use `load()` to read from environment variables and `.env` files.
@@ -309,14 +352,14 @@ print(config.port)  # 9000
 
 ### Reusing Original Parameters
 
-By default, `reload()` reuses the same five resolved parameters (`env`, `override`, `env_dir`, `read_dotfiles`, `load_local`) recorded by the original `load()` call. Recorded values win over the `DOTENV_*` env-var tier, so a bare `reload()` never silently changes behavior — only the field *values* are re-read from the live environment and files:
+By default, `reload()` reuses the same six resolved parameters (`env`, `override`, `env_dir`, `read_dotfiles`, `read_environ`, `load_local`) recorded by the original `load()` call. Recorded values win over the `DOTENV_*` env-var tier, so a bare `reload()` never silently changes behavior — only the field *values* are re-read from the live environment and files:
 
 ```python
 config = AppConfig.load(env="dev", override=True)
 config.reload()  # Uses env="dev", override=True (and every other recorded parameter)
 ```
 
-An instance loaded via `load_from_dict()` has nothing recorded; its `reload()` resolves all five parameters from the tiers.
+An instance loaded via `load_from_dict()` has nothing recorded; its `reload()` resolves all six parameters from the tiers.
 
 ### Overriding Parameters During Reload
 
@@ -371,9 +414,19 @@ assert config is same_config
 
 `cached()` is lazy — the environment is only read on the very first call. It is also thread-safe: if multiple threads call `cached()` simultaneously before the first load completes, they race on a lock and only one thread calls `load()`; the rest block and receive the same instance. Once the cache is warm, all calls return immediately without acquiring the lock.
 
-Arguments (`env`, `override`, `env_dir`, `read_dotfiles`, `load_local`) are only used on the first call. Once the instance is cached, subsequent calls ignore any arguments and return the existing instance. A warning is logged when the caller's arguments *resolve* differently from the `LoadParams` the cached instance holds — so an accessor that consistently asks for what it already got (however it spells it) stays silent, while a caller asking for something the cache does not hold is told what it actually holds.
+Arguments (`env`, `override`, `env_dir`, `read_dotfiles`, `read_environ`, `load_local`) are only used on the first call. Once the instance is cached, subsequent calls ignore any arguments and return the existing instance. A warning is logged when the caller's arguments *resolve* differently from the `LoadParams` the cached instance holds — so an accessor that consistently asks for what it already got (however it spells it) stays silent, while a caller asking for something the cache does not hold is told what it actually holds.
 
 Calling `.reload()` on the cached instance mutates it in place; since `cached()` always returns the same object, subsequent `cached()` calls see the reloaded values. A reload also updates what the instance reports as its load arguments, so `reload(env="prod")` is reflected by both `loaded_with()` and the comparison above.
+
+!!! tip "Refreshing a `cached()` singleton on `SIGHUP`"
+
+    A signal-style refresh of a cached singleton is one line — `reload()` refreshes the cached instance in place, so every holder of the `cached()` instance sees the new values:
+
+    ```python
+    AppConfig.cached().reload()
+    ```
+
+    Use `reset_cached()` followed by `cached()` when a fresh instance is wanted instead of an in-place refresh. A plain `load()` never reads or writes the cache — every `load()` call is a full fresh read — so code that mixes `load()` with `cached()` holds separate instances.
 
 !!! warning "Reentrant `cached()` calls raise `RuntimeError`"
 

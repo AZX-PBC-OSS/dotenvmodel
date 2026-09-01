@@ -1,4 +1,4 @@
-.PHONY: help install test lint format type-check clean build publish
+.PHONY: help install test lint format type-check docs docs-serve clean build publish
 
 help:
 	@echo "Available commands:"
@@ -7,12 +7,14 @@ help:
 	@echo "  make lint         - Run ruff linter and formatting check (matches CI)"
 	@echo "  make format       - Format code with ruff"
 	@echo "  make type-check   - Run pyright type checker (dotenvmodel + tests)"
+	@echo "  make docs         - Build docs site (changelog page generated from CHANGELOG.md)"
+	@echo "  make docs-serve   - Live-preview docs site (changelog page generated from CHANGELOG.md)"
 	@echo "  make clean        - Clean build artifacts"
 	@echo "  make build        - Build package"
 	@echo "  make publish      - Publish to PyPI"
 
 install:
-	uv sync --all-extras
+	uv sync --group dev
 
 test:
 	uv run pytest
@@ -27,6 +29,16 @@ format:
 
 type-check:
 	uv run pyright dotenvmodel tests
+
+# The changelog page is generated from CHANGELOG.md before every build
+# so the published site can never drift from the root changelog.
+docs:
+	cp CHANGELOG.md docs/changelog.md
+	uv run mkdocs build --strict
+
+docs-serve:
+	cp CHANGELOG.md docs/changelog.md
+	uv run mkdocs serve
 
 clean:
 	rm -rf build/

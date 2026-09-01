@@ -158,7 +158,7 @@ class Config(DotEnvConfig):
         ```python
         # Raises ConstraintViolationError:
         # Field 'api_key' violates constraint.
-        # Value: "short"
+        # Value: 'short'
         # Constraint: min_length=32
         # Error: String must be at least 32 characters long
         ```
@@ -212,11 +212,15 @@ class Config(DotEnvConfig):
         ```
 
         ```python
-        # Raises ConstraintViolationError:
-        # Field 'environment' violates constraint.
-        # Value: "production"
-        # Constraint: choices=['dev', 'test', 'staging', 'prod']
-        # Error: Value must be one of: ['dev', 'test', 'staging', 'prod']
+        # Raises MultipleValidationErrors (both fields fail):
+        # 1. ConstraintViolationError: Value must be one of: ['dev', 'test', 'staging', 'prod']
+        #    Field: environment
+        #    Value: 'production'
+        #    Constraint: choices=['dev', 'test', 'staging', 'prod']
+        # 2. ConstraintViolationError: Value must be one of: ['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
+        #    Field: log_level
+        #    Value: 'TRACE'
+        #    Constraint: choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL']
         ```
 
 !!! tip "Choices work with any type"

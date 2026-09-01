@@ -343,3 +343,4 @@ class TestReload:
         assert params.env_dir == Path.cwd()
         assert params.read_dotfiles is True
         assert params.load_local is True
+        assert params.read_environ is True

@@ -1,5 +1,6 @@
 """Tests for advanced type coercion (Path, UUID, Decimal, datetime, timedelta)."""
 
+from copy import deepcopy
 from datetime import datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
@@ -349,6 +350,21 @@ class TestSecretStrType:
         """Constructing from another SecretStr raises instead of nesting."""
         with pytest.raises(TypeError, match="SecretStr"):
             SecretStr(SecretStr("inner"))  # type: ignore[arg-type]
+
+    def test_secret_str_deepcopy_preserves_subclass_type(self) -> None:
+        """deepcopy of a SecretStr subclass keeps the subclass type.
+
+        pyright checks these assignments in CI. ``copy.deepcopy`` infers
+        from its argument, so the direct ``__deepcopy__`` call is what
+        fails if ``SecretStr.__deepcopy__`` stops returning ``Self``.
+        """
+
+        class ApiKey(SecretStr):
+            pass
+
+        key: ApiKey = deepcopy(ApiKey("sk-123"))
+        copied: ApiKey = key.__deepcopy__({})
+        assert copied.get_secret_value() == "sk-123"
 
     def test_secret_str_rejects_non_str_input(self) -> None:
         """Non-str construction input raises, naming the offending type."""

@@ -113,6 +113,21 @@ class TestCached:
         # Should not raise.
         Config.reset_cached()
 
+    def test_read_environ_false_cold_path_loads_from_dotfiles_not_the_process_env(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """cached(read_environ=False) on a cold cache: the file value beats a set env var."""
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+        monkeypatch.setenv("VALUE", "from_env")
+
+        config = Config.cached(env_dir=tmp_path, read_environ=False)
+
+        assert config.value == "from_file"
+
     def test_independent_subclasses_have_independent_caches(self, monkeypatch) -> None:
         """Two different DotEnvConfig subclasses cache independently."""
 
@@ -315,7 +330,12 @@ class TestCached:
 
         instance = Config.cached(override=False, env_dir=Path("/tmp"))
         expected = LoadParams(
-            env="dev", override=False, env_dir=Path("/tmp"), read_dotfiles=True, load_local=True
+            env="dev",
+            override=False,
+            env_dir=Path("/tmp"),
+            read_dotfiles=True,
+            load_local=True,
+            read_environ=True,
         )
         assert instance.loaded_with() == expected
 
@@ -341,19 +361,34 @@ class TestCached:
 
         instance = Config.load(env="dev", override=False)
         assert instance.loaded_with() == LoadParams(
-            env="dev", override=False, env_dir=Path.cwd(), read_dotfiles=True, load_local=True
+            env="dev",
+            override=False,
+            env_dir=Path.cwd(),
+            read_dotfiles=True,
+            load_local=True,
+            read_environ=True,
         )
 
         instance.reload(env="prod")
 
         assert instance.loaded_with() == LoadParams(
-            env="prod", override=False, env_dir=Path.cwd(), read_dotfiles=True, load_local=True
+            env="prod",
+            override=False,
+            env_dir=Path.cwd(),
+            read_dotfiles=True,
+            load_local=True,
+            read_environ=True,
         )
 
         instance.reload()
 
         assert instance.loaded_with() == LoadParams(
-            env="prod", override=False, env_dir=Path.cwd(), read_dotfiles=True, load_local=True
+            env="prod",
+            override=False,
+            env_dir=Path.cwd(),
+            read_dotfiles=True,
+            load_local=True,
+            read_environ=True,
         )
 
     def test_a_reset_cache_is_not_judged_against_the_arguments_it_dropped(

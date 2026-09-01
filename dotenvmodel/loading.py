@@ -37,6 +37,12 @@ class LoadParams:
             environment (default `False` — the process environment wins).
         env_dir: Resolved base directory for `.env` files.
         read_dotfiles: Whether `.env` files are read at all.
+        read_environ: Whether the process environment is read as a value
+            source at all (default `True`). When `False`, `os.environ` is
+            excluded from per-field lookup, from the dotfile-value
+            interpolation base, and from the string-default interpolation
+            base — fields resolve from the dotfile cascade and defaults
+            only.
         load_local: Whether `.local` files are included (default skips
             them when `env` is `"test"`).
     """
@@ -45,6 +51,7 @@ class LoadParams:
     override: bool
     env_dir: Path
     read_dotfiles: bool
+    read_environ: bool = True
     load_local: bool
 
 
@@ -194,6 +201,7 @@ def resolve_load_params(
     override: bool | None = None,
     env_dir: Path | str | None = None,
     read_dotfiles: bool | None = None,
+    read_environ: bool | None = None,
     load_local: bool | None = None,
 ) -> LoadParams:
     """Resolve every `load()` behavior knob into a `LoadParams` record.
@@ -207,6 +215,7 @@ def resolve_load_params(
     | Base directory | `env_dir` | `DOTENV_DIR` | cwd |
     | Dotfiles beat process env | `override` | `DOTENV_OVERRIDE` | `False` |
     | Read dotfiles at all | `read_dotfiles` | `DOTENV_READ_DOTFILES` | `True` |
+    | Read the process environment | `read_environ` | `DOTENV_READ_ENVIRON` | `True` |
     | Include `.local` files | `load_local` | `DOTENV_LOAD_LOCAL` | `False` iff resolved env is `"test"` (case-insensitive) |
 
     The `load_local` default skips `.env.local` / `.env.{env}.local` when
@@ -216,11 +225,18 @@ def resolve_load_params(
     gitignored `.env.test.local` must not decide test outcomes either;
     `.env.{env}` itself is still read in every environment.
 
+    `read_environ=False` excludes `os.environ` as a *value* source only:
+    the knob channel itself (`ENV`, `DOTENV_DIR`, `DOTENV_OVERRIDE`,
+    `DOTENV_READ_DOTFILES`, `DOTENV_READ_ENVIRON`, `DOTENV_LOAD_LOCAL`)
+    still resolves from the process environment.
+
     Args:
         env: Environment name, or None for the `ENV` tier.
         override: Whether dotfiles beat the process env, or None for the tier.
         env_dir: Base directory, or None for the tier.
         read_dotfiles: Whether to read dotfiles at all, or None for the tier.
+        read_environ: Whether to read the process environment as a value
+            source, or None for the tier.
         load_local: Whether to include `.local` files, or None for the tier.
 
     Returns:
@@ -240,6 +256,7 @@ def resolve_load_params(
         override=resolve_bool(override, "DOTENV_OVERRIDE", default=False),
         env_dir=resolve_env_dir(env_dir),
         read_dotfiles=resolve_bool(read_dotfiles, "DOTENV_READ_DOTFILES", default=True),
+        read_environ=resolve_bool(read_environ, "DOTENV_READ_ENVIRON", default=True),
         load_local=resolve_bool(
             load_local, "DOTENV_LOAD_LOCAL", default=resolved_env.lower() != "test"
         ),
@@ -324,20 +341,23 @@ def interpolate_value(text: str, base: Mapping[str, str]) -> str:
     return "".join(parts)
 
 
-def _interpolate(values: dict[str, str]) -> dict[str, str]:
+def _interpolate(values: dict[str, str], *, environ: Mapping[str, str]) -> dict[str, str]:
     """Resolve ${VAR} / ${VAR:-default} references, python-dotenv 1.2.3 semantics.
 
     The base is built exactly like 1.2.3's resolve_variables(override=True):
-    the process environment overlaid, in key order, with each key's
-    already-resolved value — so an earlier key's value wins over os.environ
-    for later references, while a later or self reference sees only
-    os.environ. Unresolved references become "". Nothing between ${ and its
-    closing } other than the two supported forms is a reference at all, so
-    it stays literal. Each value resolves through `interpolate_value`, the
-    same single-string entry point the field-default path uses.
+    *environ* overlaid, in key order, with each key's already-resolved value
+    — so an earlier key's value wins over *environ* for later references,
+    while a later or self reference sees only *environ*. The caller decides
+    what *environ* is (``os.environ`` for a normal read, an empty mapping
+    for ``read_environ=False``); there is deliberately no silent
+    ``os.environ`` default here. Unresolved references become "". Nothing
+    between ${ and its closing } other than the two supported forms is a
+    reference at all, so it stays literal. Each value resolves through
+    `interpolate_value`, the same single-string entry point the
+    field-default path uses.
     """
     resolved: dict[str, str] = {}
-    base: dict[str, str] = dict(os.environ)
+    base: dict[str, str] = dict(environ)
     for name, value in values.items():
         resolved[name] = interpolate_value(value, base)
         base[name] = resolved[name]
@@ -349,6 +369,7 @@ def read_env_files(
     *,
     env_dir: Path | str | None = None,
     load_local: bool | None = None,
+    read_environ: bool | None = None,
 ) -> DotenvLayer:
     """Read the cascading .env files and merge them — purely, without touching os.environ.
 
@@ -361,18 +382,22 @@ def read_env_files(
     Interpolation happens once, after the merge, and progressively in
     merged-key order: a `${VAR}` reference in a file value sees the keys
     defined earlier in the merged cascade — with their already-resolved
-    values — over `os.environ`, so a later file can build on an earlier
-    file's value, while a forward or self reference (to a key defined
+    values — over the process environment, so a later file can build on an
+    earlier file's value, while a forward or self reference (to a key defined
     later in the merged order, or after it in the same file) sees only
-    `os.environ`. A reference to a variable defined only in the process
-    environment still resolves, and interpolation is independent of the
-    `override` knob, which only governs per-field precedence afterwards.
-    python-dotenv 1.2.3's semantics apply, replicated locally (`${VAR}`
-    / `${VAR:-default}`; no `$VAR` shorthand; an unresolved reference
-    becomes `""`; the `:-` default applies only when the name is absent
-    from the base — a present-but-empty value wins over it). Bare keys
-    (`KEY` with no `=`) are left unset, matching `load_dotenv()`, which
-    skips them.
+    `os.environ`. With `read_environ=False` the process environment is
+    excluded from this base too: references resolve against the merged
+    dotfile values alone, so a variable defined only in the process
+    environment resolves to `""` (or the `:-` default) just like an
+    unresolved one. A reference to a variable defined only in the process
+    environment still resolves in the default mode, and interpolation is
+    independent of the `override` knob, which only governs per-field
+    precedence afterwards. python-dotenv 1.2.3's semantics apply,
+    replicated locally (`${VAR}` / `${VAR:-default}`; no `$VAR` shorthand;
+    an unresolved reference becomes `""`; the `:-` default applies only
+    when the name is absent from the base — a present-but-empty value wins
+    over it). Bare keys (`KEY` with no `=`) are left unset, matching
+    `load_dotenv()`, which skips them.
 
     Probing order:
         1. `.env` (base configuration)
@@ -397,6 +422,14 @@ def read_env_files(
             When False, a present-but-skipped `.local` file is logged at
             INFO with the two restore knobs (`load_local=True` /
             `DOTENV_LOAD_LOCAL=true`)
+        read_environ: Whether the process environment participates in the
+            interpolation base. If None (the default), resolves through
+            `DOTENV_READ_ENVIRON` (default `True`). When False, `${VAR}`
+            references resolve against the merged dotfile values only —
+            the knob channel (`ENV`, `DOTENV_DIR`, `DOTENV_LOAD_LOCAL`,
+            `DOTENV_READ_ENVIRON` itself) still resolves from the process
+            environment, since `read_environ` excludes it as a value
+            source only
 
     Returns:
         A `DotenvLayer` with the merged values, the base directory, and
@@ -418,6 +451,9 @@ def read_env_files(
         # Custom directory, skipping .local files
         from pathlib import Path
         layer = read_env_files(env="prod", env_dir=Path("/app/config"), load_local=False)
+
+        # Interpolate against the dotfiles only, never the process environment
+        layer = read_env_files(env="prod", read_environ=False)
         ```
 
     See Also:
@@ -448,6 +484,13 @@ def read_env_files(
     resolved_load_local = resolve_bool(
         load_local, "DOTENV_LOAD_LOCAL", default=resolved_env.lower() != "test"
     )
+
+    # Same tier resolution as load(): explicit argument > DOTENV_READ_ENVIRON
+    # > default True. S5: this knob — and every other DOTENV_* knob above —
+    # still resolves from os.environ even when it resolves to False; the
+    # False value excludes os.environ as a VALUE source (the interpolation
+    # base below) only.
+    resolved_read_environ = resolve_bool(read_environ, "DOTENV_READ_ENVIRON", default=True)
 
     env_files = [base_dir / ".env"]  # Base shared configuration
     if resolved_load_local:
@@ -487,15 +530,17 @@ def read_env_files(
 
     # Interpolate in one pass over the merged layer, progressively in
     # merged-key order: a ${VAR} reference sees the keys defined earlier
-    # in the merge (with their already-resolved values) over os.environ,
-    # so a later file can build on an earlier file's value, while a
-    # forward or self reference sees only os.environ. That base is
-    # deliberately independent of load()'s override knob, which only
-    # governs per-field precedence afterwards.
+    # in the merge (with their already-resolved values) over the environ
+    # seed, so a later file can build on an earlier file's value, while a
+    # forward or self reference sees only that seed. The seed is
+    # os.environ unless read_environ resolved False, in which case the
+    # file-value base is the merged dotfiles alone — deliberately
+    # independent of load()'s override knob, which only governs per-field
+    # precedence afterwards.
     # Unresolved references become "" (python-dotenv 1.2.3 semantics: ${VAR}
     # / ${VAR:-default} only; $VAR shorthand is not interpolated), and no
     # None values entered the merge, so none leave — every output is a str.
-    values = _interpolate(values)
+    values = _interpolate(values, environ=os.environ if resolved_read_environ else {})
 
     if loaded_files:
         logger.info(

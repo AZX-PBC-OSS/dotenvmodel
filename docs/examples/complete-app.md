@@ -178,7 +178,7 @@ app_config = AppConfig.load(env="prod")
 print(app_config.host)  # '0.0.0.0'  (str)
 print(app_config.port)  # 8000       (int)
 print(app_config.debug)  # True       (bool)
-print(db_config.password)  # SecretStr('**********')
+print(db_config.password)  # **********
 print(db_config.password.get_secret_value())  # actual password
 print(app_config.allowed_origins)  # ['http://localhost:3000', ...]
 print(app_config.upload_dir)  # PosixPath('/tmp/uploads')
@@ -270,12 +270,11 @@ print("✓ .env.example generated")
 
     # Database port
     # Type: int | Constraints: ge=1, le=65535
-    # Example: DB_PORT=5432
     # DB_PORT=5432
 
     # Database password
     # Type: SecretStr
-    # DB_PASSWORD=your_secret_here
+    DB_PASSWORD=
 
     # Full connection URL (overrides prefix)
     # Type: str
@@ -290,7 +289,7 @@ print("✓ .env.example generated")
 
     # Session secret key
     # Type: SecretStr | Constraints: min_length=32
-    # APP_SECRET_KEY=your_secret_here
+    APP_SECRET_KEY=
 
     # External API base URL
     # Type: str

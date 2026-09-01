@@ -32,7 +32,7 @@ Public API:
     - `HttpUrl`, `PostgresDsn`, `RedisDsn`: URL/DSN types with validation
     - `Json`: Type for parsing JSON strings
     - `LoadParams`: Frozen record of resolved load parameters (env, override,
-      env_dir, read_dotfiles, load_local), as returned by
+      env_dir, read_dotfiles, read_environ, load_local), as returned by
       `DotEnvConfig.loaded_with()`
     - `read_env_files`: Read the merged .env cascade without touching the
       process environment

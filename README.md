@@ -6,7 +6,7 @@
 
 ## Features
 
-- **Minimal Dependencies**: Only requires `python-dotenv`
+- **Minimal Dependencies**: Two dependency-free runtime libraries (`python-dotenv`, `typing-extensions`)
 - **Type Safety**: Full type hint support with automatic type coercion
 - **Rich Type Support**: UUID, Decimal, datetime, timedelta, SecretStr, HttpUrl, PostgresDsn, RedisDsn, Json[T], and more
 - **Developer Experience**: Intuitive Pydantic-style API
@@ -252,7 +252,7 @@ class Config(DotEnvConfig):
 
 
 config = Config.load()
-print(config.api_key)  # SecretStr('**********')
+print(config.api_key)  # **********
 print(config.api_key.get_secret_value())  # 'actual-secret-key'
 ```
 
@@ -276,7 +276,7 @@ class Config(DotEnvConfig):
 # URL types work like strings but provide properties:
 config = Config.load()
 print(config.api_url.host)  # 'api.example.com'
-print(config.api_url.port)  # 443
+print(config.api_url.port)  # None (no explicit port in the URL)
 print(config.database_url.database)  # 'db'
 print(config.redis_url.database)  # 0
 ```
@@ -578,21 +578,27 @@ The pattern follows pydantic's `model_validator(mode="after")` (run after all fi
 
 ## Loading Configuration
 
-> **Upgrading from 0.6.x — three behavior changes**
->
-> 1. **Precedence flipped: real environment variables now win over `.env` files by default.** 0.6.x injected dotfile values into `os.environ`, so files beat real env vars. Restore the old order with `override=True` or `DOTENV_OVERRIDE=true`.
-> 2. **`load()` no longer mutates `os.environ`.** The injection side effect is gone; see the [migration note in the loading guide](docs/guides/loading.md) for one-line replacements (`read_env_files()` or python-dotenv `load_dotenv()`).
-> 3. **`.local` files (`.env.local`, `.env.test.local`) are skipped when the resolved environment is `test`** — a gitignored local file must not decide test outcomes. Opt back in with `load_local=True` or `DOTENV_LOAD_LOCAL=true`.
->
-> Every load behavior knob now resolves through argument > environment variable > default:
->
-> | Parameter | Env var | Default |
-> |---|---|---|
-> | `env` | `ENV` | `"dev"` |
-> | `env_dir` | `DOTENV_DIR` | current working directory |
-> | `override` | `DOTENV_OVERRIDE` | `False` |
-> | `read_dotfiles` | `DOTENV_READ_DOTFILES` | `True` |
-> | `load_local` | `DOTENV_LOAD_LOCAL` | `True`, except `False` when env is `test` |
+### Load Behavior Knobs
+
+Four behaviors worth knowing before your first `load()`:
+
+- **Real environment variables win over `.env` files by default.** Restore the file-first order with `override=True` or `DOTENV_OVERRIDE=true`.
+- **`load()` never mutates `os.environ`.** If another part of your process needs the values in `os.environ`, the [loading guide](docs/guides/loading.md) shows one-line replacements (`read_env_files()` or python-dotenv `load_dotenv()`).
+- **`.local` files (`.env.local`, `.env.test.local`) are skipped when the resolved environment is `test`** — a gitignored local file must not decide test outcomes. Opt back in with `load_local=True` or `DOTENV_LOAD_LOCAL=true`.
+- **String defaults interpolate `${VAR}` references at load time** (an unset reference resolves to `""`); see [Variable Interpolation](docs/guides/loading.md#variable-interpolation).
+
+Every load behavior knob resolves through argument > environment variable > default:
+
+| Parameter | Env var | Default |
+|---|---|---|
+| `env` | `ENV` | `"dev"` |
+| `env_dir` | `DOTENV_DIR` | current working directory |
+| `override` | `DOTENV_OVERRIDE` | `False` |
+| `read_dotfiles` | `DOTENV_READ_DOTFILES` | `True` |
+| `read_environ` | `DOTENV_READ_ENVIRON` | `True` |
+| `load_local` | `DOTENV_LOAD_LOCAL` | `True`, except `False` when env is `test` |
+
+See [CHANGELOG.md](CHANGELOG.md) for release history and upgrade notes.
 
 ### From Environment Variables
 
@@ -612,6 +618,8 @@ from pathlib import Path
 
 config = AppConfig.load(env_dir=Path("/app/config"))
 ```
+
+You can also select the environment from the `.env` files themselves — a short recipe that reads `ENV` from the base files and passes it as `env=` lives in [The `env` Parameter](docs/guides/loading.md#the-env-parameter) in the loading guide.
 
 ### .env File Cascading
 
@@ -651,7 +659,7 @@ config = AppConfig.load(env="dev")
 # Final ENABLE_PROFILING: true (from .env.dev.local)
 ```
 
-`${VAR}` references in `.env` values — and in string field defaults — resolve against the merged files, then the process environment; see [Variable Interpolation](docs/guides/loading.md#variable-interpolation) in the loading guide.
+`${VAR}` references in `.env` values — and in string field defaults — resolve against the merged files, then the process environment; `read_environ=False` (or `DOTENV_READ_ENVIRON=false`) excludes the process environment from the interpolation bases too, leaving the merged dotfiles alone; see [Variable Interpolation](docs/guides/loading.md#variable-interpolation) and [The `read_environ` Parameter](docs/guides/loading.md#the-read_environ-parameter) in the loading guide.
 
 ### From Dictionary (Testing)
 
@@ -672,7 +680,7 @@ config = AppConfig.load_from_dict(data, validate=False)
 
 ## Logging
 
-dotenvmodel includes optional logging to help debug configuration issues. Logging is disabled by default but can be easily enabled.
+dotenvmodel logs through Python's standard `logging` module under the `"dotenvmodel"` logger. With no logging setup, warnings and errors still surface on stderr via Python's last-resort handler — for example, the `No .env files found` warning. Call `configure_logging()` for the INFO/DEBUG detail (which files were read, how each field resolved) and formatted output.
 
 ### Enable Logging
 
@@ -693,12 +701,12 @@ config = Config.load()
 ### Logging Output Example
 
 ```
-2025-12-05 00:33:40 - dotenvmodel - INFO - Loading Config configuration
-2025-12-05 00:33:40 - dotenvmodel - INFO - Loading configuration for environment: dev
-2025-12-05 00:33:40 - dotenvmodel - INFO - Reading .env file: .env
-2025-12-05 00:33:40 - dotenvmodel - INFO - Reading .env file: .env.dev
-2025-12-05 00:33:40 - dotenvmodel - INFO - Successfully loaded 2 file(s): .env, .env.dev
-2025-12-05 00:33:40 - dotenvmodel - INFO - Config configuration loaded successfully
+2025-12-05 00:33:40,312 - dotenvmodel - INFO - Loading Config configuration
+2025-12-05 00:33:40,312 - dotenvmodel - INFO - Loading configuration for environment: dev
+2025-12-05 00:33:40,312 - dotenvmodel - INFO - Reading .env file: /home/user/myapp/.env
+2025-12-05 00:33:40,313 - dotenvmodel - INFO - Reading .env file: /home/user/myapp/.env.dev
+2025-12-05 00:33:40,313 - dotenvmodel - INFO - Successfully loaded 2 file(s): /home/user/myapp/.env, /home/user/myapp/.env.dev
+2025-12-05 00:33:40,313 - dotenvmodel - INFO - Config configuration loaded successfully
 ```
 
 ### Log Levels
@@ -719,8 +727,9 @@ configure_logging("ERROR")
 
 ### Using Environment Variable
 
+`DOTENVMODEL_LOG_LEVEL` chooses the level `configure_logging()` applies when called without an explicit level — call `configure_logging()` once in your entry point, then control verbosity from the environment:
+
 ```bash
-# Set via environment variable
 export DOTENVMODEL_LOG_LEVEL=DEBUG
 python your_app.py
 ```
@@ -830,7 +839,7 @@ config.reload(env="prod")  # Switch to production environment
 The `reload()` method:
 
 - Reloads all fields from environment variables and .env files
-- By default, reuses the same five recorded parameters (`env`, `override`, `env_dir`, `read_dotfiles`, `load_local`) from the original `load()` call
+- By default, reuses the same six recorded parameters (`env`, `override`, `env_dir`, `read_dotfiles`, `read_environ`, `load_local`) from the original `load()` call
 - Allows overriding any parameter by passing new values
 - Validates all fields and raises errors if validation fails
 - Returns the same instance (useful for method chaining)
@@ -866,14 +875,15 @@ Output:
 ```
 AppConfig
 =========
-+--------------+------+----------+---------+---------------------------+----------------+
-| ENV Variable | Type | Required | Default | Description               | Constraints    |
-+--------------+------+----------+---------+---------------------------+----------------+
-| DATABASE_URL | str  | Yes      | -       | PostgreSQL connection ... | -              |
-| PORT         | int  | No       | 8000    | Server port               | ge=1, le=65535 |
-| DEBUG        | bool | No       | False   | Enable debug mode         | -              |
-| WORKERS      | int  | No       | 4       | Number of worker proces...| ge=1, le=16    |
-+--------------+------+----------+---------+---------------------------+----------------+
+
++--------------+------+----------+---------+------------------------------+----------------+
+| ENV Variable | Type | Required | Default | Description                  | Constraints    |
++--------------+------+----------+---------+------------------------------+----------------+
+| DATABASE_URL | str  | Yes      | -       | PostgreSQL connection string | -              |
+| PORT         | int  | No       | 8000    | Server port                  | ge=1, le=65535 |
+| DEBUG        | bool | No       | False   | Enable debug mode            | -              |
+| WORKERS      | int  | No       | 4       | Number of worker processes   | ge=1, le=16    |
++--------------+------+----------+---------+------------------------------+----------------+
 ```
 
 ### Output Formats
@@ -1239,7 +1249,7 @@ except TypeCoercionError as e:
     print(e)
     # TypeCoercionError: Failed to coerce field 'port' to type int.
     #
-    # Value: "abc"
+    # Value: 'abc'
     # Environment variable: PORT
     # Error: invalid literal for int() with base 10: 'abc'
     # Hint: Ensure PORT contains a valid int
@@ -1432,6 +1442,7 @@ See the [Caching guide](docs/guides/loading.md#caching-a-singleton-instance) for
 
 - Python 3.12+
 - python-dotenv
+- typing-extensions
 
 ## Known Limitations
 
@@ -1490,7 +1501,7 @@ config.nested  # None — the override above is silently ignored
 
 ### `describe()` / `generate_env_example()` and Nested Configuration
 
-`describe()` and `generate_env_example()` do not recurse into nested config fields — a nested field renders as an opaque, non-functional placeholder (e.g. `APP_NESTED=<NestedConfig()>`) rather than expanding to the nested class's real, settable env vars (e.g. `APP_NESTED_PORT`). Don't rely on generated `.env.example` output to discover a nested config's real variables — read the nested class's own fields (or its own `describe()` output) directly.
+`describe()` and `generate_env_example()` do not recurse into nested config fields — a nested field renders as an opaque, non-functional placeholder (e.g. `APP_NESTED=NestedConfig(port=None)`, the repr of a default-constructed nested instance) rather than expanding to the nested class's real, settable env vars (e.g. `APP_NESTED_PORT`). Don't rely on generated `.env.example` output to discover a nested config's real variables — read the nested class's own fields (or its own `describe()` output) directly.
 
 ## License
 

@@ -84,6 +84,7 @@ print(AppConfig.describe())
     ```json
     {
       "class_name": "AppConfig",
+      "env_prefix": "",
       "fields": [
         {
           "env_var": "DATABASE_URL",

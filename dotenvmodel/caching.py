@@ -142,6 +142,7 @@ def acquire_cached(
     override: bool | None,
     env_dir: Path | str | None,
     read_dotfiles: bool | None,
+    read_environ: bool | None,
     load_local: bool | None,
 ) -> DotEnvConfig:
     """Return the cached instance for *cls*, loading on first call.
@@ -166,6 +167,8 @@ def acquire_cached(
         override: Whether dotfiles beat the process env (only used on first call).
         env_dir: Custom .env directory (only used on first call).
         read_dotfiles: Whether to read dotfiles at all (only used on first call).
+        read_environ: Whether to read the process environment as a value
+            source (only used on first call).
         load_local: Whether to include ``.local`` files (only used on first call).
 
     Returns:
@@ -220,6 +223,7 @@ def acquire_cached(
                     override=override,
                     env_dir=env_dir,
                     read_dotfiles=read_dotfiles,
+                    read_environ=read_environ,
                     load_local=load_local,
                 )
             except (OSError, ValueError):
@@ -233,23 +237,33 @@ def acquire_cached(
 
             loaded = cached.loaded_with()
             if requested != loaded:
+                # The format string and its arguments list the same fields on
+                # both sides in the same order (env, override, env_dir,
+                # read_dotfiles, read_environ, load_local) — 12 positional
+                # values plus the class name. A mismatch between the two
+                # raises TypeError exactly when a disagreement fires, which
+                # is the one moment this warning exists for; keep all three
+                # sites (format, requested args, loaded args) in sync.
                 logger.warning(
                     "cached() called on %s: this call's resolved configuration "
                     "(env=%r, override=%r, env_dir=%r, read_dotfiles=%r, "
-                    "load_local=%r) differs from the LoadParams recorded on "
-                    "the cached instance (env=%r, override=%r, env_dir=%r, "
-                    "read_dotfiles=%r, load_local=%r); arguments were ignored "
+                    "read_environ=%r, load_local=%r) differs from the "
+                    "LoadParams recorded on the cached instance "
+                    "(env=%r, override=%r, env_dir=%r, read_dotfiles=%r, "
+                    "read_environ=%r, load_local=%r); arguments were ignored "
                     "and the cached instance was returned.",
                     cls.__name__,
                     requested.env,
                     requested.override,
                     requested.env_dir,
                     requested.read_dotfiles,
+                    requested.read_environ,
                     requested.load_local,
                     loaded.env,
                     loaded.override,
                     loaded.env_dir,
                     loaded.read_dotfiles,
+                    loaded.read_environ,
                     loaded.load_local,
                 )
         return cached
@@ -282,6 +296,7 @@ def acquire_cached(
                 override=override,
                 env_dir=env_dir,
                 read_dotfiles=read_dotfiles,
+                read_environ=read_environ,
                 load_local=load_local,
             )
             set_cached(cls, instance)
