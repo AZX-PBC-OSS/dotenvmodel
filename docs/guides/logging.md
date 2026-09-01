@@ -1,6 +1,6 @@
 # Logging
 
-dotenvmodel includes optional logging to help debug configuration loading. Logging is disabled by default but can be easily enabled via code or environment variable.
+dotenvmodel logs through Python's standard `logging` module under the `"dotenvmodel"` logger. With no logging setup, warnings and errors surface on stderr via Python's last-resort handler — for example, the `No .env files found` warning. Call `configure_logging()` for the INFO/DEBUG detail (which files were read, how each field resolved) and formatted output.
 
 ## Enabling Logging
 
@@ -38,34 +38,35 @@ configure_logging("ERROR")
 
 !!! info "Default level"
 
-    If no level is specified and the `DOTENVMODEL_LOG_LEVEL` environment variable is not set, logging defaults to `WARNING`.
+    `configure_logging()` uses `WARNING` when called with no level and no `DOTENVMODEL_LOG_LEVEL` environment variable set. Warnings and errors surface even with no setup at all (via Python's last-resort handler); `configure_logging()` is what adds INFO/DEBUG detail and the formatted output.
 
 ## Log Output Example
 
 Here's what you'll see at `INFO` level when loading configuration:
 
 ```text
-2025-12-05 00:33:40 - dotenvmodel - INFO - Loading Config configuration
-2025-12-05 00:33:40 - dotenvmodel - INFO - Loading configuration for environment: dev
-2025-12-05 00:33:40 - dotenvmodel - INFO - Reading .env file: .env
-2025-12-05 00:33:40 - dotenvmodel - INFO - Reading .env file: .env.dev
-2025-12-05 00:33:40 - dotenvmodel - INFO - Successfully loaded 2 file(s): .env, .env.dev
-2025-12-05 00:33:40 - dotenvmodel - INFO - Config configuration loaded successfully
+2025-12-05 00:33:40,312 - dotenvmodel - INFO - Loading Config configuration
+2025-12-05 00:33:40,312 - dotenvmodel - INFO - Loading configuration for environment: dev
+2025-12-05 00:33:40,312 - dotenvmodel - INFO - Reading .env file: /home/user/myapp/.env
+2025-12-05 00:33:40,313 - dotenvmodel - INFO - Reading .env file: /home/user/myapp/.env.dev
+2025-12-05 00:33:40,313 - dotenvmodel - INFO - Successfully loaded 2 file(s): /home/user/myapp/.env, /home/user/myapp/.env.dev
+2025-12-05 00:33:40,313 - dotenvmodel - INFO - Config configuration loaded successfully
 ```
+
+Logged file paths are always absolute — `resolve_env_dir()` records the base directory as an absolute path, so the log names exactly which files were read.
 
 At `DEBUG` level, you'll also see messages about files that were searched but not found:
 
 ```text
-2025-12-05 00:33:40 - dotenvmodel - DEBUG - .env.local not found (skipping)
-2025-12-05 00:33:40 - dotenvmodel - DEBUG - .env.dev.local not found (skipping)
+2025-12-05 00:33:40,312 - dotenvmodel - DEBUG - /home/user/myapp/.env.local not found (skipping)
+2025-12-05 00:33:40,313 - dotenvmodel - DEBUG - /home/user/myapp/.env.dev.local not found (skipping)
 ```
 
 ## Using Environment Variables
 
-Enable logging without changing code by setting the `DOTENVMODEL_LOG_LEVEL` environment variable:
+`DOTENVMODEL_LOG_LEVEL` is read by `configure_logging()`: set it to choose the level `configure_logging()` applies when called without an explicit level. Call `configure_logging()` once in your entry point, then control verbosity from the environment:
 
 ```bash
-# Set via environment variable
 export DOTENVMODEL_LOG_LEVEL=DEBUG
 python your_app.py
 ```
@@ -75,9 +76,9 @@ python your_app.py
 DOTENVMODEL_LOG_LEVEL=INFO python your_app.py
 ```
 
-!!! tip "No code changes needed"
+!!! note "The env var needs `configure_logging()`"
 
-    When `DOTENVMODEL_LOG_LEVEL` is set, you don't need to call `configure_logging()` at all. The logger will pick up the level automatically when any logging code runs. However, calling `configure_logging()` without arguments will also respect this env var.
+    `DOTENVMODEL_LOG_LEVEL` is only read inside `configure_logging()` — setting it alone, with no logging setup anywhere, changes nothing: warnings and errors still surface via the last-resort handler, exactly as before.
 
 ## Custom Format String
 
@@ -192,8 +193,13 @@ class JsonFormatter(logging.Formatter):
 
 handler = logging.StreamHandler()
 handler.setFormatter(JsonFormatter())
-logging.getLogger(LOGGER_NAME).addHandler(handler)
+
+logger = logging.getLogger(LOGGER_NAME)
+logger.setLevel(logging.DEBUG)  # without this, INFO/DEBUG records never reach the formatter
+logger.addHandler(handler)
 ```
+
+Without an explicit `setLevel()`, the logger's effective level is inherited from the root logger (`WARNING` by default), so INFO/DEBUG records are dropped before they ever reach the `JsonFormatter`.
 
 !!! tip "Logger name"
 

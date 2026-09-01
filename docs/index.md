@@ -4,7 +4,8 @@
 
 **dotenvmodel** combines Pydantic-style field definitions with intelligent `.env` file
 cascading inspired by Node.js dotenv patterns. Define your config once, get full type
-safety, validation, and automatic `.env` loading — with only one runtime dependency.
+safety, validation, and automatic `.env` loading — with two dependency-free runtime
+libraries.
 
 ---
 
@@ -16,7 +17,8 @@ safety, validation, and automatic `.env` loading — with only one runtime depen
 
     ---
 
-    Only requires `python-dotenv`. No heavy frameworks, no transitive dependency trees.
+    Two dependency-free runtime libraries: `python-dotenv` and `typing-extensions`.
+    No heavy frameworks, no transitive dependency trees.
 
 -   :material-shield-check:{ .lg .middle } **Type Safety**
 
@@ -86,8 +88,8 @@ uv add dotenvmodel
 ```
 
 !!! tip "Python 3.12+"
-    dotenvmodel requires Python 3.12 or newer. It has a single runtime dependency:
-    `python-dotenv`.
+    dotenvmodel requires Python 3.12 or newer. Its runtime dependencies are
+    `python-dotenv` and `typing-extensions`, both dependency-free.
 
 ---
 

@@ -333,8 +333,8 @@ PASSWORD=hunter2
 
 ```python
 config = Config.load()
-print(config.api_key)  # SecretStr('**********')
-print(repr(config.api_key))  # "SecretStr('**********')"
+print(config.api_key)  # **********
+print(repr(config.api_key))  # SecretStr('**********')
 print(config.api_key.get_secret_value())  # 'super-secret-key-with-at-least-32-chars'
 ```
 

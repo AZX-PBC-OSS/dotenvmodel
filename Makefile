@@ -1,4 +1,4 @@
-.PHONY: help install test lint format type-check docs clean build publish
+.PHONY: help install test lint format type-check docs docs-serve clean build publish
 
 help:
 	@echo "Available commands:"
@@ -8,12 +8,13 @@ help:
 	@echo "  make format       - Format code with ruff"
 	@echo "  make type-check   - Run pyright type checker (dotenvmodel + tests)"
 	@echo "  make docs         - Build docs site (changelog page generated from CHANGELOG.md)"
+	@echo "  make docs-serve   - Live-preview docs site (changelog page generated from CHANGELOG.md)"
 	@echo "  make clean        - Clean build artifacts"
 	@echo "  make build        - Build package"
 	@echo "  make publish      - Publish to PyPI"
 
 install:
-	uv sync --all-extras
+	uv sync --group dev
 
 test:
 	uv run pytest
@@ -34,6 +35,10 @@ type-check:
 docs:
 	cp CHANGELOG.md docs/changelog.md
 	uv run mkdocs build --strict
+
+docs-serve:
+	cp CHANGELOG.md docs/changelog.md
+	uv run mkdocs serve
 
 clean:
 	rm -rf build/

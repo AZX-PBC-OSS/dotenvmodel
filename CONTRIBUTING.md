@@ -19,12 +19,14 @@ Thank you for your interest in contributing to dotenvmodel! We appreciate your t
 
 2. **Install dependencies:**
 
-   This project uses `uv` for dependency management. Install development dependencies with:
+   This project uses `uv` for dependency management (the required uv version is pinned in `pyproject.toml`). Install development dependencies with:
    ```bash
-   uv sync --dev
+   uv sync --group dev
    ```
 
-   This will create a virtual environment and install all necessary dependencies including pytest, pyright, ruff, and other development tools.
+   This creates a virtual environment and installs everything CI uses: pytest, pyright, ruff, pip-audit, and the MkDocs toolchain.
+
+   The `Makefile` wraps the same commands CI runs: `make install`, `make test`, `make lint`, `make format`, `make type-check`, `make docs`.
 
 ## Running Tests
 
@@ -49,7 +51,7 @@ uv run pytest tests/test_describe.py
 uv run pytest tests/test_describe.py::TestLineEndings
 
 # Run specific test function
-uv run pytest tests/test_core.py::TestDotEnvConfig::test_load_from_dict
+uv run pytest tests/test_basic.py::TestBasicTypes::test_string_field
 
 # Run with verbose output
 uv run pytest -v
@@ -76,51 +78,77 @@ The project is configured with the following pytest settings (in `pyproject.toml
 
 ### Type Checking
 
-The project uses `pyright` for type checking:
+The project uses `pyright` for type checking (the same invocation CI and `make type-check` use):
 
 ```bash
-# Run type checking
-uv run pyright dotenvmodel
+# Run type checking (package and tests)
+uv run pyright dotenvmodel tests
 
 # Type check specific file
-uv run pyright dotenvmodel/core.py
+uv run pyright dotenvmodel/config.py
 ```
 
 ### Linting and Formatting
 
-The project uses `ruff` for both linting and formatting:
+The project uses `ruff` for both linting and formatting (over the whole repository, matching CI):
 
 ```bash
 # Check for linting issues
-uv run ruff check dotenvmodel
+uv run ruff check .
 
 # Auto-fix linting issues
-uv run ruff check --fix dotenvmodel
+uv run ruff check --fix .
 
 # Format code
-uv run ruff format dotenvmodel
+uv run ruff format .
 
 # Check formatting without making changes
-uv run ruff format --check dotenvmodel
+uv run ruff format --check .
 ```
 
 ### Running All Quality Checks
 
-Before submitting a PR, run all quality checks:
+Before submitting a PR, run all quality checks (or their `make` equivalents: `make test`, `make lint`, `make type-check`):
 
 ```bash
 # Run tests with coverage
 uv run pytest
 
 # Run type checking
-uv run pyright dotenvmodel
+uv run pyright dotenvmodel tests
 
 # Run linting
-uv run ruff check dotenvmodel
+uv run ruff check .
 
 # Check formatting
-uv run ruff format --check dotenvmodel
+uv run ruff format --check .
 ```
+
+## Documentation
+
+Build the docs site locally before submitting documentation changes:
+
+```bash
+make docs
+```
+
+The build runs with `--strict`: broken links and anchors fail the build instead of shipping quietly, exactly like the CI docs job. Use `make docs-serve` for a live preview while editing.
+
+The site's changelog page (`docs/changelog.md`) is generated from `CHANGELOG.md` on every build — it is gitignored and must never be edited or committed. `CHANGELOG.md` itself is maintained by release-please; see the next section.
+
+## Commits, Changelog, and Releases
+
+This project uses [Conventional Commits](https://www.conventionalcommits.org/). Commit messages drive the changelog and version bumps via [release-please](https://github.com/googleapis/release-please):
+
+- `feat:` → minor version bump, "Features" changelog section
+- `fix:` → patch bump, "Bug Fixes"
+- `feat!:` / `fix!:` or a `BREAKING CHANGE:` footer → major bump, "⚠ BREAKING CHANGES" section
+- `perf:`, `docs:`, `refactor:`, `build:`, `ci:` → their own changelog sections
+- `style:`, `chore:`, `test:` → hidden from the changelog
+
+Merging the release PR that release-please opens updates `CHANGELOG.md`, `pyproject.toml`, `dotenvmodel/__init__.py`, and `.release-please-manifest.json`, then tags the release and publishes it. Never bump versions or edit the changelog manually; write good conventional commit messages instead, and let the tooling do the rest.
+
+Full history lives in [CHANGELOG.md](CHANGELOG.md).
 
 ## Making Changes
 
@@ -150,9 +178,10 @@ uv run ruff format --check dotenvmodel
    - Run tests with `uv run pytest`
 
 4. **Update documentation:**
-   - Update README.md if adding new features
-   - Add docstrings to new functions and classes
+   - Update README.md and the matching `docs/` guide for user-facing changes (the published guides live in `docs/`)
+   - Add docstrings to new functions and classes (the API reference pages render them)
    - Update type hints and examples
+   - Do not edit `CHANGELOG.md` by hand — see [Commits, Changelog, and Releases](#commits-changelog-and-releases)
 
 5. **Verify your changes:**
    ```bash
@@ -160,13 +189,13 @@ uv run ruff format --check dotenvmodel
    uv run pytest
 
    # Check types
-   uv run pyright dotenvmodel
+   uv run pyright dotenvmodel tests
 
    # Check linting
-   uv run ruff check dotenvmodel
+   uv run ruff check .
 
    # Check formatting
-   uv run ruff format --check dotenvmodel
+   uv run ruff format --check .
    ```
 
 ## Pull Request Process
@@ -180,13 +209,13 @@ uv run ruff format --check dotenvmodel
 
 2. **Ensure type checking passes:**
    ```bash
-   uv run pyright dotenvmodel
+   uv run pyright dotenvmodel tests
    ```
 
 3. **Ensure code is properly formatted:**
    ```bash
-   uv run ruff format dotenvmodel
-   uv run ruff check --fix dotenvmodel
+   uv run ruff format .
+   uv run ruff check --fix .
    ```
 
 4. **Verify coverage hasn't decreased:**

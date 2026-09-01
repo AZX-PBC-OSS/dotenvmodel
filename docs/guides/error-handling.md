@@ -82,7 +82,7 @@ except TypeCoercionError as e:
     ```text
     TypeCoercionError: Failed to coerce field 'port' to type int.
 
-    Value: "abc"
+    Value: 'abc'
     Environment variable: PORT
     Error: invalid literal for int() with base 10: 'abc'
     Hint: Ensure PORT contains a valid int
@@ -169,7 +169,7 @@ except MultipleValidationErrors as e:
     ```text
     MultipleValidationErrors: Configuration validation failed with 3 error(s):
 
-    1. ConstraintViolationError: String length 9 is less than minimum 32
+    1. ConstraintViolationError: String must be at least 32 characters long
        Field: api_key
        Value: 'too-short'
        Environment variable: API_KEY
