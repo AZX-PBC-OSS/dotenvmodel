@@ -5,7 +5,7 @@ import json
 import re
 from datetime import datetime, timedelta
 from decimal import Decimal, InvalidOperation
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Self
 from urllib.parse import ParseResult, unquote, urlparse
 from uuid import UUID
 
@@ -94,7 +94,7 @@ class SecretStr:
             "Extract the secret value with get_secret_value() before pickling if needed."
         )
 
-    def __deepcopy__(self, memo: dict[int, object]) -> "SecretStr":
+    def __deepcopy__(self, memo: dict[int, object]) -> Self:
         """Return self: an immutable value is safe to share across copies.
 
         Without this, ``copy.deepcopy`` falls back to ``__reduce_ex__`` and
@@ -171,7 +171,7 @@ class BaseDsn(str):
     require_host: bool = True
     default_port: int | None = None
 
-    def __new__(cls, value: str) -> "BaseDsn":
+    def __new__(cls, value: str) -> Self:
         """Validate and create DSN instance."""
         parsed = urlparse(value)
 

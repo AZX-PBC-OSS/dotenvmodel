@@ -260,3 +260,23 @@ class TestUrlProperties:
         config = Config.load_from_dict({"URL": "https://example.com"})
         assert config.url.username is None
         assert config.url.password is None
+
+
+class TestDsnConstructorTyping:
+    """Constructor calls must infer as the subclass, not BaseDsn.
+
+    These assignments are type-checked by pyright in CI; they fail if
+    BaseDsn.__new__ stops returning Self, which is how users constructing
+    DSNs directly (outside a config load) keep working type hints.
+    """
+
+    def test_constructor_returns_own_type(self) -> None:
+        """Test that each DSN constructor infers as its own class."""
+
+        http: HttpUrl = HttpUrl("http://api.example.com")
+        postgres: PostgresDsn = PostgresDsn("postgresql://localhost:5432/db")
+        redis: RedisDsn = RedisDsn("redis://localhost:6379/0")
+
+        assert str(http) == "http://api.example.com"
+        assert str(postgres) == "postgresql://localhost:5432/db"
+        assert str(redis) == "redis://localhost:6379/0"
