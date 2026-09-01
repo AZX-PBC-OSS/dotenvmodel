@@ -46,6 +46,7 @@ class TestEnvironIsolationFixture:
         os.environ["DOTENV_OVERRIDE"] = "true"
         os.environ["DOTENV_READ_DOTFILES"] = "false"
         os.environ["DOTENV_LOAD_LOCAL"] = "true"
+        os.environ["DOTENV_READ_ENVIRON"] = "false"
 
         gen = _snapshot_and_restore_environ()
         next(gen)  # setup
@@ -56,6 +57,7 @@ class TestEnvironIsolationFixture:
             "DOTENV_OVERRIDE",
             "DOTENV_READ_DOTFILES",
             "DOTENV_LOAD_LOCAL",
+            "DOTENV_READ_ENVIRON",
         ):
             assert var not in os.environ
 
@@ -67,6 +69,33 @@ class TestEnvironIsolationFixture:
         assert os.environ["DOTENV_OVERRIDE"] == "true"
         assert os.environ["DOTENV_READ_DOTFILES"] == "false"
         assert os.environ["DOTENV_LOAD_LOCAL"] == "true"
+        assert os.environ["DOTENV_READ_ENVIRON"] == "false"
+
+    def test_setup_pops_the_ambient_field_vars(self) -> None:
+        """Setup removes field-name collisions so ambient values cannot win.
+
+        ``NAME`` is exported from the hostname by Debian/WSL profiles —
+        verified to break a template-default test on such a machine — and
+        the rest of ``_AMBIENT_FIELD_ENV_VARS`` are common container or
+        dev-shell exports. Iterating the tuple keeps this test in sync
+        with the scrub list.
+        """
+        from tests.conftest import _AMBIENT_FIELD_ENV_VARS, _snapshot_and_restore_environ
+
+        os.environ["NAME"] = "ambient-hostname-value"
+        os.environ["PORT"] = "8080"
+
+        gen = _snapshot_and_restore_environ()
+        next(gen)  # setup
+
+        for var in _AMBIENT_FIELD_ENV_VARS:
+            assert var not in os.environ
+
+        with pytest.raises(StopIteration):
+            next(gen)  # teardown restores the pre-test snapshot
+
+        assert os.environ["NAME"] == "ambient-hostname-value"
+        assert os.environ["PORT"] == "8080"
 
     def test_teardown_restores_the_exact_snapshot(self) -> None:
         """Values added or removed during the test do not survive it."""
@@ -269,6 +298,65 @@ class TestReadDotfilesFalse:
         assert config.value == "from_env"
 
 
+class TestReadEnvironFalse:
+    """read_environ=False excludes the process environment as a value source: dotfiles and defaults only."""
+
+    def test_env_var_excluded_the_dotfile_value_wins_in_both_modes(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """The WSL NAME repro shape: a monkeypatched env var must not beat the .env value."""
+        monkeypatch.setenv("VALUE", "from_env")
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        default_mode = Config.load(env_dir=tmp_path, read_environ=False)
+        assert default_mode.value == "from_file"
+
+        override_mode = Config.load(env_dir=tmp_path, read_environ=False, override=True)
+        assert override_mode.value == "from_file"
+
+    def test_var_only_in_the_process_env_falls_back_to_the_field_default(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("VALUE", "from_env")
+        (tmp_path / ".env").write_text("OTHER=also_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        assert Config.load(env_dir=tmp_path, read_environ=False).value == "default"
+
+    def test_override_is_moot_without_the_process_env(self, tmp_path: Path, monkeypatch) -> None:
+        """With the process env excluded there is nothing for override to demote — the file wins anyway."""
+        monkeypatch.setenv("VALUE", "from_env")
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        config = Config.load(env_dir=tmp_path, read_environ=False, override=True)
+        assert config.value == "from_file"
+
+    def test_selector_channel_still_resolves_env_from_the_process_env(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """ENV keeps selecting `.env.{env}` files with `read_environ=False`.
+
+        The selector is load behavior, not a field value: excluding the
+        process environment as a value source must not change which
+        files are read.
+        """
+        monkeypatch.setenv("ENV", "prod")
+        (tmp_path / ".env.prod").write_text("VALUE=from_prod_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        assert Config.load(env_dir=tmp_path, read_environ=False).value == "from_prod_file"
+
+
 class TestEnvVarTier:
     """Behavior knobs: explicit argument > DOTENV_* env var > default."""
 
@@ -323,6 +411,46 @@ class TestEnvVarTier:
 
         assert config.value == "default"
         assert not any("No .env files found" in r.message for r in caplog.records)
+
+    def test_dotenv_read_environ_false_excludes_the_process_env(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        monkeypatch.setenv("DOTENV_READ_ENVIRON", "false")
+        monkeypatch.setenv("VALUE", "from_env")
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        assert Config.load(env_dir=tmp_path).value == "from_file"
+
+    def test_explicit_read_environ_beats_the_env_var(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("DOTENV_READ_ENVIRON", "false")
+        monkeypatch.setenv("VALUE", "from_env")
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        assert Config.load(env_dir=tmp_path, read_environ=True).value == "from_env"
+
+    def test_invalid_dotenv_read_environ_warns_and_uses_default(
+        self, tmp_path: Path, monkeypatch, caplog
+    ) -> None:
+        monkeypatch.setenv("DOTENV_READ_ENVIRON", "banana")
+        monkeypatch.setenv("VALUE", "from_env")
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            config = Config.load(env_dir=tmp_path)
+
+        assert config.value == "from_env"  # default read_environ=True held
+        assert any(
+            "DOTENV_READ_ENVIRON" in r.message and "banana" in r.message for r in caplog.records
+        )
 
 
 class TestLoadLocalRule:
@@ -423,6 +551,7 @@ class TestLoadParamsRecording:
             env_dir=tmp_path,
             read_dotfiles=True,
             load_local=True,
+            read_environ=True,
         )
 
     def test_records_test_env_auto_local_rule(self, tmp_path: Path) -> None:
@@ -434,6 +563,17 @@ class TestLoadParamsRecording:
         assert params.env == "test"
         assert params.load_local is False
 
+    def test_records_read_environ(self, tmp_path: Path) -> None:
+        """True is the default recording; an explicit False is recorded as asked."""
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        default_recording = Config.load(env_dir=tmp_path).loaded_with()
+        explicit_recording = Config.load(env_dir=tmp_path, read_environ=False).loaded_with()
+        assert default_recording.read_environ is True
+        assert explicit_recording.read_environ is False
+
     def test_params_equality(self, tmp_path: Path) -> None:
         class Config(DotEnvConfig):
             value: str = Field(default="x")
@@ -442,7 +582,12 @@ class TestLoadParamsRecording:
         second = Config.load(env="dev", env_dir=tmp_path).loaded_with()
         assert first == second
         assert first != LoadParams(
-            env="prod", override=False, env_dir=tmp_path, read_dotfiles=True, load_local=True
+            env="prod",
+            override=False,
+            env_dir=tmp_path,
+            read_dotfiles=True,
+            load_local=True,
+            read_environ=True,
         )
 
     def test_loaded_with_raises_on_never_loaded_instance(self) -> None:
@@ -495,6 +640,20 @@ class TestNestedConfigLayer:
         assert Parent.load(env_dir=tmp_path).nested.token == "nested_env"
         assert Parent.load(env_dir=tmp_path, override=True).nested.token == "nested_file"
 
+    def test_read_environ_threads_into_nested_config(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("NESTED_TOKEN", "nested_env")
+        (tmp_path / ".env").write_text("NESTED_TOKEN=nested_file\n")
+
+        class Nested(DotEnvConfig):
+            env_prefix = "NESTED_"
+            token: str = Field(default="unset")
+
+        class Parent(DotEnvConfig):
+            nested: Nested
+
+        assert Parent.load(env_dir=tmp_path).nested.token == "nested_env"
+        assert Parent.load(env_dir=tmp_path, read_environ=False).nested.token == "nested_file"
+
     def test_reload_resolves_nested_from_updated_files(self, tmp_path: Path) -> None:
         (tmp_path / ".env").write_text("NESTED_TOKEN=v1\n")
 
@@ -524,6 +683,17 @@ class TestCachedDisagreement:
 
         with caplog.at_level("WARNING", logger="dotenvmodel"):
             Config.cached(read_dotfiles=True)
+
+        assert any("arguments were ignored" in r.message for r in caplog.records)
+
+    def test_read_environ_disagreement_warns(self, caplog) -> None:
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        Config.cached(read_environ=False)
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            Config.cached(read_environ=True)
 
         assert any("arguments were ignored" in r.message for r in caplog.records)
 
@@ -572,6 +742,18 @@ class TestCachedDisagreement:
 
         assert list(caplog.records) == []
 
+    def test_matching_read_environ_stays_silent(self, caplog) -> None:
+        class Config(DotEnvConfig):
+            value: str = Field(default="x")
+
+        Config.cached(read_environ=False)
+
+        with caplog.at_level("WARNING", logger="dotenvmodel"):
+            caplog.clear()
+            Config.cached(read_environ=False)
+
+        assert list(caplog.records) == []
+
     def test_override_installed_dict_instance_is_returned_without_judging(
         self, monkeypatch
     ) -> None:
@@ -605,6 +787,23 @@ class TestReloadReuse:
         assert config.value == "default"
         config.reload()
         assert config.value == "default"  # files still not read
+
+    def test_bare_reload_repeats_read_environ_false_even_after_the_env_var_changes(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        (tmp_path / ".env").write_text("VALUE=from_file\n")
+
+        class Config(DotEnvConfig):
+            value: str = Field(default="default")
+
+        config = Config.load(env_dir=tmp_path, read_environ=False)
+        assert config.value == "from_file"
+
+        monkeypatch.setenv("VALUE", "from_env")
+        monkeypatch.setenv("DOTENV_READ_ENVIRON", "true")
+        config.reload()
+        assert config.value == "from_file"  # the process env is still excluded
+        assert config.loaded_with().read_environ is False
 
     def test_bare_reload_repeats_load_local_skip_for_test_env(self, tmp_path: Path) -> None:
         (tmp_path / ".env.test").write_text("VALUE=from_test\n")
@@ -678,7 +877,12 @@ class TestReloadReuse:
             env_dir=tmp_path,
             read_dotfiles=True,
             load_local=False,
+            read_environ=True,
         )
+
+        # An explicit read_environ argument overrides the recorded value too.
+        config.reload(read_environ=False)
+        assert config.loaded_with().read_environ is False
 
     def test_reload_after_load_from_dict_uses_tier_defaults(self, monkeypatch) -> None:
         """A dict-loaded instance has no recorded params; reload() resolves from the tiers."""
@@ -870,6 +1074,22 @@ class TestInterpolation:
 
         layer = read_env_files(env="dev", env_dir=tmp_path)
         assert layer.values["X"] == "prefixed-from_env"
+
+    def test_read_environ_false_excludes_os_environ_from_the_file_value_base(
+        self, tmp_path: Path, monkeypatch
+    ) -> None:
+        """With read_environ=False the file-value base is the merged dotfiles only: a
+        reference defined only in the process environment resolves to "", while an
+        earlier-key reference within the cascade still resolves.
+        """
+        monkeypatch.setenv("EXTRA", "from_env")
+        (tmp_path / ".env").write_text("HOST=db.internal\nURL=postgres://${HOST}/app\n")
+        (tmp_path / ".env.local").write_text("X=prefixed-${EXTRA}\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path, read_environ=False)
+
+        assert layer.values["URL"] == "postgres://db.internal/app"
+        assert layer.values["X"] == "prefixed-"
 
     def test_unresolved_reference_becomes_empty_string(self, tmp_path: Path, monkeypatch) -> None:
         monkeypatch.delenv("MISSING", raising=False)
@@ -1162,6 +1382,27 @@ class TestReaderLoadLocalTier:
             read_env_files(env="dev", env_dir=tmp_path)
 
         assert any(f"Reading .env file: {tmp_path / '.env'}" in r.message for r in caplog.records)
+
+
+class TestReaderReadEnvironTier:
+    """read_env_files() resolves read_environ through the same tiers as load()."""
+
+    def test_dotenv_read_environ_false_steers_the_reader(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("DOTENV_READ_ENVIRON", "false")
+        monkeypatch.setenv("EXTRA", "from_env")
+        (tmp_path / ".env").write_text("X=prefixed-${EXTRA}\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+
+        assert layer.values["X"] == "prefixed-"
+
+    def test_reader_default_keeps_the_os_environ_base(self, tmp_path: Path, monkeypatch) -> None:
+        monkeypatch.setenv("EXTRA", "from_env")
+        (tmp_path / ".env").write_text("X=prefixed-${EXTRA}\n")
+
+        layer = read_env_files(env="dev", env_dir=tmp_path)
+
+        assert layer.values["X"] == "prefixed-from_env"
 
 
 class TestWarmPathRobustness:

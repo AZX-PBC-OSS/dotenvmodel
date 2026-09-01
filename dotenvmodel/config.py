@@ -348,21 +348,33 @@ def _layer_for(params: LoadParams) -> DotenvLayer | None:
     """
     if not params.read_dotfiles:
         return None
-    return read_env_files(env=params.env, env_dir=params.env_dir, load_local=params.load_local)
+    return read_env_files(
+        env=params.env,
+        env_dir=params.env_dir,
+        load_local=params.load_local,
+        read_environ=params.read_environ,
+    )
 
 
 def _resolve_raw_value(
     env_var_name: str,
     dotenv_layer: DotenvLayer | None,
     override: bool,
+    read_environ: bool,
 ) -> str | None:
     """Resolve one field's raw value across the process-env and dotfile layers.
 
     With ``override`` False (the default) the process environment wins;
     with ``override`` True the merged dotfile layer wins. The losing layer
     is the fallback, and ``None`` (field default) only when both are unset.
+    With ``read_environ`` False the process environment is not consulted
+    at all — the dotfile layer is the only external source, and ``override``
+    becomes moot.
     """
-    os_value = os.getenv(env_var_name)
+    # The single gate excluding os.environ from per-field lookup. Every
+    # caller must pass read_environ explicitly; a forgotten thread is a
+    # loud TypeError here, not a silent environ leak.
+    os_value = os.getenv(env_var_name) if read_environ else None
     file_value = dotenv_layer.values.get(env_var_name) if dotenv_layer is not None else None
     if override:
         value, source = (
@@ -466,6 +478,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         validate: bool = True,
         dotenv_layer: DotenvLayer | None = None,
         override: bool = False,
+        read_environ: bool,
     ) -> Any:
         """
         Process a single field: handle missing values, coerce, and validate.
@@ -487,6 +500,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 as their parent.
             override: The override policy of the enclosing load, forwarded
                 to nested `DotEnvConfig` fields alongside `dotenv_layer`.
+            read_environ: Whether the process environment is consulted as a
+                value source, forwarded to nested `DotEnvConfig` fields and
+                gating the string-default interpolation base.
 
         Returns:
             Processed and validated value
@@ -529,6 +545,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 validate=validate,
                 dotenv_layer=dotenv_layer,
                 override=override,
+                read_environ=read_environ,
             )
             return nested
 
@@ -555,20 +572,27 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 # os.environ — every merged key visible to every reference,
                 # unlike the file layer's progressive merged-key order
                 # (os.environ alone when no layer was read, e.g.
-                # read_dotfiles=False), independent of the
-                # override knob. default_factory results are built
-                # programmatically and stay verbatim. The "${" membership
-                # check keeps ordinary defaults off the interpolation path
-                # entirely; resolution re-runs on every load()/reload(), so
-                # a changed environment re-resolves the template.
+                # read_dotfiles=False) — independent of the
+                # override knob. read_environ=False excludes os.environ
+                # from this base too: the merged dotfile values when a
+                # layer was read, an empty mapping when none was (so
+                # references resolve to "" or the :- default). In every
+                # mode default_factory results are built programmatically
+                # and stay verbatim. The "${" membership check keeps
+                # ordinary defaults off the interpolation path entirely;
+                # resolution re-runs on every load()/reload(), so a
+                # changed environment re-resolves the template.
                 if field_info.default_factory is None and isinstance(value, str) and "${" in value:
                     # ChainMap gives the layer-over-environ lookup order
                     # without copying the process environment.
-                    base: Mapping[str, str] = (
-                        ChainMap(dotenv_layer.values, os.environ)
-                        if dotenv_layer is not None
-                        else os.environ
-                    )
+                    if read_environ:
+                        base: Mapping[str, str] = (
+                            ChainMap(dotenv_layer.values, os.environ)
+                            if dotenv_layer is not None
+                            else os.environ
+                        )
+                    else:
+                        base = dotenv_layer.values if dotenv_layer is not None else {}
                     # Keep the unresolved template for error reporting: a
                     # reference can pull secret material out of the layer
                     # or os.environ, and the resolved value would otherwise
@@ -707,6 +731,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         validate: bool = True,
         dotenv_layer: DotenvLayer | None = None,
         override: bool = False,
+        read_environ: bool,
     ) -> None:
         """Process all fields from the given source, setting attributes on self.
 
@@ -722,6 +747,11 @@ class DotEnvConfig(metaclass=ConfigMeta):
             override: Whether the dotfile layer beats the process
                 environment (only meaningful alongside a dotenv_layer, with
                 env_source None).
+            read_environ: Whether the process environment is consulted as a
+                value source (per-field lookup and the string-default
+                interpolation base). `load_from_dict()` passes True — its
+                dict is the field-value source, and its template defaults
+                resolve against os.environ (documented behavior).
 
         Raises:
             ValidationError: If any field fails validation. Collects all errors
@@ -739,7 +769,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 if raw_value is None:
                     raw_value = env_source.get(field_name)
             else:
-                raw_value = _resolve_raw_value(env_var_name, dotenv_layer, override)
+                raw_value = _resolve_raw_value(env_var_name, dotenv_layer, override, read_environ)
 
             try:
                 value = self._process_field(
@@ -752,6 +782,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
                     validate=validate,
                     dotenv_layer=dotenv_layer,
                     override=override,
+                    read_environ=read_environ,
                 )
                 setattr(self, field_name, value)
             except ValidationError as e:
@@ -774,15 +805,21 @@ class DotEnvConfig(metaclass=ConfigMeta):
         override: bool | None = None,
         env_dir: Path | str | None = None,
         read_dotfiles: bool | None = None,
+        read_environ: bool | None = None,
         load_local: bool | None = None,
     ) -> Self:
         """Load configuration from environment variables and .env files.
 
         Each field is resolved across three layers; the process environment
-        is never written:
+        is never written (and the first layer can be turned off entirely
+        with `read_environ=False`, leaving the merged dotfile cascade and
+        field defaults):
 
         - default (`override=False`): process environment -> merged dotfile cascade -> field default
         - `override=True` (opt-in): merged dotfile cascade -> process environment -> field default
+        - `read_environ=False`: merged dotfile cascade -> field default
+          (`override` becomes moot — there is no process-env layer to
+          promote or demote)
 
         The dotfile cascade (`.env`, `.env.local`, `.env.{env}`,
         `.env.{env}.local`) is merged once per load with later files
@@ -797,6 +834,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         | `env_dir` | `DOTENV_DIR` | `Path.cwd()` |
         | `override` | `DOTENV_OVERRIDE` | `False` |
         | `read_dotfiles` | `DOTENV_READ_DOTFILES` | `True` |
+        | `read_environ` | `DOTENV_READ_ENVIRON` | `True` |
         | `load_local` | `DOTENV_LOAD_LOCAL` | `False` when the resolved env is `"test"`, else `True` |
 
         When to use:
@@ -822,6 +860,15 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 are probed, no "No .env files found" warning is logged, and a
                 missing `env_dir` does not raise; fields resolve from the
                 process environment and defaults only (`override` becomes moot)
+            read_environ: If False, `os.environ` is excluded as a value source:
+                per-field lookup resolves from the dotfile cascade and defaults
+                only (in both override modes — `override` becomes moot), and
+                `${VAR}` interpolation bases (file values and string defaults)
+                resolve against the merged dotfile values alone. The knob
+                channel itself (`ENV`, `DOTENV_DIR`, `DOTENV_OVERRIDE`,
+                `DOTENV_READ_DOTFILES`, `DOTENV_READ_ENVIRON`,
+                `DOTENV_LOAD_LOCAL`) still resolves from `os.environ` —
+                `read_environ` excludes it as a value source only
             load_local: If False, `.env.local` and `.env.{env}.local` are not
                 read in any environment. If None, `DOTENV_LOAD_LOCAL` applies,
                 else the default: skip `.local` files only when the resolved
@@ -878,6 +925,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
             override=override,
             env_dir=env_dir,
             read_dotfiles=read_dotfiles,
+            read_environ=read_environ,
             load_local=load_local,
         )
         dotenv_layer = _layer_for(params)
@@ -885,7 +933,12 @@ class DotEnvConfig(metaclass=ConfigMeta):
         instance = cls()
         logger.debug(f"Processing {len(cls._fields)} field(s)")
 
-        instance._load_fields(None, dotenv_layer=dotenv_layer, override=params.override)
+        instance._load_fields(
+            None,
+            dotenv_layer=dotenv_layer,
+            override=params.override,
+            read_environ=params.read_environ,
+        )
 
         logger.info(f"{cls.__name__} configuration loaded successfully")
         logger.debug(f"Loaded fields: {', '.join(cls._fields.keys())}")
@@ -898,8 +951,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
         """The resolved `LoadParams` this instance was last loaded with.
 
         `reload()` uses it to repeat a load without restating its arguments — so a SIGHUP
-        handler calling `reload()` with no arguments keeps the original precedence and
-        file-discovery settings rather than silently reverting to the defaults.
+        handler calling `reload()` with no arguments keeps the original precedence,
+        file-discovery, and environ-reading settings rather than silently reverting to the
+        defaults.
         `cached()`'s warm path uses it to tell a caller who agrees with how the cache was
         built from one who disagrees.
 
@@ -929,6 +983,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         override: bool | None = None,
         env_dir: Path | str | None = None,
         read_dotfiles: bool | None = None,
+        read_environ: bool | None = None,
         load_local: bool | None = None,
     ) -> Self:
         """Reload configuration from environment variables and .env files.
@@ -942,13 +997,13 @@ class DotEnvConfig(metaclass=ConfigMeta):
             - After programmatically changing environment variables
             - When switching environments at runtime (e.g., dev to prod)
 
-        By default, this repeats the same five resolved parameters (env,
-        override, env_dir, read_dotfiles, load_local) recorded by the
-        original `load()` — the recorded values win over the `DOTENV_*`
+        By default, this repeats the same six resolved parameters (env,
+        override, env_dir, read_dotfiles, read_environ, load_local) recorded
+        by the original `load()` — the recorded values win over the `DOTENV_*`
         env-var tier, so a bare `reload()` never silently changes behavior.
         You can override any of them by passing new values. An instance
         loaded via `load_from_dict()` has nothing recorded; its `reload()`
-        resolves all five from the tiers.
+        resolves all six from the tiers.
 
         Args:
             env: Environment name (e.g., "dev", "prod", "test"). If None, uses
@@ -961,6 +1016,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
                 env_dir from the original load() call
             read_dotfiles: If False, skip the .env cascade entirely (see
                 `load()`). If None, uses the value from the original load() call
+            read_environ: If False, exclude `os.environ` as a value source
+                (see `load()`). If None, uses the value from the original
+                load() call
             load_local: Whether to include `.local` files (see `load()`).
                 If None, uses the value from the original load() call
 
@@ -1000,6 +1058,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
             override = recorded.override if override is None else override
             env_dir = recorded.env_dir if env_dir is None else env_dir
             read_dotfiles = recorded.read_dotfiles if read_dotfiles is None else read_dotfiles
+            read_environ = recorded.read_environ if read_environ is None else read_environ
             load_local = recorded.load_local if load_local is None else load_local
 
         params = resolve_load_params(
@@ -1007,12 +1066,18 @@ class DotEnvConfig(metaclass=ConfigMeta):
             override=override,
             env_dir=env_dir,
             read_dotfiles=read_dotfiles,
+            read_environ=read_environ,
             load_local=load_local,
         )
         dotenv_layer = _layer_for(params)
 
         logger.debug(f"Reloading {len(self._fields)} field(s)")
-        self._load_fields(None, dotenv_layer=dotenv_layer, override=params.override)
+        self._load_fields(
+            None,
+            dotenv_layer=dotenv_layer,
+            override=params.override,
+            read_environ=params.read_environ,
+        )
 
         logger.info(f"{self.__class__.__name__} configuration reloaded successfully")
         logger.debug(f"Reloaded fields: {', '.join(self._fields.keys())}")
@@ -1036,6 +1101,14 @@ class DotEnvConfig(metaclass=ConfigMeta):
 
         When NOT to use:
             - In production: use `load()` to read from environment and .env files
+
+        Note:
+            `load_from_dict()` has no `read_dotfiles` / `read_environ`
+            knobs: its values come from the dict, and a string default's
+            `${VAR}` template resolves against `os.environ` — the documented
+            behavior, kept unchanged. Callers wanting a hermetic template
+            load should use `load(read_dotfiles=False, read_environ=False)`
+            instead.
 
         Args:
             data: Dictionary mapping environment variable names (or field names) to
@@ -1069,7 +1142,10 @@ class DotEnvConfig(metaclass=ConfigMeta):
             - [`load`][dotenvmodel.config.DotEnvConfig.load]: For production loading.
         """
         instance = cls()
-        instance._load_fields(data, validate=validate)
+        # read_environ=True keeps the documented dict-load behavior: the dict
+        # is the field-value source, and template defaults resolve against
+        # os.environ (see the Note in this method's docstring).
+        instance._load_fields(data, validate=validate, read_environ=True)
         instance._loaded = True
         return instance
 
@@ -1081,6 +1157,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         override: bool | None = None,
         env_dir: Path | str | None = None,
         read_dotfiles: bool | None = None,
+        read_environ: bool | None = None,
         load_local: bool | None = None,
     ) -> Self:
         """Return the process-wide cached instance for this exact config class, loading it on first call.
@@ -1141,6 +1218,9 @@ class DotEnvConfig(metaclass=ConfigMeta):
             read_dotfiles: If False, skip the .env cascade entirely (see
                 `load()`). Only used on the first call; ignored once the
                 cache is warm.
+            read_environ: If False, exclude `os.environ` as a value source
+                (see `load()`). Only used on the first call; ignored once
+                the cache is warm.
             load_local: Whether to include `.local` files (see `load()`).
                 Only used on the first call; ignored once the cache is warm.
 
@@ -1198,7 +1278,7 @@ class DotEnvConfig(metaclass=ConfigMeta):
         """
         return cast(
             Self,
-            acquire_cached(cls, env, override, env_dir, read_dotfiles, load_local),
+            acquire_cached(cls, env, override, env_dir, read_dotfiles, read_environ, load_local),
         )
 
     @classmethod

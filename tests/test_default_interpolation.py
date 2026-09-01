@@ -111,6 +111,41 @@ class TestDefaultInterpolationBase:
 
         assert config.api_url == "http://from-env/api"
 
+    def test_read_environ_false_dotfile_reference_beats_the_same_named_env_var(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """read_environ=False drops os.environ from the default's interpolation base too."""
+        monkeypatch.setenv("BASE_URL", "http://from-env")
+        (tmp_path / ".env").write_text("BASE_URL=http://from-file\n")
+
+        class Config(DotEnvConfig):
+            api_url: str = Field(default="${BASE_URL}/api")
+
+        config = Config.load(env_dir=tmp_path, read_environ=False)
+
+        assert config.api_url == "http://from-file/api"
+
+    def test_defaults_only_mode_leaves_the_interpolation_base_empty(
+        self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """read_dotfiles=False + read_environ=False: hermetic defaults-only mode.
+
+        With an empty base, ${MISSING} resolves to "" and ${MISSING:-fallback}
+        to its default — no ambient value can reach a default template.
+        """
+        (tmp_path / ".env").write_text("BASE_URL=http://from-file\n")
+        monkeypatch.setenv("BASE_URL", "http://from-env")
+        monkeypatch.delenv("MISSING", raising=False)
+
+        class Config(DotEnvConfig):
+            empty: str = Field(default="prefix-${MISSING}-suffix")
+            fallback: str = Field(default="${MISSING:-fallback}")
+
+        config = Config.load(env_dir=tmp_path, read_dotfiles=False, read_environ=False)
+
+        assert config.empty == "prefix--suffix"
+        assert config.fallback == "fallback"
+
     def test_override_does_not_affect_default_resolution(
         self, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
     ) -> None:
