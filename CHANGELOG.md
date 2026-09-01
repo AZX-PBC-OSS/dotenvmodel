@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v1.0.0...v1.1.0) (2026-09-01)
+
+
+### Features
+
+* add read_environ load knob, plus typing fixes and a docs accuracy pass ([#68](https://github.com/AZX-PBC-OSS/dotenvmodel/issues/68)) ([a061acc](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/a061acc5da4fdd7cdf131fe58f7e5281d5b85821))
+
 ## [1.0.0](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v0.6.3...v1.0.0) (2026-08-31)
 
 
