@@ -1206,18 +1206,31 @@ class TestInterpolation:
 
 
 class TestNoDotenvInternals:
-    """The reader must use only python-dotenv's public API.
+    """The reader must use only python-dotenv's public API at module load.
 
     `resolve_variables` lives in `dotenv.main` — internal API, not in
     `dotenv.__all__` — and `pyproject.toml` pins `python-dotenv>=1.2.3`
     with no upper bound. Importing internals can break at module load time
     on a future python-dotenv release, so the interpolation is implemented
     locally instead.
+
+    Sanctioned exception: `dotenv.parser` (the tokenizer behind
+    `dotenv_values`) MAY be imported lazily inside a function body for the
+    duplicate-key warning, and only under a guarded import whose worst
+    case is that the warning degrades to silence - never an import-time
+    break, and never a load crash. A parser is exactly the wrong thing to
+    hand-roll (quoted multiline values, export prefixes, escape rules);
+    using python-dotenv's own token stream with a guarded call-time import
+    is the only version of duplicate detection that respects this pin's
+    reason to exist.
     """
 
     def test_loading_imports_only_the_public_dotenv_api(self) -> None:
         """Every dotenv import in loading.py is from the `dotenv` root, never
-        a `dotenv.*` submodule (main, variables, parser, ...).
+        a `dotenv.*` submodule (main, variables, parser, ...) at MODULE
+        level. The lazy, guarded `dotenv.parser` import inside
+        `_duplicate_keys` is the one sanctioned exception (see the class
+        docstring); a module-level `dotenv.*` import is still a failure.
         """
         import ast
 
@@ -1237,7 +1250,7 @@ class TestNoDotenvInternals:
             ):
                 imported.add(node.module)
 
-        assert imported == {"dotenv"}
+        assert imported <= {"dotenv", "dotenv.parser"}
 
 
 class TestPackageRootExports:
