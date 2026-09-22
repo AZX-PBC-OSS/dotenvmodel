@@ -5,6 +5,13 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.1](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v1.1.0...v1.1.1) (2026-09-22)
+
+
+### Bug Fixes
+
+* **ci:** install from the pinned lockfile, not an implicit re-resolve ([f6dc887](https://github.com/AZX-PBC-OSS/dotenvmodel/commit/f6dc8871edf45a019ab816ab3741999ab2b0517f))
+
 ## [1.1.0](https://github.com/AZX-PBC-OSS/dotenvmodel/compare/v1.0.0...v1.1.0) (2026-09-01)
 
 
