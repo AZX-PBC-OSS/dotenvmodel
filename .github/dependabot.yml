@@ -1,6 +1,9 @@
 version: 2
 updates:
-  - package-ecosystem: pip
+  # uv, not pip: Dependabot's pip ecosystem reads pyproject.toml but does NOT
+  # maintain uv.lock, so the lockfile CI installs from (with `uv sync
+  # --locked`) would drift silently while the bot reports itself healthy.
+  - package-ecosystem: uv
     directory: /
     schedule:
       interval: weekly
