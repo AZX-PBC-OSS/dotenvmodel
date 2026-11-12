@@ -516,6 +516,18 @@ def read_env_files(
     for file_path in env_files:
         if file_path.exists():
             logger.info(f"Reading .env file: {file_path}")
+            # A key appearing twice in ONE file (or re-defined across the
+            # cascade) is almost always an editing mistake - two appended
+            # sections over months - and the failure mode is invisible:
+            # the merge is dict-based, so the later value silently wins.
+            # Name each duplicate loudly (file + key + both values) before
+            # the merge, so the operator sees the flip instead of
+            # discovering a silently-flipped default in production.
+            for key in _duplicate_keys(file_path):
+                logger.warning(
+                    f"Duplicate key {key!r} in {file_path}: the later value wins. "
+                    "Remove the stale occurrence."
+                )
             # dotenv_values() is pure (no os.environ writes). Reading with
             # interpolate=False defers ${VAR} resolution to one pass over
             # the whole merged layer below, so a later file's references
@@ -523,7 +535,15 @@ def read_env_files(
             file_values = dotenv_values(file_path, interpolate=False)
             # A bare key (`KEY` with no `=`) comes back as None and is
             # dropped, matching load_dotenv(), which never sets such keys.
-            values.update({k: v for k, v in file_values.items() if v is not None})
+            merged_in = {k: v for k, v in file_values.items() if v is not None}
+            for key in sorted(set(merged_in) & set(values)):
+                logger.warning(
+                    f"Key {key!r} redefined in {file_path}: "
+                    f"{values[key]!r} (earlier file) is overridden by "
+                    f"{merged_in[key]!r} (this file). The cascade keeps the "
+                    "later file's value."
+                )
+            values.update(merged_in)
             loaded_files.append(file_path)
         else:
             logger.debug(f"{file_path} not found (skipping)")
@@ -551,6 +571,45 @@ def read_env_files(
         logger.warning(f"No .env files found in {base_dir}")
 
     return DotenvLayer(values=values, base_dir=base_dir, files=tuple(loaded_files))
+
+
+def _duplicate_keys(file_path: Path) -> list[str]:
+    """Keys defined more than once in one env file, in first-appearance order.
+
+    Uses python-dotenv's own tokenizer (``parse_stream``): one binding per
+    occurrence, quote- and multiline-aware, so a ``KEY=`` line inside a
+    quoted multi-line value can never false-positive. The merge below
+    keeps last-wins (python-dotenv's own dict semantics); this exists only
+    to make the flip visible.
+
+    The import is call-time and guarded ON PURPOSE: ``dotenv.parser`` is
+    not python-dotenv's public API (see TestNoDotenvInternals), so a
+    future python-dotenv must be able to break it without breaking THIS
+    library at import time - the worst case is that the duplicate warning
+    quietly disappears, exactly like the pre-warning behavior, and never
+    that a load crashes.
+    """
+    try:
+        from dotenv.parser import Error, parse_stream
+    except ImportError:  # pragma: no cover - depends on the python-dotenv build
+        logger.debug("dotenv.parser unavailable: duplicate-key warnings disabled")
+        return []
+    try:
+        with file_path.open("r", encoding="utf-8-sig") as stream:
+            seen: set[str] = set()
+            duplicates: list[str] = []
+            for binding in parse_stream(stream):
+                if binding.key is None:
+                    continue
+                if binding.key in seen and binding.key not in duplicates:
+                    duplicates.append(binding.key)
+                seen.add(binding.key)
+            return duplicates
+    except (OSError, UnicodeDecodeError, Error):
+        # An unparseable file is dotenv_values()' problem (it raises the
+        # authoritative error downstream); this pre-scan never turns a
+        # read failure into a different one.
+        return []
 
 
 def get_env_var(field_name: str, alias: str | None = None, prefix: str | None = None) -> str | None:
